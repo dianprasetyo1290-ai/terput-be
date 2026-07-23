@@ -46,12 +46,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    volumes: ["./services/identity/migrations:/migrations"]
+    volumes: ["./identity/migrations:/migrations"]
     entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${IDENTITY_DB_NAME}?sslmode=disable", "up"]
     restart: "no"
 
   identity:
-    build: ./services/identity
+    build: ./identity
     restart: unless-stopped
     depends_on:
       postgres:
@@ -74,12 +74,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    volumes: ["./services/academic/migrations:/migrations"]
+    volumes: ["./academic/migrations:/migrations"]
     entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${ACADEMIC_DB_NAME}?sslmode=disable", "up"]
     restart: "no"
 
   academic:
-    build: ./services/academic
+    build: ./academic
     restart: unless-stopped
     depends_on:
       postgres:
@@ -105,12 +105,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    volumes: ["./services/attendance/migrations:/migrations"]
+    volumes: ["./attendance/migrations:/migrations"]
     entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${ATTENDANCE_DB_NAME}?sslmode=disable", "up"]
     restart: "no"
 
   attendance:
-    build: ./services/attendance
+    build: ./attendance
     restart: unless-stopped
     depends_on:
       postgres:
@@ -139,12 +139,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    volumes: ["./services/exam/migrations:/migrations"]
+    volumes: ["./exam/migrations:/migrations"]
     entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${EXAM_DB_NAME}?sslmode=disable", "up"]
     restart: "no"
 
   exam:
-    build: ./services/exam
+    build: ./exam
     restart: unless-stopped
     depends_on:
       postgres:
@@ -173,12 +173,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    volumes: ["./services/evaluation/migrations:/migrations"]
+    volumes: ["./evaluation/migrations:/migrations"]
     entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${EVALUATION_DB_NAME}?sslmode=disable", "up"]
     restart: "no"
 
   evaluation:
-    build: ./services/evaluation
+    build: ./evaluation
     restart: unless-stopped
     depends_on:
       postgres:
@@ -207,12 +207,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    volumes: ["./services/report/migrations:/migrations"]
+    volumes: ["./report/migrations:/migrations"]
     entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${REPORT_DB_NAME}?sslmode=disable", "up"]
     restart: "no"
 
   report:
-    build: ./services/report
+    build: ./report
     restart: unless-stopped
     depends_on:
       postgres:
@@ -240,6 +240,19 @@ services:
       ATTENDANCE_SERVICE_URL: http://attendance:${ATTENDANCE_PORT}
       EXAM_SERVICE_URL: http://exam:${EXAM_PORT}
     ports: ["${REPORT_PORT}:${REPORT_PORT}"]
+
+  # ---------- web (frontend, nginx reverse-proxying /api/<service>/) ----------
+  web:
+    build: ./web
+    restart: unless-stopped
+    depends_on:
+      - identity
+      - academic
+      - attendance
+      - exam
+      - evaluation
+      - report
+    ports: ["80:80"]
 
 volumes:
   sekoci_pgdata:
