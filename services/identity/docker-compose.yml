@@ -1,0 +1,35 @@
+services:
+  identity-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "${DB_HOST_PORT}:5432" # host port = 54 + last two digits of service port (8081)
+    volumes:
+      - identity_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  identity-service:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      identity-db:
+        condition: service_healthy
+    environment:
+      PORT: ${PORT}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@identity-db:5432/${DB_NAME}?sslmode=disable
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+    ports:
+      - "${PORT}:${PORT}"
+
+volumes:
+  identity_pgdata:

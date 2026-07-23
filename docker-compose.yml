@@ -1,0 +1,245 @@
+# Root compose: boots all 6 sekoci microservices against ONE shared
+# Postgres instance (6 separate databases, one per service — see
+# db-init/init-multiple-dbs.sh) to keep operational/hosting cost low for a
+# product sold per-school ("ketengan"). Each service still owns its own
+# database/credentials/migrations — this is purely an infra consolidation,
+# zero application code changes, since every service already just reads
+# DATABASE_URL from env. See docs/CONVENTIONS.md.
+#
+# All secrets/ports/db-names are parameterized via .env (loaded
+# automatically by `docker compose` from this same directory) — nothing
+# below is a hardcoded credential; see .env.example for the full list and
+# defaults.
+#
+#   cp .env.example .env   # first time only
+#   docker compose up -d --build
+#   docker compose ps            # 1 postgres + 6 migrate (exit 0) + 6 app containers
+#   curl localhost:8081/healthz  # ... 8082 8083 8084 8085 8086
+#   docker compose down          # -v to also wipe the shared DB volume
+#
+# Each service also keeps its own standalone services/<name>/docker-compose.yml
+# (own throwaway postgres) for developing that one service in total isolation —
+# unrelated to this file, left as-is.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+      POSTGRES_MULTIPLE_DATABASES: ${IDENTITY_DB_NAME},${ACADEMIC_DB_NAME},${ATTENDANCE_DB_NAME},${EXAM_DB_NAME},${EVALUATION_DB_NAME},${REPORT_DB_NAME}
+    ports: ["${POSTGRES_PORT}:5432"]
+    volumes:
+      - sekoci_pgdata:/var/lib/postgresql/data
+      - ./db-init/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---------- identity ----------
+  identity-migrate:
+    image: migrate/migrate:v4.18.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes: ["./services/identity/migrations:/migrations"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${IDENTITY_DB_NAME}?sslmode=disable", "up"]
+    restart: "no"
+
+  identity:
+    build: ./services/identity
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      identity-migrate:
+        condition: service_completed_successfully
+    environment:
+      PORT: ${IDENTITY_PORT}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${IDENTITY_DB_NAME}?sslmode=disable
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+    ports: ["${IDENTITY_PORT}:${IDENTITY_PORT}"]
+
+  # ---------- academic ----------
+  academic-migrate:
+    image: migrate/migrate:v4.18.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes: ["./services/academic/migrations:/migrations"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${ACADEMIC_DB_NAME}?sslmode=disable", "up"]
+    restart: "no"
+
+  academic:
+    build: ./services/academic
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      academic-migrate:
+        condition: service_completed_successfully
+      identity:
+        condition: service_started
+    environment:
+      PORT: ${ACADEMIC_PORT}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${ACADEMIC_DB_NAME}?sslmode=disable
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      IDENTITY_BASE_URL: http://identity:${IDENTITY_PORT}
+    ports: ["${ACADEMIC_PORT}:${ACADEMIC_PORT}"]
+
+  # ---------- attendance ----------
+  attendance-migrate:
+    image: migrate/migrate:v4.18.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes: ["./services/attendance/migrations:/migrations"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${ATTENDANCE_DB_NAME}?sslmode=disable", "up"]
+    restart: "no"
+
+  attendance:
+    build: ./services/attendance
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      attendance-migrate:
+        condition: service_completed_successfully
+      identity:
+        condition: service_started
+      academic:
+        condition: service_started
+    environment:
+      PORT: ${ATTENDANCE_PORT}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${ATTENDANCE_DB_NAME}?sslmode=disable
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      IDENTITY_SERVICE_URL: http://identity:${IDENTITY_PORT}
+      ACADEMIC_SERVICE_URL: http://academic:${ACADEMIC_PORT}
+    ports: ["${ATTENDANCE_PORT}:${ATTENDANCE_PORT}"]
+
+  # ---------- exam ----------
+  exam-migrate:
+    image: migrate/migrate:v4.18.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes: ["./services/exam/migrations:/migrations"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${EXAM_DB_NAME}?sslmode=disable", "up"]
+    restart: "no"
+
+  exam:
+    build: ./services/exam
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      exam-migrate:
+        condition: service_completed_successfully
+      identity:
+        condition: service_started
+      academic:
+        condition: service_started
+    environment:
+      PORT: ${EXAM_PORT}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${EXAM_DB_NAME}?sslmode=disable
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      IDENTITY_URL: http://identity:${IDENTITY_PORT}
+      ACADEMIC_URL: http://academic:${ACADEMIC_PORT}
+    ports: ["${EXAM_PORT}:${EXAM_PORT}"]
+
+  # ---------- evaluation ----------
+  evaluation-migrate:
+    image: migrate/migrate:v4.18.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes: ["./services/evaluation/migrations:/migrations"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${EVALUATION_DB_NAME}?sslmode=disable", "up"]
+    restart: "no"
+
+  evaluation:
+    build: ./services/evaluation
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      evaluation-migrate:
+        condition: service_completed_successfully
+      identity:
+        condition: service_started
+      academic:
+        condition: service_started
+    environment:
+      PORT: ${EVALUATION_PORT}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${EVALUATION_DB_NAME}?sslmode=disable
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      IDENTITY_BASE_URL: http://identity:${IDENTITY_PORT}
+      ACADEMIC_BASE_URL: http://academic:${ACADEMIC_PORT}
+    ports: ["${EVALUATION_PORT}:${EVALUATION_PORT}"]
+
+  # ---------- report ----------
+  report-migrate:
+    image: migrate/migrate:v4.18.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes: ["./services/report/migrations:/migrations"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${REPORT_DB_NAME}?sslmode=disable", "up"]
+    restart: "no"
+
+  report:
+    build: ./services/report
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      report-migrate:
+        condition: service_completed_successfully
+      identity:
+        condition: service_started
+      academic:
+        condition: service_started
+      attendance:
+        condition: service_started
+      exam:
+        condition: service_started
+    environment:
+      PORT: ${REPORT_PORT}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${REPORT_DB_NAME}?sslmode=disable
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      IDENTITY_SERVICE_URL: http://identity:${IDENTITY_PORT}
+      ACADEMIC_SERVICE_URL: http://academic:${ACADEMIC_PORT}
+      ATTENDANCE_SERVICE_URL: http://attendance:${ATTENDANCE_PORT}
+      EXAM_SERVICE_URL: http://exam:${EXAM_PORT}
+    ports: ["${REPORT_PORT}:${REPORT_PORT}"]
+
+volumes:
+  sekoci_pgdata:

@@ -1,0 +1,10 @@
+DROP TABLE IF EXISTS exam_attempt_answers;
+DROP TABLE IF EXISTS exam_attempts;
+DROP TABLE IF EXISTS exam_tokens;
+DROP TABLE IF EXISTS exam_questions;
+DROP TABLE IF EXISTS exams;
+DROP TABLE IF EXISTS essay_answer_options;
+DROP TABLE IF EXISTS answer_options;
+DROP TABLE IF EXISTS questions;
+DROP TABLE IF EXISTS question_folders;
+DROP TABLE IF EXISTS exam_types;

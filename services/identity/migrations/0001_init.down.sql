@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS import_staged_rows;
+DROP TABLE IF EXISTS announcements;
+DROP TABLE IF EXISTS position_assignments;
+DROP TABLE IF EXISTS positions;
+DROP TABLE IF EXISTS user_school_roles;
+DROP TABLE IF EXISTS users;
+ALTER TABLE IF EXISTS schools DROP CONSTRAINT IF EXISTS fk_schools_current_academic_year;
+DROP TABLE IF EXISTS academic_years;
+DROP TABLE IF EXISTS schools;
+DROP TABLE IF EXISTS foundations;
+DROP EXTENSION IF EXISTS pgcrypto;

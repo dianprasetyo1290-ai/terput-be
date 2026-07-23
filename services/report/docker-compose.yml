@@ -1,0 +1,46 @@
+services:
+  report-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "${DB_HOST_PORT}:5432"
+    volumes:
+      - report_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  report-service:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      report-db:
+        condition: service_healthy
+    environment:
+      PORT: ${PORT}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@report-db:5432/${DB_NAME}?sslmode=disable
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      # Sibling services are each standalone docker-compose stacks on the
+      # host machine (see CONVENTIONS.md — no shared docker network across
+      # services). host.docker.internal reaches the host's published ports
+      # from inside this container on macOS/Windows Docker Desktop; the
+      # extra_hosts entry below keeps this portable to Linux too.
+      IDENTITY_SERVICE_URL: http://host.docker.internal:8081
+      ACADEMIC_SERVICE_URL: http://host.docker.internal:8082
+      ATTENDANCE_SERVICE_URL: http://host.docker.internal:8083
+      EXAM_SERVICE_URL: http://host.docker.internal:8084
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${PORT}:${PORT}"
+
+volumes:
+  report_pgdata:

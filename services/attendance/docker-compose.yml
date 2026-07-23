@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: skci-attendance-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "${DB_HOST_PORT}:5432"
+    volumes:
+      - attendance_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  attendance:
+    build: .
+    container_name: skci-attendance-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: ${PORT}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${DB_NAME}?sslmode=disable
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      # host.docker.internal reaches sibling services' ports published on the
+      # host by their own standalone compose stacks (macOS/Windows Docker
+      # Desktop native; see extra_hosts below for Linux portability).
+      IDENTITY_SERVICE_URL: http://host.docker.internal:8081
+      ACADEMIC_SERVICE_URL: http://host.docker.internal:8082
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${PORT}:${PORT}"
+
+volumes:
+  attendance_pgdata:
