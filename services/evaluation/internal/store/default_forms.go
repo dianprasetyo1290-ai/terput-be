@@ -1,5 +1,11 @@
 package store
 
+import (
+	"fmt"
+
+	"skci/evaluation/internal/model"
+)
+
 // Default evaluator-category forms and their scoring items, sourced from the
 // client-provided reference spreadsheet:
 //   "RAPOT KINERJA GURU SMK 2025-2026 (2).xlsx"
@@ -99,6 +105,27 @@ var DefaultForms = []defaultForm{
 			{"C-8", "Dokumentasi perkembangan karakter siswa secara berkala", "Periodic documentation of student character development", 0.01, map[string]string{"4": "Mendokumentasi perkembangan karakter siswa secara sistematis dan berkala", "3": "Ada dokumentasi; cukup teratur dan bisa dijadikan referensi", "2": "Dokumentasi ada tapi tidak teratur atau tidak lengkap", "1": "Tidak ada dokumentasi perkembangan karakter siswa"}},
 		},
 	},
+	// G/H/I: upward-feedback track (guru rates a school leader). NOT part of
+	// the 100% blend above (Weight: 0, excluded from computeResults -- see
+	// internal/handler/results.go) -- a separate track with its own simple
+	// per-leader average, since no specific criteria were given beyond
+	// "generic, sensible criteria for evaluating a school leader". Item
+	// content mirrors the same 6-item ballpark/1-4 rubric-label structure as
+	// the other forms, generated once via upwardItems() and reused per role
+	// (identical questions asked of every leader type, just addressed to a
+	// different role) rather than repeating near-duplicate literals 3x.
+	{
+		Code: "G", Title: "Kepala Sekolah (oleh Guru) / Principal (rated by Teacher)", EvaluatorType: model.EvalTypeGuruToKepsek, Priority: 7, Weight: 0,
+		Items: upwardItems("G", "Kepala Sekolah", "the Principal"),
+	},
+	{
+		Code: "H", Title: "Waka Kurikulum (oleh Guru) / Curriculum VP (rated by Teacher)", EvaluatorType: model.EvalTypeGuruToWakaKurikulum, Priority: 8, Weight: 0,
+		Items: upwardItems("H", "Waka Kurikulum", "the Curriculum Vice-Principal"),
+	},
+	{
+		Code: "I", Title: "Waka Kesiswaan (oleh Guru) / Student Affairs VP (rated by Teacher)", EvaluatorType: model.EvalTypeGuruToWakaKesiswaan, Priority: 9, Weight: 0,
+		Items: upwardItems("I", "Waka Kesiswaan", "the Student Affairs Vice-Principal"),
+	},
 	{
 		Code: "D", Title: "Teman Sejawat / Peer Teachers", EvaluatorType: "peer", Priority: 6, Weight: 0.05,
 		Items: []defaultItem{
@@ -110,4 +137,24 @@ var DefaultForms = []defaultForm{
 			{"D-6", "Mendukung rekan yang membutuhkan bantuan tanpa diminta", "Supporting colleagues who need help without being asked", 0.005, map[string]string{"4": "Aktif menawarkan bantuan; peka terhadap kesulitan rekan tanpa diminta", "3": "Membantu ketika diminta; responsif dan tulus", "2": "Membantu hanya jika ada keuntungan timbal balik; atau tidak peduli", "1": "Tidak mau membantu rekan; acuh tak acuh"}},
 		},
 	},
+}
+
+// upwardItems generates the 6-item rubric shared by the 3 upward-feedback
+// forms (guru rates kepsek/waka_kurikulum/waka_kesiswaan) -- same generic,
+// sensible "rate your school leader" questions asked of whichever leader
+// role is being evaluated, just addressed to that role's Indonesian/English
+// name. Item weights are equal (1/6 each) so a task's raw_score (see
+// TaskStore.SubmitAnswers) is a plain average across whichever items were
+// answered -- there's no form-level weight to renormalize against since
+// these forms carry Weight: 0 (excluded from the blended teacher score).
+func upwardItems(codePrefix, roleID, roleEN string) []defaultItem {
+	const w = 1.0 / 6
+	return []defaultItem{
+		{codePrefix + "-1", fmt.Sprintf("Kejelasan arah dan komunikasi dari %s", roleID), fmt.Sprintf("Clarity of direction and communication from %s", roleEN), w, map[string]string{"4": "Arahan selalu jelas, dikomunikasikan tepat waktu, dan mudah dipahami", "3": "Umumnya jelas dan tersampaikan dengan baik", "2": "Kadang membingungkan atau terlambat disampaikan", "1": "Arahan sering tidak jelas atau tidak dikomunikasikan"}},
+		{codePrefix + "-2", fmt.Sprintf("Dukungan %s terhadap pengembangan profesional guru", roleID), fmt.Sprintf("Support from %s for teachers' professional development", roleEN), w, map[string]string{"4": "Aktif memfasilitasi pelatihan, mentoring, dan kebutuhan guru", "3": "Cukup mendukung ketika diminta", "2": "Dukungan minim atau tidak konsisten", "1": "Tidak memberikan dukungan pengembangan profesional"}},
+		{codePrefix + "-3", fmt.Sprintf("Responsivitas %s terhadap masukan dan permasalahan guru", roleID), fmt.Sprintf("Responsiveness of %s to teacher input and issues", roleEN), w, map[string]string{"4": "Selalu merespons cepat dan menindaklanjuti masukan/masalah guru", "3": "Merespons dengan baik meski kadang perlu waktu", "2": "Respons lambat atau tidak tuntas", "1": "Jarang atau tidak pernah merespons masukan guru"}},
+		{codePrefix + "-4", fmt.Sprintf("Keadilan dan objektivitas %s dalam pengambilan keputusan", roleID), fmt.Sprintf("Fairness and objectivity of %s in decision-making", roleEN), w, map[string]string{"4": "Selalu adil, objektif, dan konsisten pada semua guru", "3": "Umumnya adil; sesekali ada persepsi ketidakadilan minor", "2": "Kadang terlihat pilih kasih atau tidak konsisten", "1": "Sering dianggap tidak adil atau memihak"}},
+		{codePrefix + "-5", fmt.Sprintf("Efektivitas %s dalam pengelolaan administratif dan operasional", roleID), fmt.Sprintf("Effectiveness of %s in administrative and operational management", roleEN), w, map[string]string{"4": "Pengelolaan rapi, efisien, dan tidak membebani guru", "3": "Pengelolaan cukup baik dengan sedikit kendala", "2": "Sering ada kendala administratif yang membebani guru", "1": "Pengelolaan buruk dan sering menyulitkan guru"}},
+		{codePrefix + "-6", fmt.Sprintf("Keteladanan dan integritas kepemimpinan %s", roleID), fmt.Sprintf("Role-modeling and leadership integrity of %s", roleEN), w, map[string]string{"4": "Menjadi teladan nyata dalam etika dan integritas kepemimpinan", "3": "Berperilaku etis dan konsisten sebagai pemimpin", "2": "Ada insiden etika minor yang terdokumentasi", "1": "Ada pelanggaran etika/integritas kepemimpinan yang serius"}},
+	}
 }

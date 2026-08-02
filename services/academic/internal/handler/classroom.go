@@ -197,6 +197,28 @@ func (h *Handler) ListClassroomStudents(w http.ResponseWriter, r *http.Request) 
 	common.WriteJSON(w, http.StatusOK, items, nil)
 }
 
+// ListEnrollmentsByYear: GET /classrooms/enrollments?academic_year_id=
+// Year-wide roster across all classrooms (not scoped to one classroom id) —
+// lets the frontend know which students already have ANY classroom
+// assignment this year (siswa-picker dedup in Data Kelas) and drives the
+// "semua siswa + kelasnya" roster view.
+func (h *Handler) ListEnrollmentsByYear(w http.ResponseWriter, r *http.Request) {
+	schoolID, ok := scopeSchoolID(w, r)
+	if !ok {
+		return
+	}
+	academicYearID, ok := h.scopeAcademicYearID(w, r, schoolID)
+	if !ok {
+		return
+	}
+	items, err := h.Store.ListClassEnrollmentsByYear(r.Context(), schoolID, academicYearID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, items, nil)
+}
+
 // RemoveStudentFromClassroom: DELETE /classrooms/{id}/students/{student_user_id}
 func (h *Handler) RemoveStudentFromClassroom(w http.ResponseWriter, r *http.Request) {
 	schoolID, ok := scopeSchoolID(w, r)

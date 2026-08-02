@@ -56,6 +56,7 @@ type User struct {
 	BirthPlace      *string   `json:"birth_place"`
 	Address         *string   `json:"address"`
 	Religion        *string   `json:"religion"`
+	NISN            *string   `json:"nisn"`
 	IsSuperadmin    bool      `json:"is_superadmin"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
@@ -81,6 +82,7 @@ type Position struct {
 	ID        string    `json:"id"`
 	SchoolID  string    `json:"school_id"`
 	Name      string    `json:"name"`
+	Priority  int       `json:"priority"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

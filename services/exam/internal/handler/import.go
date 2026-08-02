@@ -103,13 +103,19 @@ func (h *Handler) ImportQuestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Item 7: importing soal while building an exam must NOT spawn a new Bank
+	// Soal folder. Reuse the folder the exam itself was created from
+	// (exam.FolderID, set when the guru entered the builder from a Bank
+	// Soal folder's "Kelola Ujian" button); if the exam has no folder
+	// context at all, require an explicit folder_id rather than silently
+	// creating one.
 	folderID := r.FormValue("folder_id")
+	if folderID == "" && exam.FolderID != nil {
+		folderID = *exam.FolderID
+	}
 	if folderID == "" {
-		folderID, err = h.Store.FindOrCreateImportFolder(r.Context(), exam.SchoolID, exam.AcademicYearID, c.UserID, "Import - "+exam.Title)
-		if err != nil {
-			writeStoreErr(w, err)
-			return
-		}
+		common.WriteError(w, http.StatusBadRequest, "folder_id is required: this exam has no Bank Soal folder to import into")
+		return
 	}
 
 	cols := csvColumns[qType]
@@ -188,14 +194,14 @@ func rowToQuestionReq(qType string, row []string, idx map[string]int, academicYe
 		poin = 1
 	}
 	req := questionReq{
-		AcademicYearID: academicYearID,
-		QuestionType:   qType,
-		Content:        get("content"),
-		NoKD:           strPtr(get("no_kd")),
-		KontenKD:       strPtr(get("konten_kd")),
+		AcademicYearID:      academicYearID,
+		QuestionType:        qType,
+		Content:             get("content"),
+		NoKD:                strPtr(get("no_kd")),
+		KontenKD:            strPtr(get("konten_kd")),
 		IndikatorPencapaian: strPtr(get("indikator_pencapaian")),
-		LevelKognitif:  strPtr(get("level_kognitif")),
-		Poin:           poin,
+		LevelKognitif:       strPtr(get("level_kognitif")),
+		Poin:                poin,
 	}
 	if req.Content == "" {
 		return req, "content column is empty"

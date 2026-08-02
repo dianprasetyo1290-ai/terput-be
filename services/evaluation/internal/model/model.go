@@ -112,7 +112,26 @@ const (
 	EvalTypeSelf          = "self"
 	EvalTypePeer          = "peer"
 	EvalTypeSiswa         = "siswa"
+
+	// Upward-feedback track: guru rates a school leader. Separate from the
+	// 6 categories above (self 25/siswa 22/kepsek 20/waka-kurikulum 18/
+	// waka-kesiswaan 10/peer 5 = 100%) -- these are NOT blended into that
+	// weighted score (no room in the 100%, and it's the opposite direction:
+	// teacher rating their supervisor, not the supervisor's report card).
+	// Reuses the same EvalTask row shape: for these types
+	// target_teacher_user_id holds the LEADER being rated and
+	// evaluator_user_id holds the rating guru (swapped vs. the
+	// kepala_sekolah/waka_* types above, where the leader is the evaluator).
+	EvalTypeGuruToKepsek        = "guru_to_kepsek"
+	EvalTypeGuruToWakaKurikulum = "guru_to_waka_kurikulum"
+	EvalTypeGuruToWakaKesiswaan = "guru_to_waka_kesiswaan"
 )
+
+// IsUpwardEvalType reports whether t is one of the guru-rates-a-leader
+// upward-feedback types (see EvalTypeGuruToKepsek doc comment).
+func IsUpwardEvalType(t string) bool {
+	return t == EvalTypeGuruToKepsek || t == EvalTypeGuruToWakaKurikulum || t == EvalTypeGuruToWakaKesiswaan
+}
 
 const (
 	TaskStatusPending   = "pending"

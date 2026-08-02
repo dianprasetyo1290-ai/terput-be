@@ -3,6 +3,7 @@ package upstream
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -37,4 +38,40 @@ func (ic *IdentityClient) GetUser(ctx context.Context, userID string) (*User, er
 		return nil, nil
 	}
 	return &u, nil
+}
+
+// OrgPosition mirrors one row of identity-service's GET /organization
+// response (its model.PositionAssignment) -- the "Organisasi Sekolah" list
+// (Jabatan | Nama) admin already maintains via Data Jabatan/Peran. Kepala
+// Sekolah is just the row whose PositionName is "Kepala Sekolah", already
+// joined to the holder's name server-side (no extra GetUser round trip
+// needed).
+type OrgPosition struct {
+	PositionName string `json:"position_name"`
+	UserID       string `json:"user_id"`
+	UserName     string `json:"user_name"`
+}
+
+// GetOrganization fetches GET /organization?school_id=, the school's full
+// jabatan-holder list. Report-service scans it for "Kepala Sekolah" to
+// auto-fill the report card's principal signature.
+func (ic *IdentityClient) GetOrganization(ctx context.Context, schoolID string) ([]OrgPosition, error) {
+	var out []OrgPosition
+	if err := ic.c.getJSON(ctx, "GetOrganization", fmt.Sprintf("/organization?school_id=%s", schoolID), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// PrincipalName scans a GetOrganization result for the "Kepala Sekolah"
+// jabatan holder (case-insensitive, trimmed -- matches how admin free-types
+// position names in Data Jabatan/Peran). Returns "" if no such position is
+// currently assigned.
+func PrincipalName(positions []OrgPosition) string {
+	for _, p := range positions {
+		if strings.EqualFold(strings.TrimSpace(p.PositionName), "Kepala Sekolah") {
+			return p.UserName
+		}
+	}
+	return ""
 }

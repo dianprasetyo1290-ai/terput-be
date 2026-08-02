@@ -192,12 +192,17 @@ func (s *Store) ListSessions(ctx context.Context, f ListSessionsFilter) ([]model
 	return out, total, rows.Err()
 }
 
-// ActiveTeachers returns sessions still "in progress": checked in today, and
-// the slot's end time hasn't passed yet (per the spec's "aktif" rule).
+// ActiveTeachers returns sessions still "in progress": checked in today, the
+// slot has actually started, and its end time hasn't passed yet (per the
+// spec's "aktif" rule). Status is derived from agenda_filled_at — the same
+// flag UpdateAgenda sets on "Simpan & Lanjutkan ke Presensi" — rather than a
+// new one: "tidak_aktif" until the guru has filled and saved the agenda,
+// "aktif" once they have.
 func (s *Store) ActiveTeachers(ctx context.Context, schoolID string) ([]model.ActiveTeacher, error) {
 	where := []string{
 		"checked_in_at IS NOT NULL",
 		"session_date = CURRENT_DATE",
+		"(slot_start_time IS NULL OR slot_start_time <= CURRENT_TIME)",
 		"(slot_end_time IS NULL OR slot_end_time > CURRENT_TIME)",
 	}
 	args := []interface{}{}
@@ -206,7 +211,7 @@ func (s *Store) ActiveTeachers(ctx context.Context, schoolID string) ([]model.Ac
 		where = append(where, fmt.Sprintf("school_id = $%d", len(args)))
 	}
 	query := fmt.Sprintf(`
-		SELECT id, guru_id, classroom_id, schedule_id, slot_start_time, slot_end_time, checked_in_at
+		SELECT id, guru_id, classroom_id, subject_id, schedule_id, slot_start_time, slot_end_time, checked_in_at, agenda_filled_at
 		FROM class_sessions WHERE %s
 		ORDER BY checked_in_at DESC
 	`, strings.Join(where, " AND "))
@@ -221,12 +226,22 @@ func (s *Store) ActiveTeachers(ctx context.Context, schoolID string) ([]model.Ac
 		var at model.ActiveTeacher
 		var start, end sql.NullString
 		var checkedIn time.Time
-		if err := rows.Scan(&at.SessionID, &at.GuruID, &at.ClassroomID, &at.ScheduleID, &start, &end, &checkedIn); err != nil {
+		var agendaFilledAt sql.NullTime
+		var subjectID sql.NullString
+		if err := rows.Scan(&at.SessionID, &at.GuruID, &at.ClassroomID, &subjectID, &at.ScheduleID, &start, &end, &checkedIn, &agendaFilledAt); err != nil {
 			return nil, err
+		}
+		if subjectID.Valid {
+			at.SubjectID = subjectID.String
 		}
 		at.SlotStartTime = start.String
 		at.SlotEndTime = end.String
 		at.CheckedInAt = checkedIn.Format(time.RFC3339)
+		if agendaFilledAt.Valid {
+			at.Status = "aktif"
+		} else {
+			at.Status = "tidak_aktif"
+		}
 		out = append(out, at)
 	}
 	return out, rows.Err()
@@ -323,18 +338,18 @@ type MarkInput struct {
 // UpsertStudentAttendance inserts or overrides a single student's status for
 // a session (used both by "pilih semua" bulk-hadir and by the per-student
 // "ubah status" override).
-func (s *Store) UpsertStudentAttendance(ctx context.Context, in MarkInput) (*model.StudentAttendance, error) {
+func (s *Store) UpsertStudentAttendance(ctx context.Context, sessionDate string, in MarkInput) (*model.StudentAttendance, error) {
 	row := s.DB.QueryRowContext(ctx, `
 		INSERT INTO student_attendances (
-			class_session_id, school_id, academic_year_id, term_id, classroom_id,
+			class_session_id, school_id, academic_year_id, term_id, classroom_id, session_date,
 			student_id, status, catatan, marked_by
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		ON CONFLICT (class_session_id, student_id) DO UPDATE SET
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		ON CONFLICT (classroom_id, session_date, student_id) DO UPDATE SET
 			status = EXCLUDED.status, catatan = EXCLUDED.catatan,
 			marked_by = EXCLUDED.marked_by, updated_at = now()
 		RETURNING id, class_session_id, school_id, academic_year_id, term_id, classroom_id,
 			student_id, status, catatan, marked_by, created_at, updated_at
-	`, in.ClassSessionID, in.SchoolID, in.AcademicYearID, in.TermID, in.ClassroomID,
+	`, in.ClassSessionID, in.SchoolID, in.AcademicYearID, in.TermID, in.ClassroomID, sessionDate,
 		in.StudentID, in.Status, in.Catatan, in.MarkedBy)
 	sa := &model.StudentAttendance{}
 	var termID, catatan, markedBy sql.NullString
@@ -355,13 +370,34 @@ func (s *Store) UpsertStudentAttendance(ctx context.Context, in MarkInput) (*mod
 	return sa, nil
 }
 
-func (s *Store) ListStudentAttendances(ctx context.Context, classSessionID string) ([]model.StudentAttendance, error) {
+// InitStudentAttendances seeds one belum_presensi row per roster student for
+// a freshly checked-in session, so "not yet marked" is a real status rather
+// than an absent row that individual callers each had to default to hadir.
+// ON CONFLICT DO NOTHING keeps this idempotent and never clobbers a status
+// the guru already set (e.g. re-checkin, or roster fetched after marking
+// started). Loops one insert per student, same style as BulkMarkStudents.
+func (s *Store) InitStudentAttendances(ctx context.Context, cs *model.ClassSession, studentIDs []string) error {
+	for _, sid := range studentIDs {
+		_, err := s.DB.ExecContext(ctx, `
+			INSERT INTO student_attendances (
+				class_session_id, school_id, academic_year_id, term_id, classroom_id, session_date, student_id, status
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,'belum_presensi')
+			ON CONFLICT (classroom_id, session_date, student_id) DO NOTHING
+		`, cs.ID, cs.SchoolID, cs.AcademicYearID, cs.TermID, cs.ClassroomID, cs.SessionDate, sid)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) ListStudentAttendances(ctx context.Context, classroomID, sessionDate string) ([]model.StudentAttendance, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, class_session_id, school_id, academic_year_id, term_id, classroom_id,
 			student_id, status, catatan, marked_by, created_at, updated_at
-		FROM student_attendances WHERE class_session_id = $1
+		FROM student_attendances WHERE classroom_id = $1 AND session_date = $2
 		ORDER BY created_at ASC
-	`, classSessionID)
+	`, classroomID, sessionDate)
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +428,7 @@ type StudentAttendanceFilter struct {
 	SchoolID       string
 	AcademicYearID string
 	ClassroomID    string
-	Date, Month, Day string
+	Date, Month    string
 	Page, PerPage  int
 }
 
@@ -420,9 +456,6 @@ func (s *Store) ListStudentAttendanceForAdmin(ctx context.Context, f StudentAtte
 	}
 	if f.Month != "" {
 		add("to_char(cs.session_date, 'YYYY-MM') = $%d", f.Month)
-	}
-	if f.Day != "" {
-		add("to_char(cs.session_date, 'FMDay') = $%d", f.Day)
 	}
 	if f.Page <= 0 {
 		f.Page = 1
@@ -473,6 +506,62 @@ func (s *Store) ListStudentAttendanceForAdmin(ctx context.Context, f StudentAtte
 		out = append(out, sa)
 	}
 	return out, total, rows.Err()
+}
+
+// StudentAttendanceMonthlySummary backs the "Presensi Siswa" admin default
+// view (client revision V4, item 1): one row per student per classroom,
+// Hadir/Sakit/Izin/Tanpa Keterangan counts aggregated for one month —
+// re-aggregates when the month filter changes, no duplicate student rows.
+// Sibling of DashboardStudentSummary (which groups by month across the
+// whole school for the dashboard chart); this one groups by student for a
+// single month instead. A roster student always has at least one
+// student_attendances row for a month a session happened (InitStudentAttendances
+// seeds 'belum_presensi' at check-in), so they still show up with all-zero
+// counts rather than being missing entirely.
+func (s *Store) StudentAttendanceMonthlySummary(ctx context.Context, schoolID, academicYearID, classroomID, month string) ([]model.StudentMonthlyAttendance, error) {
+	if month == "" {
+		month = time.Now().Format("2006-01")
+	}
+	where := []string{"to_char(cs.session_date, 'YYYY-MM') = $1"}
+	args := []interface{}{month}
+	add := func(cond string, val interface{}) {
+		args = append(args, val)
+		where = append(where, fmt.Sprintf(cond, len(args)))
+	}
+	if schoolID != "" {
+		add("sa.school_id = $%d", schoolID)
+	}
+	if academicYearID != "" {
+		add("sa.academic_year_id = $%d", academicYearID)
+	}
+	if classroomID != "" {
+		add("sa.classroom_id = $%d", classroomID)
+	}
+	query := fmt.Sprintf(`
+		SELECT sa.student_id, sa.classroom_id,
+			count(*) FILTER (WHERE sa.status = 'hadir'),
+			count(*) FILTER (WHERE sa.status = 'sakit'),
+			count(*) FILTER (WHERE sa.status = 'izin'),
+			count(*) FILTER (WHERE sa.status = 'tanpa_keterangan')
+		FROM student_attendances sa JOIN class_sessions cs ON cs.id = sa.class_session_id
+		WHERE %s
+		GROUP BY sa.student_id, sa.classroom_id
+		ORDER BY sa.classroom_id, sa.student_id
+	`, strings.Join(where, " AND "))
+	rows, err := s.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.StudentMonthlyAttendance{}
+	for rows.Next() {
+		var m model.StudentMonthlyAttendance
+		if err := rows.Scan(&m.StudentID, &m.ClassroomID, &m.Hadir, &m.Sakit, &m.Izin, &m.TanpaKeterangan); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
 }
 
 // StudentAttendanceSummary aggregates counts by status for one student,

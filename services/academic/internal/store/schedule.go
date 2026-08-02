@@ -81,14 +81,40 @@ func (s *Store) DeleteSchedulePeriod(ctx context.Context, schoolID, id string) e
 
 // --- Schedules (jadwal slot: classroom_subject assigned into a period) ---
 
+// CreateSchedule inserts a (period, classroom_subject) pairing. Conflict
+// target is (schedule_period_id, classroom_subject_id) — not
+// schedule_period_id alone — so a period slot can hold more than one row
+// (Agama variants running concurrently); re-posting the SAME subject into
+// the same slot is still just a no-op idempotent touch, not a second row.
+// Whether a genuinely DIFFERENT subject may share the slot is a business
+// rule (Agama-only) checked in the handler before this is ever called, not
+// here — see checkScheduleSlotConflict in internal/handler/schedule.go.
 func (s *Store) CreateSchedule(ctx context.Context, sc model.Schedule) (*model.Schedule, error) {
 	row := s.DB.QueryRowContext(ctx, `
 		INSERT INTO schedules (school_id, academic_year_id, classroom_id, schedule_period_id, classroom_subject_id)
 		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (schedule_period_id) DO UPDATE SET classroom_subject_id = EXCLUDED.classroom_subject_id, updated_at = now()
+		ON CONFLICT (schedule_period_id, classroom_subject_id) DO UPDATE SET updated_at = now()
 		RETURNING id, school_id, academic_year_id, classroom_id, schedule_period_id, classroom_subject_id, created_at, updated_at
 	`, sc.SchoolID, sc.AcademicYearID, sc.ClassroomID, sc.SchedulePeriodID, sc.ClassroomSubjectID)
 	return scanSchedule(row)
+}
+
+// ListSchedulesByPeriod returns every schedule row already occupying one
+// schedule_period_id — used by the handler's slot-conflict check to decide
+// whether a new/changed subject may join an already-occupied slot (only
+// when every occupant, existing and new, is an Agama variant).
+func (s *Store) ListSchedulesByPeriod(ctx context.Context, schoolID, periodID string) ([]model.Schedule, error) {
+	q := `
+		SELECT s.id, s.school_id, s.academic_year_id, s.classroom_id, s.schedule_period_id, s.classroom_subject_id, s.created_at, s.updated_at,
+		       sub.name, c.name, sp.day_of_week, sp.period_no, sp.start_time, sp.end_time, cs.teacher_user_id
+		FROM schedules s
+		JOIN schedule_periods sp ON sp.id = s.schedule_period_id
+		JOIN classroom_subjects cs ON cs.id = s.classroom_subject_id
+		JOIN subjects sub ON sub.id = cs.subject_id
+		JOIN classrooms c ON c.id = s.classroom_id
+		WHERE s.school_id = $1 AND s.schedule_period_id = $2
+	`
+	return s.scanScheduleRows(ctx, q, schoolID, periodID)
 }
 
 func (s *Store) ListSchedulesByClassroom(ctx context.Context, schoolID, classroomID string, day *int) ([]model.Schedule, error) {

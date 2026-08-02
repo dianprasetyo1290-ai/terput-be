@@ -111,17 +111,29 @@ func (s *Store) GetQuestion(ctx context.Context, id, schoolID string) (*model.Qu
 		return nil, err
 	}
 
+	if err := s.loadQuestionOptions(ctx, &q); err != nil {
+		return nil, err
+	}
+	return &q, nil
+}
+
+// loadQuestionOptions fetches answer_options/essay_answer_options for a
+// single question and attaches them. Shared by GetQuestion and
+// ListExamQuestions so every caller that returns a question also returns
+// its options (a Preview Soal that only reused GetQuestion's query missed
+// this for the exam-level question list, silently omitting a, b, c, d, e).
+func (s *Store) loadQuestionOptions(ctx context.Context, q *model.Question) error {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, question_id, content, image_url, is_correct, order_index
 		FROM answer_options WHERE question_id=$1 ORDER BY order_index`, q.ID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for rows.Next() {
 		var o model.AnswerOption
 		if err := rows.Scan(&o.ID, &o.QuestionID, &o.Content, &o.ImageURL, &o.IsCorrect, &o.OrderIndex); err != nil {
 			rows.Close()
-			return nil, err
+			return err
 		}
 		q.AnswerOptions = append(q.AnswerOptions, o)
 	}
@@ -130,19 +142,18 @@ func (s *Store) GetQuestion(ctx context.Context, id, schoolID string) (*model.Qu
 	rows2, err := s.DB.QueryContext(ctx, `
 		SELECT id, question_id, answer_text FROM essay_answer_options WHERE question_id=$1`, q.ID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for rows2.Next() {
 		var e model.EssayAnswerOption
 		if err := rows2.Scan(&e.ID, &e.QuestionID, &e.AnswerText); err != nil {
 			rows2.Close()
-			return nil, err
+			return err
 		}
 		q.EssayOptions = append(q.EssayOptions, e)
 	}
 	rows2.Close()
-
-	return &q, nil
+	return nil
 }
 
 // UpdateQuestion replaces the question's scalar fields and (if provided)
@@ -203,4 +214,27 @@ func (s *Store) DeleteQuestion(ctx context.Context, id, schoolID string) error {
 func (s *Store) PublishQuestion(ctx context.Context, id, schoolID string) error {
 	_, err := s.DB.ExecContext(ctx, `UPDATE questions SET is_published=true, updated_at=now() WHERE id=$1 AND school_id=$2`, id, schoolID)
 	return err
+}
+
+// distributeEqualPoints splits 100 whole points across n questions as evenly
+// as possible: base = 100/n rounded down, and the first (100 % n) questions
+// get one extra point so the total is ALWAYS exactly 100 — no floating-point
+// division involved, so there's no way to land on 99.99999999 (see
+// ExamDetailView's "Simpan sebagai Draft" / NormalizeDraftPoints in
+// store/exams.go, which calls this on every draft save).
+func distributeEqualPoints(n int) []float64 {
+	if n <= 0 {
+		return nil
+	}
+	base := 100 / n
+	remainder := 100 % n
+	out := make([]float64, n)
+	for i := 0; i < n; i++ {
+		p := base
+		if i < remainder {
+			p++
+		}
+		out[i] = float64(p)
+	}
+	return out
 }

@@ -15,13 +15,13 @@ import (
 // ---- 1. guru self check-in ------------------------------------------
 
 type checkInRequest struct {
-	ScheduleID  string  `json:"schedule_id"`
-	ClassroomID string  `json:"classroom_id"` // fallback if academic-service lookup fails, see README Assumptions
-	SubjectID   string  `json:"subject_id"`
-	TermID      string  `json:"term_id"`
-	SessionDate string  `json:"session_date"` // YYYY-MM-DD, defaults to today
-	StartTime   string  `json:"slot_start_time"`
-	EndTime     string  `json:"slot_end_time"`
+	ScheduleID  string `json:"schedule_id"`
+	ClassroomID string `json:"classroom_id"` // fallback if academic-service lookup fails, see README Assumptions
+	SubjectID   string `json:"subject_id"`
+	TermID      string `json:"term_id"`
+	SessionDate string `json:"session_date"` // YYYY-MM-DD, defaults to today
+	StartTime   string `json:"slot_start_time"`
+	EndTime     string `json:"slot_end_time"`
 }
 
 // CheckIn handles step 1 of the guru daily flow: self presensi tied to a
@@ -112,6 +112,18 @@ func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
 	if cs.GuruID != claims.UserID {
 		common.WriteError(w, http.StatusForbidden, "this schedule slot's session was already checked into by another guru")
 		return
+	}
+	// Seed every roster student as belum_presensi so a fresh session starts
+	// with a real "not yet marked" status instead of callers each defaulting
+	// unmarked students to hadir. Best-effort: academic-service being down
+	// shouldn't fail the check-in itself (Roster()/frontend still fall back
+	// sensibly for students that don't have a row yet).
+	if roster, err := h.Client.GetRoster(bg(r), cs.ClassroomID); err == nil {
+		ids := make([]string, len(roster))
+		for i, s := range roster {
+			ids[i] = s.StudentID
+		}
+		_ = h.Store.InitStudentAttendances(r.Context(), cs, ids)
 	}
 	common.WriteJSONMsg(w, http.StatusOK, cs, nil, "Presensi berhasil dicatat")
 }
@@ -217,7 +229,7 @@ func (h *Handler) Roster(w http.ResponseWriter, r *http.Request) {
 	if !guruOwnsSession(w, claims, cs) {
 		return
 	}
-	existing, err := h.Store.ListStudentAttendances(r.Context(), cs.ID)
+	existing, err := h.Store.ListStudentAttendances(r.Context(), cs.ClassroomID, cs.SessionDate)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -236,14 +248,14 @@ func (h *Handler) Roster(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type rosterEntry struct {
-		StudentID   string `json:"student_id"`
-		StudentName string `json:"student_name"`
-		Status      string `json:"status"`
+		StudentID   string  `json:"student_id"`
+		StudentName string  `json:"student_name"`
+		Status      string  `json:"status"`
 		Catatan     *string `json:"catatan,omitempty"`
 	}
 	out := make([]rosterEntry, 0, len(roster))
 	for _, s := range roster {
-		status := string(model.StatusHadir)
+		status := string(model.StatusBelumPresensi)
 		var catatan *string
 		if sa, ok := statusByStudent[s.StudentID]; ok {
 			status = sa.Status
@@ -263,7 +275,7 @@ func (h *Handler) ListSessionStudents(w http.ResponseWriter, r *http.Request) {
 	if !guruOwnsSession(w, claims, cs) {
 		return
 	}
-	list, err := h.Store.ListStudentAttendances(r.Context(), cs.ID)
+	list, err := h.Store.ListStudentAttendances(r.Context(), cs.ClassroomID, cs.SessionDate)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -309,7 +321,7 @@ func (h *Handler) BulkMarkStudents(w http.ResponseWriter, r *http.Request) {
 	}
 	results := make([]model.StudentAttendance, 0, len(req.StudentIDs))
 	for _, sid := range req.StudentIDs {
-		sa, err := h.Store.UpsertStudentAttendance(r.Context(), store.MarkInput{
+		sa, err := h.Store.UpsertStudentAttendance(r.Context(), cs.SessionDate, store.MarkInput{
 			ClassSessionID: cs.ID,
 			SchoolID:       cs.SchoolID,
 			AcademicYearID: cs.AcademicYearID,
@@ -356,7 +368,7 @@ func (h *Handler) MarkOneStudent(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "invalid status, must be one of hadir|sakit|izin|tanpa_keterangan")
 		return
 	}
-	sa, err := h.Store.UpsertStudentAttendance(r.Context(), store.MarkInput{
+	sa, err := h.Store.UpsertStudentAttendance(r.Context(), cs.SessionDate, store.MarkInput{
 		ClassSessionID: cs.ID,
 		SchoolID:       cs.SchoolID,
 		AcademicYearID: cs.AcademicYearID,

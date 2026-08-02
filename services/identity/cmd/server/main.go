@@ -86,6 +86,7 @@ func main() {
 
 		pr.Post("/auth/switch-role", app.SwitchRole)
 		pr.Get("/auth/me", app.Me)
+		pr.Post("/auth/change-password", app.ChangePassword) // Admin's self-service "Ubah Password"
 
 		// Superadmin dashboard.
 		pr.Get("/dashboard", app.Dashboard)
@@ -126,10 +127,13 @@ func main() {
 		// guru-list for peer-evaluator pools, etc.) need it too.
 		pr.Route("/users", func(ur chi.Router) {
 			ur.Post("/", app.CreateUser)
+			ur.Post("/import", app.ImportUsers)
+			ur.Get("/import-template", app.DownloadUsersTemplate)
 			ur.Put("/{id}", app.UpdateUser)
 			ur.Delete("/{id}", app.DeleteUser)
 			ur.Post("/{id}/reset-password", app.ResetPassword)
 			ur.Post("/{id}/roles", app.AssignUserRole)
+			ur.Delete("/{id}/roles/{role}", app.RemoveUserRole)
 		})
 
 		// Data Siswa / Data Guru — account-management slice, reusing the
@@ -147,7 +151,14 @@ func main() {
 			pos.Post("/{id}/assign", app.AssignPosition)
 		})
 		pr.Delete("/position-assignments/{assignmentId}", app.UnassignPosition)
-		pr.Get("/organization", app.Organization)
+		// GET /organization itself is NOT registered here -- report-service
+		// needs to read it (Kepala Sekolah lookup for E-Raport auto-fill)
+		// over X-Internal-Key, which this JWT-only group rejects. It's
+		// registered on the internal-or-jwt group below instead, same as
+		// /schools/{id} and /academic-years.
+		pr.Get("/organization/export", app.ExportOrganizationExcel)
+		pr.Get("/organization/import/template", app.DownloadOrganizationTemplate)
+		pr.Post("/organization/import", app.ImportOrganization)
 
 		// Tahun Akademik — identity owns this table; academic-service
 		// resolves IDs via this same REST API over HTTP (read side is
@@ -169,6 +180,7 @@ func main() {
 			an.Post("/{id}/publish", app.PublishAnnouncement)
 			an.Post("/{id}/unpublish", app.UnpublishAnnouncement)
 			an.Delete("/{id}", app.DeleteAnnouncement)
+			an.Delete("/all", app.DeleteAllAnnouncements)
 		})
 	})
 
@@ -205,6 +217,10 @@ func main() {
 		ir.Get("/schools/deleted", app.ListDeletedSchools)
 		ir.Get("/schools/{id}", app.GetSchool)
 		ir.Get("/academic-years", app.ListAcademicYears)
+		// Organisasi Sekolah read: report-service scans this for the
+		// current "Kepala Sekolah" jabatan holder (see internal_auth.go).
+		// Still reachable with a normal user JWT too (falls through).
+		ir.Get("/organization", app.Organization)
 	})
 
 	log.Printf("identity-service listening on :%s", port)

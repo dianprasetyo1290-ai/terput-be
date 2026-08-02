@@ -34,26 +34,6 @@ func attachStatus(p *model.Period) {
 	p.Status = domain.PeriodStatus(time.Now(), p.Published, p.PublishStartDate, p.PublishEndDate)
 }
 
-// validatePeerCrossFilter enforces the CRITICAL business rule: a guru placed
-// in "guru yang ingin dinilai" (K-a) cannot also appear in "yang menilai"
-// (K-b) for the same period.
-func validatePeerCrossFilter(evaluatees, evaluators []string) error {
-	set := map[string]bool{}
-	for _, id := range evaluatees {
-		set[id] = true
-	}
-	var offenders []string
-	for _, id := range evaluators {
-		if set[id] {
-			offenders = append(offenders, id)
-		}
-	}
-	if len(offenders) > 0 {
-		return fmt.Errorf("guru %v are in 'guru yang ingin dinilai' and cannot also be in 'yang menilai' for the same period", offenders)
-	}
-	return nil
-}
-
 // POST /periods - admin creates a period (status starts as Draft: published=false).
 func (h *Handler) CreatePeriod(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
@@ -68,10 +48,6 @@ func (h *Handler) CreatePeriod(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Title == "" || req.PublishStartDate == "" || req.PublishEndDate == "" || req.AcademicYearID == "" {
 		common.WriteError(w, http.StatusBadRequest, "title, publish_start_date, publish_end_date, academic_year_id are required")
-		return
-	}
-	if err := validatePeerCrossFilter(req.PeerEvaluateeIDs, req.PeerEvaluatorIDs); err != nil {
-		common.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	schoolID := effectiveSchoolID(r, claims)
@@ -111,10 +87,6 @@ func (h *Handler) UpdatePeriod(w http.ResponseWriter, r *http.Request) {
 	var req periodRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		common.WriteError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-	if err := validatePeerCrossFilter(req.PeerEvaluateeIDs, req.PeerEvaluatorIDs); err != nil {
-		common.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	existing.Title, existing.Semester = req.Title, req.Semester
@@ -241,8 +213,13 @@ func (h *Handler) UnpublishPeriod(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /periods/{id}/available-peer-evaluators
-// Excludes anyone already placed in the period's "guru yang ingin dinilai" (K-a)
-// list from the selectable pool for "yang menilai" (K-b).
+// Returns the full school guru pool for field K(b) ("yang menilai"). A guru
+// may appear in both K(a) ("guru yang ingin dinilai") and K(b) -- that's the
+// whole point of "Pilih Semua Guru" on both sides: it produces a reciprocal
+// teman-sejawat mesh where every selected guru both rates and is rated by
+// every OTHER selected guru (see regenerateTasks' peer loop below, which
+// already skips only exact self-pairs). This endpoint intentionally does
+// NOT exclude K(a) members anymore.
 func (h *Handler) AvailablePeerEvaluators(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	id := chi.URLParam(r, "id")
@@ -260,22 +237,14 @@ func (h *Handler) AvailablePeerEvaluators(w http.ResponseWriter, r *http.Request
 			pool = append(pool, client.UserSummary{ID: id, Name: "(name via identity-service, unavailable)"})
 		}
 	}
-	excluded := map[string]bool{}
-	for _, id := range p.PeerEvaluateeIDs {
-		excluded[id] = true
-	}
-	available := make([]client.UserSummary, 0, len(pool))
-	for _, u := range pool {
-		if !excluded[u.ID] {
-			available = append(available, u)
-		}
-	}
-	common.WriteJSON(w, http.StatusOK, available, map[string]interface{}{"source": source})
+	common.WriteJSON(w, http.StatusOK, pool, map[string]interface{}{"source": source})
 }
 
 // regenerateTasks (re)creates pending tasks for the eagerly-known evaluator
-// categories (kepala_sekolah, waka_kurikulum, waka_kesiswaan, self, peer).
-// Siswa tasks are created lazily on first submission -- see evaluation.go --
+// categories (kepala_sekolah, waka_kurikulum, waka_kesiswaan, self, peer,
+// plus the upward-feedback guru_to_kepsek/guru_to_waka_kurikulum/
+// guru_to_waka_kesiswaan trio). Siswa tasks are created lazily on first
+// submission -- see evaluation.go --
 // because the student roster per classroom is owned by academic-service and
 // this call must stay idempotent/cheap on every period save. See README
 // Assumptions for the full rationale.
@@ -293,6 +262,9 @@ func (h *Handler) regenerateTasks(ctx context.Context, p *model.Period) error {
 	}
 
 	upsert := func(formType, target, evaluator string) error {
+		if formType != model.EvalTypeSelf && target == evaluator {
+			return nil
+		}
 		f, ok := byType[formType]
 		if !ok {
 			return nil
@@ -322,6 +294,23 @@ func (h *Handler) regenerateTasks(ctx context.Context, p *model.Period) error {
 		}
 		if err := upsert(model.EvalTypeSelf, guruID, guruID); err != nil {
 			return err
+		}
+		// Upward-feedback track: same leader-lookup as above, direction
+		// swapped -- target is the leader, evaluator is the guru.
+		if p.HeadmasterUserID != nil {
+			if err := upsert(model.EvalTypeGuruToKepsek, *p.HeadmasterUserID, guruID); err != nil {
+				return err
+			}
+		}
+		if p.CurriculumVPUserID != nil {
+			if err := upsert(model.EvalTypeGuruToWakaKurikulum, *p.CurriculumVPUserID, guruID); err != nil {
+				return err
+			}
+		}
+		if p.StudentAffairsVPUserID != nil {
+			if err := upsert(model.EvalTypeGuruToWakaKesiswaan, *p.StudentAffairsVPUserID, guruID); err != nil {
+				return err
+			}
 		}
 	}
 	for _, evaluatorID := range p.PeerEvaluatorIDs {

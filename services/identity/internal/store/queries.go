@@ -70,8 +70,17 @@ func HasRole(db *sql.DB, userID, role, schoolID string) (bool, error) {
 func PickActiveRole(roles []model.UserSchoolRole) (activeRole, schoolID string, allRoleNames []string, ok bool) {
 	priority := []string{"superadmin", "admin", "guru", "siswa"}
 	byRole := map[string]model.UserSchoolRole{}
+	// roles is ordered by created_at ascending (see UserRoles) — a user can hold the same
+	// role at more than one school (unique constraint is user_id+school_id+role, not
+	// user_id+role), so keep the FIRST (oldest/primary) assignment per role name rather than
+	// overwriting on every iteration. This must match SwitchRole's own first-match selection
+	// below, or the same account gets a different school_id from login vs. switch-role —
+	// which is exactly the kind of inconsistency that made one admin's session bleed into
+	// another school's data.
 	for _, r := range roles {
-		byRole[r.Role] = r
+		if _, exists := byRole[r.Role]; !exists {
+			byRole[r.Role] = r
+		}
 		allRoleNames = append(allRoleNames, r.Role)
 	}
 	for _, p := range priority {

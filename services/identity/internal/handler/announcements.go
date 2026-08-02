@@ -339,3 +339,23 @@ func nullIfEmpty(s string) interface{} {
 	}
 	return s
 }
+
+func (a *App) DeleteAllAnnouncements(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, common.RoleAdmin) {
+		return
+	}
+	claims := common.FromCtx(r)
+	query := `DELETE FROM announcements`
+	args := []interface{}{}
+	if claims.ActiveRole != common.RoleSuperadmin {
+		query += ` WHERE school_id=$1`
+		args = append(args, claims.SchoolID)
+	}
+	res, err := a.DB.Exec(query, args...)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to delete all announcements")
+		return
+	}
+	n, _ := res.RowsAffected()
+	common.WriteJSON(w, http.StatusOK, map[string]int64{"deleted": n}, nil)
+}

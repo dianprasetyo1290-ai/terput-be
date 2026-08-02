@@ -120,6 +120,9 @@ func main() {
 		// Wali Kelas (derived)
 		r.Get("/wali-kelas", h.ListWaliKelas)
 
+		// Year-wide roster (all classrooms) — siswa-picker dedup + roster view
+		r.Get("/classrooms/enrollments", h.ListEnrollmentsByYear)
+
 		// Data Mata Pelajaran: subjects catalog
 		r.Post("/subjects", h.CreateSubject)
 		r.Get("/subjects", h.ListSubjects)
@@ -168,6 +171,7 @@ func main() {
 		r.Get("/classrooms/{id}/subject-matrix", h.GetClassroomSubjectMatrix)
 		r.Get("/classrooms/{id}/student-subject-matrix", h.GetStudentSubjectMatrix)
 		r.Get("/students/{id}/active-subjects", h.GetStudentActiveSubjects)
+		r.Get("/students/{id}/classroom", h.GetStudentClassroom)
 		r.Get("/teaching-assignments", h.GetTeachingAssignments)
 	})
 

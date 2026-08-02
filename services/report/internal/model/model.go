@@ -21,11 +21,13 @@ type ReportCard struct {
 	Attendance AttendanceSummary `json:"attendance"`
 
 	// Header snapshot fetched from identity/academic-service.
-	StudentName    *string    `json:"student_name,omitempty"`
-	StudentNISN    *string    `json:"student_nisn,omitempty"`
-	ClassroomName  *string    `json:"classroom_name,omitempty"`
-	TermName       *string    `json:"term_name,omitempty"`
-	HeaderSyncedAt *time.Time `json:"header_synced_at,omitempty"`
+	StudentName         *string    `json:"student_name,omitempty"`
+	StudentNISN         *string    `json:"student_nisn,omitempty"`
+	ClassroomName       *string    `json:"classroom_name,omitempty"`
+	TermName            *string    `json:"term_name,omitempty"`
+	HomeroomTeacherName *string    `json:"homeroom_teacher_name,omitempty"`
+	PrincipalName       *string    `json:"principal_name,omitempty"`
+	HeaderSyncedAt      *time.Time `json:"header_synced_at,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

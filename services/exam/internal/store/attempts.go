@@ -100,47 +100,12 @@ func (s *Store) ListAttemptsByStudent(ctx context.Context, userID string) ([]mod
 	return out, rows.Err()
 }
 
-// MonitorCounts computes the 4 live-monitor counters fresh from current DB
-// state (never cached) for a classroom's roster on this exam.
-type MonitorCounts struct {
-	BelumMengerjakan int `json:"belum_mengerjakan"`
-	SedangUjian      int `json:"sedang_ujian"` // aktif + blokir: student is still mid-attempt either way
-	Selesai          int `json:"selesai"`
-	DilarangUjian    int `json:"dilarang_ujian"`
-	Total            int `json:"total"`
-}
-
-func (s *Store) MonitorCounts(ctx context.Context, examID, classroomID string) (*MonitorCounts, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT status, COUNT(*) FROM exam_attempts WHERE exam_id=$1 AND classroom_id=$2 GROUP BY status`, examID, classroomID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	c := &MonitorCounts{}
-	for rows.Next() {
-		var status string
-		var n int
-		if err := rows.Scan(&status, &n); err != nil {
-			return nil, err
-		}
-		switch status {
-		case model.StatusBelumMulai:
-			c.BelumMengerjakan += n
-		case model.StatusAktif, model.StatusBlokir:
-			c.SedangUjian += n
-		case model.StatusSelesai:
-			c.Selesai += n
-		case model.StatusDilarang:
-			c.DilarangUjian += n
-		}
-		c.Total += n
-	}
-	return c, rows.Err()
-}
-
-// EnterExam validates the voucher code and starts (belum_mulai->aktif) or
-// resumes (aktif stays aktif) the student's attempt, building the
+// EnterExam validates the student's voucher (a school-wide code valid across
+// any exam within [valid_from, valid_until] — client spec 2026-07-24, no
+// longer 1-voucher-1-exam) and starts (belum_mulai->aktif) or resumes
+// (aktif stays aktif) the student's attempt, creating the exam_attempts row
+// lazily on first entry (it used to be pre-created at voucher-issuance
+// time, back when a voucher was tied to one exam) and building the
 // per-attempt question_order the first time it starts.
 func (s *Store) EnterExam(ctx context.Context, examID, userID, code string) (*model.ExamAttempt, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -149,25 +114,42 @@ func (s *Store) EnterExam(ctx context.Context, examID, userID, code string) (*mo
 	}
 	defer tx.Rollback()
 
+	var schoolID, academicYearID, classroomID string
+	err = tx.QueryRowContext(ctx, `SELECT school_id, academic_year_id, classroom_id FROM exams WHERE id=$1`, examID).
+		Scan(&schoolID, &academicYearID, &classroomID)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("exam not found")
+	}
+	if err != nil {
+		return nil, err
+	}
+
 	var tokenID string
-	var expiresAt time.Time
-	err = tx.QueryRowContext(ctx, `SELECT id, expires_at FROM exam_tokens WHERE exam_id=$1 AND user_id=$2 AND code=$3`, examID, userID, code).
-		Scan(&tokenID, &expiresAt)
+	var validFrom, validUntil time.Time
+	err = tx.QueryRowContext(ctx, `SELECT id, valid_from, valid_until FROM exam_tokens WHERE school_id=$1 AND user_id=$2 AND code=$3`, schoolID, userID, code).
+		Scan(&tokenID, &validFrom, &validUntil)
 	if err == sql.ErrNoRows {
 		return nil, ErrTokenInvalid
 	}
 	if err != nil {
 		return nil, err
 	}
-	if time.Now().After(expiresAt) {
+	today := time.Now()
+	if today.Before(validFrom) || today.After(validUntil.AddDate(0, 0, 1)) {
 		return nil, ErrTokenInvalid
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO exam_attempts (school_id, academic_year_id, exam_id, user_id, classroom_id, token_id, status)
+		VALUES ($1,$2,$3,$4,$5,$6,'belum_mulai')
+		ON CONFLICT (exam_id, user_id) DO NOTHING`,
+		schoolID, academicYearID, examID, userID, classroomID, tokenID)
+	if err != nil {
+		return nil, err
 	}
 
 	row := tx.QueryRowContext(ctx, `SELECT `+attemptCols+` FROM exam_attempts WHERE exam_id=$1 AND user_id=$2 FOR UPDATE`, examID, userID)
 	a, err := scanAttempt(row)
-	if err == sql.ErrNoRows {
-		return nil, ErrTokenInvalid // no attempt row -> voucher was never properly issued
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -484,6 +466,56 @@ func (s *Store) BukaBlokir(ctx context.Context, attemptID string) error {
 		return ErrInvalidTransition
 	}
 	return nil
+}
+
+// LarangUjianPreEntry blocks a student who has never entered the exam yet —
+// the client's primary Larang Ujian scenario ("admin bisa memblokir kode
+// ujian/voucher dari awal SEBELUM siswa melaksanakan ujian tersebut"). Since
+// EnterExam only creates an exam_attempts row lazily on first entry, a
+// not-yet-started student has no attempt_id for LarangUjian to key on.
+// Lazily creates the row here instead (same bootstrap EnterExam does, minus
+// token_id/question_order since the student never entered — both nullable),
+// then immediately transitions it straight to 'dilarang' in one statement.
+func (s *Store) LarangUjianPreEntry(ctx context.Context, examID, userID, byUserID, reason string) (string, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+
+	var schoolID, academicYearID, classroomID string
+	err = tx.QueryRowContext(ctx, `SELECT school_id, academic_year_id, classroom_id FROM exams WHERE id=$1`, examID).
+		Scan(&schoolID, &academicYearID, &classroomID)
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("exam not found")
+	}
+	if err != nil {
+		return "", err
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO exam_attempts (school_id, academic_year_id, exam_id, user_id, classroom_id, status)
+		VALUES ($1,$2,$3,$4,$5,'belum_mulai')
+		ON CONFLICT (exam_id, user_id) DO NOTHING`,
+		schoolID, academicYearID, examID, userID, classroomID)
+	if err != nil {
+		return "", err
+	}
+
+	var attemptID string
+	row := tx.QueryRowContext(ctx, `
+		UPDATE exam_attempts SET status='dilarang', banned_at=now(), banned_reason=$1, banned_by=$2, updated_at=now()
+		WHERE exam_id=$3 AND user_id=$4 AND status='belum_mulai'
+		RETURNING id`, reason, byUserID, examID, userID)
+	if err := row.Scan(&attemptID); err == sql.ErrNoRows {
+		return "", ErrInvalidTransition
+	} else if err != nil {
+		return "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return attemptID, nil
 }
 
 // LarangUjian (admin only, belum_mulai -> dilarang). Alasan is required.

@@ -22,7 +22,8 @@ func (s *Store) GetOrCreateReportCard(ctx context.Context, schoolID, academicYea
 			finalized_at, finalized_by, unlocked_at, unlocked_by, class_teacher_note,
 			attendance_hadir, attendance_sakit, attendance_izin, attendance_tanpa_keterangan,
 			attendance_synced_at, attendance_sync_error,
-			student_name, student_nisn, classroom_name, term_name, header_synced_at,
+			student_name, student_nisn, classroom_name, term_name,
+			homeroom_teacher_name, principal_name, header_synced_at,
 			created_at, updated_at, (xmax = 0) AS inserted`,
 		schoolID, academicYearID, termID, classroomID, studentID)
 	rc, inserted, err := scanReportCard(row)
@@ -38,7 +39,7 @@ func scanReportCard(row *sql.Row) (*model.ReportCard, bool, error) {
 	var finalizedAt, unlockedAt, attendanceSyncedAt, headerSyncedAt sql.NullTime
 	var hadir, sakit, izin, tanpa sql.NullInt64
 	var attendanceSyncErr sql.NullString
-	var studentName, studentNISN, classroomName, termName sql.NullString
+	var studentName, studentNISN, classroomName, termName, homeroomTeacherName, principalName sql.NullString
 	var inserted bool
 
 	err := row.Scan(
@@ -46,7 +47,8 @@ func scanReportCard(row *sql.Row) (*model.ReportCard, bool, error) {
 		&finalizedAt, &finalizedBy, &unlockedAt, &unlockedBy, &classTeacherNote,
 		&hadir, &sakit, &izin, &tanpa,
 		&attendanceSyncedAt, &attendanceSyncErr,
-		&studentName, &studentNISN, &classroomName, &termName, &headerSyncedAt,
+		&studentName, &studentNISN, &classroomName, &termName,
+		&homeroomTeacherName, &principalName, &headerSyncedAt,
 		&rc.CreatedAt, &rc.UpdatedAt, &inserted,
 	)
 	if err == sql.ErrNoRows {
@@ -108,6 +110,12 @@ func scanReportCard(row *sql.Row) (*model.ReportCard, bool, error) {
 	if termName.Valid {
 		rc.TermName = &termName.String
 	}
+	if homeroomTeacherName.Valid {
+		rc.HomeroomTeacherName = &homeroomTeacherName.String
+	}
+	if principalName.Valid {
+		rc.PrincipalName = &principalName.String
+	}
 	if headerSyncedAt.Valid {
 		t := headerSyncedAt.Time
 		rc.HeaderSyncedAt = &t
@@ -119,7 +127,8 @@ const reportCardSelectCols = `id, school_id, academic_year_id, term_id, classroo
 	finalized_at, finalized_by, unlocked_at, unlocked_by, class_teacher_note,
 	attendance_hadir, attendance_sakit, attendance_izin, attendance_tanpa_keterangan,
 	attendance_synced_at, attendance_sync_error,
-	student_name, student_nisn, classroom_name, term_name, header_synced_at,
+	student_name, student_nisn, classroom_name, term_name,
+	homeroom_teacher_name, principal_name, header_synced_at,
 	created_at, updated_at, false AS inserted`
 
 func (s *Store) GetReportCard(ctx context.Context, id string) (*model.ReportCard, error) {
@@ -161,7 +170,7 @@ func scanReportCardRows(rows *sql.Rows) ([]model.ReportCard, error) {
 		var finalizedAt, unlockedAt, attendanceSyncedAt, headerSyncedAt sql.NullTime
 		var hadir, sakit, izin, tanpa sql.NullInt64
 		var attendanceSyncErr sql.NullString
-		var studentName, studentNISN, classroomName, termName sql.NullString
+		var studentName, studentNISN, classroomName, termName, homeroomTeacherName, principalName sql.NullString
 		var inserted bool
 
 		if err := rows.Scan(
@@ -169,7 +178,8 @@ func scanReportCardRows(rows *sql.Rows) ([]model.ReportCard, error) {
 			&finalizedAt, &finalizedBy, &unlockedAt, &unlockedBy, &classTeacherNote,
 			&hadir, &sakit, &izin, &tanpa,
 			&attendanceSyncedAt, &attendanceSyncErr,
-			&studentName, &studentNISN, &classroomName, &termName, &headerSyncedAt,
+			&studentName, &studentNISN, &classroomName, &termName,
+			&homeroomTeacherName, &principalName, &headerSyncedAt,
 			&rc.CreatedAt, &rc.UpdatedAt, &inserted,
 		); err != nil {
 			return nil, err
@@ -226,6 +236,12 @@ func scanReportCardRows(rows *sql.Rows) ([]model.ReportCard, error) {
 		if termName.Valid {
 			rc.TermName = &termName.String
 		}
+		if homeroomTeacherName.Valid {
+			rc.HomeroomTeacherName = &homeroomTeacherName.String
+		}
+		if principalName.Valid {
+			rc.PrincipalName = &principalName.String
+		}
 		if headerSyncedAt.Valid {
 			t := headerSyncedAt.Time
 			rc.HeaderSyncedAt = &t
@@ -235,12 +251,13 @@ func scanReportCardRows(rows *sql.Rows) ([]model.ReportCard, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) UpdateHeaderSnapshot(ctx context.Context, id string, studentName, studentNISN, classroomName, termName *string, syncedAt time.Time) error {
+func (s *Store) UpdateHeaderSnapshot(ctx context.Context, id string, studentName, studentNISN, classroomName, termName, homeroomTeacherName, principalName *string, syncedAt time.Time) error {
 	_, err := s.DB.ExecContext(ctx, `
 		UPDATE report_cards SET student_name = $1, student_nisn = $2, classroom_name = $3, term_name = $4,
-			header_synced_at = $5, updated_at = now()
-		WHERE id = $6`,
-		studentName, studentNISN, classroomName, termName, syncedAt, id)
+			homeroom_teacher_name = $5, principal_name = $6,
+			header_synced_at = $7, updated_at = now()
+		WHERE id = $8`,
+		studentName, studentNISN, classroomName, termName, homeroomTeacherName, principalName, syncedAt, id)
 	return err
 }
 

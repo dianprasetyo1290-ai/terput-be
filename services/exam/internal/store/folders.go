@@ -66,24 +66,3 @@ func (s *Store) DeleteFolder(ctx context.Context, id, schoolID string) error {
 	_, err := s.DB.ExecContext(ctx, `UPDATE question_folders SET deleted_at=now() WHERE id=$1 AND school_id=$2`, id, schoolID)
 	return err
 }
-
-// FindOrCreateImportFolder is used by the CSV import flow when no folder_id
-// is supplied: reuses (or lazily creates) a per-guru "Import - <exam title>"
-// folder so imported soal still land somewhere in Bank Soal.
-func (s *Store) FindOrCreateImportFolder(ctx context.Context, schoolID, academicYearID, createdBy, name string) (string, error) {
-	var id string
-	err := s.DB.QueryRowContext(ctx, `
-		SELECT id FROM question_folders
-		WHERE school_id=$1 AND academic_year_id=$2 AND created_by=$3 AND name=$4 AND deleted_at IS NULL
-		LIMIT 1`, schoolID, academicYearID, createdBy, name).Scan(&id)
-	if err == nil {
-		return id, nil
-	}
-	if err != sql.ErrNoRows {
-		return "", err
-	}
-	err = s.DB.QueryRowContext(ctx, `
-		INSERT INTO question_folders (school_id, academic_year_id, name, created_by)
-		VALUES ($1,$2,$3,$4) RETURNING id`, schoolID, academicYearID, name, createdBy).Scan(&id)
-	return id, err
-}

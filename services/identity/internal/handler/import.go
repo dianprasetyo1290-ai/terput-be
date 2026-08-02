@@ -93,6 +93,11 @@ func parseImportFile(f *excelize.File, schoolNameOverride string) *parsedImport 
 	}
 	pi.report.Counts = map[string]int{}
 	pi.report.DuplicatesDropped = map[string]int{}
+	// Never leave this nil: encoding/json serializes a nil slice as `null`, and the frontend's
+	// dry-run view does `dryRunReport.errors.length` unconditionally — a clean dry-run (the
+	// common case) would otherwise crash the render with no error boundary, which is exactly
+	// the reported "upload succeeds, then blank white screen" bug.
+	pi.report.Errors = []importRowError{}
 
 	// Data Identitas Sekolah: header row + one data row.
 	if rows, err := f.GetRows(sheetIdentitas); err == nil && len(rows) >= 2 {

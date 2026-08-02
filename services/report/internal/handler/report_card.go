@@ -13,6 +13,7 @@ import (
 
 	"skci/report/internal/common"
 	"skci/report/internal/model"
+	"skci/report/internal/upstream"
 )
 
 // classifyMapping buckets an ExamType.MappingRapor value into "sts"/"sas"/
@@ -84,7 +85,7 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	warnings := map[string]string{}
 
-	var classroomName, termName *string
+	var classroomName, termName, homeroomTeacherName, principalName *string
 	var academicYearID string
 
 	if classroom, err := h.d.Academic.GetClassroom(ctx, classroomID); err != nil {
@@ -93,6 +94,28 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 		academicYearID = classroom.AcademicYearID
 		n := classroom.Name
 		classroomName = &n
+
+		// Wali Kelas: academic-service already stores the homeroom teacher
+		// assignment on the classroom itself (Data Kelas admin form) --
+		// just resolve that user's display name from identity-service, the
+		// same as every other name lookup in this handler.
+		if classroom.HomeroomTeacherUserID != nil {
+			if teacher, terr := h.d.Identity.GetUser(ctx, *classroom.HomeroomTeacherUserID); terr != nil {
+				warnings["identity_wali_kelas"] = terr.Error()
+			} else if teacher != nil {
+				n := teacher.Name
+				homeroomTeacherName = &n
+			}
+		}
+	}
+
+	// Kepala Sekolah: not tied to this classroom at all -- it's whoever
+	// currently holds the "Kepala Sekolah" jabatan for the school, per
+	// identity-service's Organisasi Sekolah (Data Jabatan/Peran) feature.
+	if orgPositions, oerr := h.d.Identity.GetOrganization(ctx, schoolID); oerr != nil {
+		warnings["identity_kepala_sekolah"] = oerr.Error()
+	} else if name := upstream.PrincipalName(orgPositions); name != "" {
+		principalName = &name
 	}
 	if term, err := h.d.Academic.GetTerm(ctx, termID); err != nil {
 		warnings["academic_term"] = err.Error()
@@ -207,7 +230,7 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 			studentName = &n
 			studentNISN = user.NISN
 		}
-		_ = h.d.Store.UpdateHeaderSnapshot(ctx, rc.ID, studentName, studentNISN, classroomName, termName, time.Now())
+		_ = h.d.Store.UpdateHeaderSnapshot(ctx, rc.ID, studentName, studentNISN, classroomName, termName, homeroomTeacherName, principalName, time.Now())
 
 		// A finalized card is locked: don't let a regenerate silently
 		// change attendance/computed scores under a locked report. Admin

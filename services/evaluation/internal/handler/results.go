@@ -59,6 +59,12 @@ func (h *Handler) computeResults(ctx context.Context, p *model.Period, targetTea
 	overallComplete := true
 
 	for _, f := range forms {
+		if model.IsUpwardEvalType(f.EvaluatorType) {
+			// Upward-feedback track (guru rates a leader) is a separate,
+			// unblended track -- see leadership-results below -- and must
+			// not appear in a guru's own weighted-score categories.
+			continue
+		}
 		formTasks := tasksByForm[f.ID]
 		submitted := 0
 		var sum float64
@@ -200,7 +206,8 @@ func (h *Handler) GuruReport(w http.ResponseWriter, r *http.Request) {
 	// same subject across multiple classrooms or vice versa.
 	seenClass := map[string]bool{}
 	seenSubj := map[string]bool{}
-	var kelas, mapel []string
+	kelas := []string{}
+	mapel := []string{}
 	for _, ta := range h.Clients.GetTeachingAssignments(guruID) {
 		if !seenClass[ta.ClassroomName] {
 			seenClass[ta.ClassroomName] = true
@@ -253,4 +260,103 @@ func (h *Handler) GuruReport(w http.ResponseWriter, r *http.Request) {
 		rep.NUPTK = "-"
 	}
 	common.WriteJSON(w, http.StatusOK, rep, nil)
+}
+
+// ---------------- Upward-feedback track (guru rates a leader) ----------------
+//
+// Deliberately separate from computeResults above: not blended into any
+// guru's weighted score (no room in the 100% self/siswa/kepsek/waka/peer
+// split, and it's the opposite rating direction), just a simple per-leader
+// average of what their guru rated them.
+
+type leadershipCategoryResult struct {
+	EvaluatorType  string   `json:"evaluator_type"`
+	FormCode       string   `json:"form_code"`
+	FormTitle      string   `json:"form_title"`
+	LeaderUserID   string   `json:"leader_user_id"`
+	SubmittedCount int      `json:"submitted_count"`
+	ExpectedCount  int      `json:"expected_count"` // = number of guru in-scope for the period (each owes one upward eval per assigned leader role)
+	AvgScore       *float64 `json:"avg_score"`      // simple average of submitted tasks' raw_score (1-4), null if none submitted
+	Complete       bool     `json:"complete"`
+}
+
+type leadershipResults struct {
+	PeriodID    string                     `json:"period_id"`
+	PeriodTitle string                     `json:"period_title"`
+	Categories  []leadershipCategoryResult `json:"categories"`
+}
+
+// computeLeadershipResults returns one row per leadership role currently
+// assigned to the period (kepala_sekolah/waka_kurikulum/waka_kesiswaan,
+// skipping any unassigned role), aggregating every guru's upward-eval task
+// targeting that role-holder.
+func (h *Handler) computeLeadershipResults(ctx context.Context, p *model.Period) (*leadershipResults, error) {
+	res := &leadershipResults{PeriodID: p.ID, PeriodTitle: p.Title}
+	roles := []struct {
+		evalType string
+		leaderID *string
+	}{
+		{model.EvalTypeGuruToKepsek, p.HeadmasterUserID},
+		{model.EvalTypeGuruToWakaKurikulum, p.CurriculumVPUserID},
+		{model.EvalTypeGuruToWakaKesiswaan, p.StudentAffairsVPUserID},
+	}
+	for _, role := range roles {
+		if role.leaderID == nil {
+			continue
+		}
+		form, err := h.Forms.GetFormByEvaluatorType(ctx, p.SchoolID, role.evalType)
+		if err != nil {
+			continue // form not bootstrapped yet for this school -- nothing to report
+		}
+		// ListForPeriodTarget is keyed by target_teacher_user_id only, so
+		// filter to this role's own form -- the leader's user id could in
+		// principle also appear as a target under a different form (e.g.
+		// they're also a target guru in the primary track).
+		tasks, err := h.Tasks.ListForPeriodTarget(ctx, p.ID, *role.leaderID)
+		if err != nil {
+			return nil, err
+		}
+		submitted := 0
+		var sum float64
+		for _, t := range tasks {
+			if t.FormID != form.ID {
+				continue
+			}
+			if t.Status == model.TaskStatusSubmitted {
+				submitted++
+				if t.RawScore != nil {
+					sum += *t.RawScore
+				}
+			}
+		}
+		cr := leadershipCategoryResult{
+			EvaluatorType: role.evalType, FormCode: form.Code, FormTitle: form.Title, LeaderUserID: *role.leaderID,
+			SubmittedCount: submitted, ExpectedCount: len(p.TargetTeacherIDs),
+		}
+		if submitted > 0 {
+			avg := sum / float64(submitted)
+			cr.AvgScore = &avg
+		}
+		cr.Complete = cr.ExpectedCount > 0 && submitted >= cr.ExpectedCount
+		res.Categories = append(res.Categories, cr)
+	}
+	return res, nil
+}
+
+// GET /periods/{id}/leadership-results
+func (h *Handler) LeadershipResults(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	periodID := chi.URLParam(r, "id")
+	schoolID := effectiveSchoolID(r, claims)
+	p, err := h.Periods.GetByID(r.Context(), periodID, schoolID)
+	if err != nil {
+		common.WriteError(w, http.StatusNotFound, "period not found")
+		return
+	}
+	res, err := h.computeLeadershipResults(r.Context(), p)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to compute leadership results: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, res, nil)
 }

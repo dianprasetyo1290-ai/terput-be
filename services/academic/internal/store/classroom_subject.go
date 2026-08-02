@@ -51,16 +51,25 @@ func (s *Store) ListClassroomSubjects(ctx context.Context, schoolID, classroomID
 	return out, rows.Err()
 }
 
+// GetClassroomSubject also joins subjects.subject_group (enriched, not a
+// classroom_subjects column) — schedule.go's slot-conflict check needs to
+// know whether a classroom_subject is an Agama variant.
 func (s *Store) GetClassroomSubject(ctx context.Context, schoolID, id string) (*model.ClassroomSubject, error) {
 	row := s.DB.QueryRowContext(ctx, `
-		SELECT id, school_id, academic_year_id, classroom_id, subject_id, teacher_user_id, is_active, created_at, updated_at
-		FROM classroom_subjects WHERE id = $1 AND school_id = $2 AND deleted_at IS NULL
+		SELECT cs.id, cs.school_id, cs.academic_year_id, cs.classroom_id, cs.subject_id, cs.teacher_user_id, cs.is_active, cs.created_at, cs.updated_at, sub.subject_group
+		FROM classroom_subjects cs
+		JOIN subjects sub ON sub.id = cs.subject_id
+		WHERE cs.id = $1 AND cs.school_id = $2 AND cs.deleted_at IS NULL
 	`, id, schoolID)
-	cs, err := scanClassroomSubject(row)
+	var cs model.ClassroomSubject
+	err := row.Scan(&cs.ID, &cs.SchoolID, &cs.AcademicYearID, &cs.ClassroomID, &cs.SubjectID, &cs.TeacherUserID, &cs.IsActive, &cs.CreatedAt, &cs.UpdatedAt, &cs.SubjectGroup)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return cs, err
+	if err != nil {
+		return nil, err
+	}
+	return &cs, nil
 }
 
 func (s *Store) UpdateClassroomSubject(ctx context.Context, schoolID, id string, teacherUserID *string, isActive *bool) (*model.ClassroomSubject, error) {
@@ -155,13 +164,27 @@ func (s *Store) BulkSetStudentSubjectEnrollments(ctx context.Context, schoolID, 
 	for _, item := range items {
 		if item.IsEnrolled {
 			// Siblings lists are small (a handful of religion variants at
-			// most) — a plain loop of scalar UPDATEs avoids pulling in an
+			// most) — a plain loop of scalar upserts avoids pulling in an
 			// array-param dependency academic-service doesn't otherwise need.
+			//
+			// This MUST be an upsert, not a plain UPDATE: on a fresh
+			// classroom (no prior enrollment rows at all — the common case
+			// the first time Auto-Enroll Agama is run), a bare UPDATE
+			// matches zero rows and silently does nothing, leaving NO row
+			// for the sibling at all. ActiveSubjectsForStudent's "nothing
+			// resolved yet, show every variant" fallback then still fires
+			// for that sibling, so a student ends up showing as active in
+			// BOTH their own Agama variant AND every other one — the exact
+			// "siswa...tercampur" bug the client reported. Explicitly
+			// inserting an is_enrolled=false row for every sibling closes
+			// that fallback for good, regardless of whether a row already
+			// existed.
 			for _, sibling := range siblingsOf[item.ClassroomSubjectID] {
 				if _, err := tx.ExecContext(ctx, `
-					UPDATE student_subject_enrollments SET is_enrolled = false, updated_at = now()
-					WHERE student_user_id = $1 AND classroom_subject_id = $2
-				`, item.StudentUserID, sibling); err != nil {
+					INSERT INTO student_subject_enrollments (school_id, academic_year_id, student_user_id, classroom_subject_id, is_enrolled)
+					VALUES ($1, $2, $3, $4, false)
+					ON CONFLICT (student_user_id, classroom_subject_id) DO UPDATE SET is_enrolled = false, updated_at = now()
+				`, schoolID, academicYearID, item.StudentUserID, sibling); err != nil {
 					return err
 				}
 			}
@@ -272,6 +295,27 @@ func (s *Store) ListTeachingAssignments(ctx context.Context, teacherUserID strin
 		out = append(out, ta)
 	}
 	return out, rows.Err()
+}
+
+// StudentClassroomID resolves the one classroom a student is actively
+// enrolled in for a given academic year (a student belongs to exactly one
+// classroom per year, per class_enrollments' design — see
+// ActiveSubjectsForStudent's identical CTE above). Returns "" (not an
+// error) if the student has no active enrollment — callers (exam-service's
+// siswa dashboard, item 20) treat that as "no exams to show" rather than a
+// hard failure.
+func (s *Store) StudentClassroomID(ctx context.Context, schoolID, studentUserID, academicYearID string) (string, error) {
+	var classroomID string
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT classroom_id FROM class_enrollments
+		WHERE ($1 = '' OR school_id::text = $1) AND student_user_id = $2
+		  AND ($3 = '' OR academic_year_id::text = $3) AND status = 'active'
+		ORDER BY created_at DESC LIMIT 1
+	`, schoolID, studentUserID, academicYearID).Scan(&classroomID)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return classroomID, err
 }
 
 func scanClassroomSubject(row rowScanner) (*model.ClassroomSubject, error) {

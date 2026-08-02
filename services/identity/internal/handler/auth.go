@@ -139,6 +139,55 @@ func (a *App) Me(w http.ResponseWriter, r *http.Request) {
 	}, nil)
 }
 
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+// ChangePassword: self-service password change for the logged-in user
+// (Admin's "Ubah Password" 3-step form). Unlike ResetPassword in
+// users.go (an admin resetting someone ELSE's password without knowing
+// it), this requires the caller's own current password to verify identity
+// before allowing the change — a genuinely different, security-sensitive
+// path, not a variant of the existing reset endpoint.
+func (a *App) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	var req changePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.CurrentPassword == "" || req.NewPassword == "" {
+		common.WriteError(w, http.StatusBadRequest, "current_password and new_password are required")
+		return
+	}
+	if len(req.NewPassword) < 6 {
+		common.WriteError(w, http.StatusBadRequest, "new_password must be at least 6 characters")
+		return
+	}
+
+	var hash string
+	if err := a.DB.QueryRow(`SELECT password_hash FROM users WHERE id=$1 AND deleted_at IS NULL`, claims.UserID).Scan(&hash); err != nil {
+		common.WriteError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if !common.CheckPassword(hash, req.CurrentPassword) {
+		common.WriteError(w, http.StatusUnauthorized, "current password is incorrect")
+		return
+	}
+
+	newHash, err := common.HashPassword(req.NewPassword)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to change password")
+		return
+	}
+	// Same post-change bookkeeping as ResetPassword: default_password no
+	// longer applies once a real password is set, password_changed flips
+	// so the UI stops showing a plaintext default password anywhere.
+	if _, err := a.DB.Exec(`UPDATE users SET password_hash=$1, password_changed=true, default_password=NULL, updated_at=now() WHERE id=$2`,
+		newHash, claims.UserID); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to change password")
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "password changed"}, nil)
+}
+
 func (a *App) issueToken(userID, schoolID, activeRole string, roles []string) (string, error) {
 	claims := common.Claims{
 		UserID:     userID,

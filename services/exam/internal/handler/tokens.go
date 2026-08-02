@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -10,49 +9,52 @@ import (
 	"skci/exam/internal/common"
 )
 
+// Voucher management (client spec 2026-07-24: admin-only, issued per
+// student from Data Siswa — not per exam, and not guru-accessible). Dates
+// are plain YYYY-MM-DD (no time-of-day component — a voucher is valid for
+// whole days).
 type issueTokenReq struct {
-	UserID      string `json:"user_id"`
-	ClassroomID string `json:"classroom_id"`
-	ExpiresAt   string `json:"expires_at"` // RFC3339; defaults to exam.end_at if omitted
+	ValidFrom  string `json:"valid_from"`
+	ValidUntil string `json:"valid_until"`
 }
 
+func parseVoucherDates(req issueTokenReq) (time.Time, time.Time, string, bool) {
+	if req.ValidFrom == "" || req.ValidUntil == "" {
+		return time.Time{}, time.Time{}, "valid_from and valid_until are required (YYYY-MM-DD)", false
+	}
+	from, err := time.Parse("2006-01-02", req.ValidFrom)
+	if err != nil {
+		return time.Time{}, time.Time{}, "valid_from must be YYYY-MM-DD", false
+	}
+	until, err := time.Parse("2006-01-02", req.ValidUntil)
+	if err != nil {
+		return time.Time{}, time.Time{}, "valid_until must be YYYY-MM-DD", false
+	}
+	if until.Before(from) {
+		return time.Time{}, time.Time{}, "valid_until cannot be before valid_from", false
+	}
+	return from, until, "", true
+}
+
+// IssueToken: POST /students/{userId}/voucher — issues or reissues (same
+// code, new date range) the student's voucher.
 func (h *Handler) IssueToken(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin", "guru") {
+	if !requireRole(w, c, "admin", "superadmin") {
 		return
 	}
-	examID := chi.URLParam(r, "id")
-	exam, err := h.Store.GetExam(r.Context(), examID, common.EffectiveSchoolID(r, c))
-	if err != nil {
-		writeStoreErr(w, err)
-		return
-	}
-	if exam == nil {
-		common.WriteError(w, http.StatusNotFound, "exam not found")
-		return
-	}
+	userID := chi.URLParam(r, "userId")
 	var req issueTokenReq
 	if !common.DecodeJSON(w, r, &req) {
 		return
 	}
-	if req.UserID == "" {
-		common.WriteError(w, http.StatusBadRequest, "user_id is required")
+	from, until, msg, ok := parseVoucherDates(req)
+	if !ok {
+		common.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
-	classroomID := req.ClassroomID
-	if classroomID == "" {
-		classroomID = exam.ClassroomID
-	}
-	expiresAt := exam.EndAt
-	if req.ExpiresAt != "" {
-		t, err := time.Parse(time.RFC3339, req.ExpiresAt)
-		if err != nil {
-			common.WriteError(w, http.StatusBadRequest, "expires_at must be RFC3339")
-			return
-		}
-		expiresAt = t
-	}
-	tok, err := h.Store.IssueToken(r.Context(), exam.SchoolID, exam.AcademicYearID, examID, req.UserID, classroomID, c.UserID, expiresAt)
+	schoolID := common.EffectiveSchoolID(r, c)
+	tok, err := h.Store.IssueToken(r.Context(), schoolID, r.URL.Query().Get("academic_year_id"), userID, c.UserID, from, until)
 	if err != nil {
 		writeStoreErr(w, err)
 		return
@@ -61,46 +63,37 @@ func (h *Handler) IssueToken(w http.ResponseWriter, r *http.Request) {
 }
 
 type bulkIssueTokenReq struct {
-	ClassroomID string   `json:"classroom_id"`
-	StudentIDs  []string `json:"student_ids"` // simplification: caller (admin-web) sources these from academic-service's roster; see README Assumptions
-	ExpiresAt   string   `json:"expires_at"`
+	StudentIDs []string `json:"student_ids"`
+	ValidFrom  string   `json:"valid_from"`
+	ValidUntil string   `json:"valid_until"`
 }
 
+// BulkIssueTokens: POST /vouchers/bulk — issues the same date-range voucher
+// for a list of students at once (e.g. a whole classroom picked in Data
+// Siswa).
 func (h *Handler) BulkIssueTokens(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin", "guru") {
-		return
-	}
-	examID := chi.URLParam(r, "id")
-	exam, err := h.Store.GetExam(r.Context(), examID, common.EffectiveSchoolID(r, c))
-	if err != nil {
-		writeStoreErr(w, err)
-		return
-	}
-	if exam == nil {
-		common.WriteError(w, http.StatusNotFound, "exam not found")
+	if !requireRole(w, c, "admin", "superadmin") {
 		return
 	}
 	var req bulkIssueTokenReq
 	if !common.DecodeJSON(w, r, &req) {
 		return
 	}
-	if req.ClassroomID == "" || len(req.StudentIDs) == 0 {
-		common.WriteError(w, http.StatusBadRequest, "classroom_id and a non-empty student_ids are required")
+	if len(req.StudentIDs) == 0 {
+		common.WriteError(w, http.StatusBadRequest, "student_ids must be non-empty")
 		return
 	}
-	expiresAt := exam.EndAt
-	if req.ExpiresAt != "" {
-		t, err := time.Parse(time.RFC3339, req.ExpiresAt)
-		if err != nil {
-			common.WriteError(w, http.StatusBadRequest, "expires_at must be RFC3339")
-			return
-		}
-		expiresAt = t
+	from, until, msg, ok := parseVoucherDates(issueTokenReq{ValidFrom: req.ValidFrom, ValidUntil: req.ValidUntil})
+	if !ok {
+		common.WriteError(w, http.StatusBadRequest, msg)
+		return
 	}
+	schoolID := common.EffectiveSchoolID(r, c)
+	academicYearID := r.URL.Query().Get("academic_year_id")
 	var issued []interface{}
 	for _, sid := range req.StudentIDs {
-		tok, err := h.Store.IssueToken(r.Context(), exam.SchoolID, exam.AcademicYearID, examID, sid, req.ClassroomID, c.UserID, expiresAt)
+		tok, err := h.Store.IssueToken(r.Context(), schoolID, academicYearID, sid, c.UserID, from, until)
 		if err != nil {
 			writeStoreErr(w, err)
 			return
@@ -110,13 +103,14 @@ func (h *Handler) BulkIssueTokens(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusCreated, issued, nil)
 }
 
+// ListTokens: GET /vouchers — every student voucher issued in the school
+// (Data Siswa's voucher column reads this).
 func (h *Handler) ListTokens(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin", "guru") {
+	if !requireRole(w, c, "admin", "superadmin") {
 		return
 	}
-	examID := chi.URLParam(r, "id")
-	list, err := h.Store.ListTokens(r.Context(), examID, common.EffectiveSchoolID(r, c))
+	list, err := h.Store.ListTokens(r.Context(), common.EffectiveSchoolID(r, c))
 	if err != nil {
 		writeStoreErr(w, err)
 		return
@@ -125,9 +119,12 @@ func (h *Handler) ListTokens(w http.ResponseWriter, r *http.Request) {
 }
 
 type regenTokenReq struct {
-	ExpiresAt string `json:"expires_at"`
+	ValidFrom  string `json:"valid_from"`
+	ValidUntil string `json:"valid_until"`
 }
 
+// RegenerateToken: POST /vouchers/{tokenId}/regenerate — new code, optional
+// new date range (omit both to just rotate the code).
 func (h *Handler) RegenerateToken(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
 	if !requireRole(w, c, "admin", "superadmin") {
@@ -136,19 +133,20 @@ func (h *Handler) RegenerateToken(w http.ResponseWriter, r *http.Request) {
 	tokenID := chi.URLParam(r, "tokenId")
 	var req regenTokenReq
 	if r.ContentLength > 0 {
-		defer r.Body.Close()
-		_ = json.NewDecoder(r.Body).Decode(&req) // body optional; malformed/empty body just means "no new expiry"
-	}
-	var expiresAt *time.Time
-	if req.ExpiresAt != "" {
-		t, err := time.Parse(time.RFC3339, req.ExpiresAt)
-		if err != nil {
-			common.WriteError(w, http.StatusBadRequest, "expires_at must be RFC3339")
+		if !common.DecodeJSON(w, r, &req) {
 			return
 		}
-		expiresAt = &t
 	}
-	tok, err := h.Store.RegenerateToken(r.Context(), tokenID, common.EffectiveSchoolID(r, c), expiresAt)
+	var from, until *time.Time
+	if req.ValidFrom != "" && req.ValidUntil != "" {
+		f, u, msg, ok := parseVoucherDates(issueTokenReq{ValidFrom: req.ValidFrom, ValidUntil: req.ValidUntil})
+		if !ok {
+			common.WriteError(w, http.StatusBadRequest, msg)
+			return
+		}
+		from, until = &f, &u
+	}
+	tok, err := h.Store.RegenerateToken(r.Context(), tokenID, common.EffectiveSchoolID(r, c), from, until)
 	if err != nil {
 		writeStoreErr(w, err)
 		return

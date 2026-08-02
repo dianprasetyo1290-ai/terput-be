@@ -11,6 +11,46 @@ import (
 	"skci/academic/internal/model"
 )
 
+// isAgamaSubject reuses classroom_subject.go's normalizeGroup (same package)
+// — the one place that already knows real Data Mata Pelajaran subject_group
+// values are per-religion strings ("Agama Islam", "Agama Kristen", ...)
+// rather than one shared "Agama" value.
+func isAgamaSubject(subjectGroup *string) bool {
+	group := normalizeGroup(subjectGroup)
+	return group != nil && *group == "agama"
+}
+
+// checkScheduleSlotConflict enforces "a jam pelajaran slot may hold more
+// than one subject ONLY when every subject in it is an Agama variant" —
+// per spec, one classroom's students split by religion into parallel Agama
+// sessions at the same hour, but a school must still not be able to
+// double-book e.g. Matematika into an already-occupied slot. excludeID is
+// the schedule row being edited (UpdateSchedule), so it doesn't conflict
+// with itself; pass "" from CreateSchedule (new row, nothing to exclude).
+func (h *Handler) checkScheduleSlotConflict(r *http.Request, schoolID, periodID string, newCS *model.ClassroomSubject, excludeID string) (string, error) {
+	existing, err := h.Store.ListSchedulesByPeriod(r.Context(), schoolID, periodID)
+	if err != nil {
+		return "", err
+	}
+	newIsAgama := isAgamaSubject(newCS.SubjectGroup)
+	for _, e := range existing {
+		if e.ID == excludeID || e.ClassroomSubjectID == newCS.ID {
+			continue // itself, or an idempotent re-post of the same subject
+		}
+		if !newIsAgama {
+			return "jam pelajaran ini sudah terisi mata pelajaran lain di hari dan jam yang sama", nil
+		}
+		occupant, err := h.Store.GetClassroomSubject(r.Context(), schoolID, e.ClassroomSubjectID)
+		if err != nil {
+			return "", err
+		}
+		if occupant == nil || !isAgamaSubject(occupant.SubjectGroup) {
+			return "jam pelajaran ini sudah terisi mata pelajaran non-Agama; hanya varian Agama yang boleh digabung pada jam yang sama", nil
+		}
+	}
+	return "", nil
+}
+
 func parseDayParam(r *http.Request) *int {
 	v := r.URL.Query().Get("day")
 	if v == "" {
@@ -174,6 +214,13 @@ func (h *Handler) CreateSchedule(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "classroom_subject_id is not a subject assigned to this classroom (Data Kelas); assign it there first")
 		return
 	}
+	if msg, err := h.checkScheduleSlotConflict(r, schoolID, req.SchedulePeriodID, cs, ""); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if msg != "" {
+		common.WriteError(w, http.StatusConflict, msg)
+		return
+	}
 	sc, err := h.Store.CreateSchedule(r.Context(), model.Schedule{
 		SchoolID:           schoolID,
 		AcademicYearID:     classroom.AcademicYearID,
@@ -234,6 +281,13 @@ func (h *Handler) UpdateSchedule(w http.ResponseWriter, r *http.Request) {
 		}
 		if cs == nil || cs.ClassroomID != existing.ClassroomID {
 			common.WriteError(w, http.StatusBadRequest, "classroom_subject_id is not a subject assigned to this classroom")
+			return
+		}
+		if msg, err := h.checkScheduleSlotConflict(r, schoolID, existing.SchedulePeriodID, cs, existing.ID); err != nil {
+			common.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		} else if msg != "" {
+			common.WriteError(w, http.StatusConflict, msg)
 			return
 		}
 	}

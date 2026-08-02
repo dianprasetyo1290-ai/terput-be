@@ -22,71 +22,55 @@ func GenerateCode(n int) string {
 	return sb.String()
 }
 
-// IssueToken creates (or returns the existing) voucher for a student for this
-// exam, and ensures a corresponding exam_attempts row exists in
-// belum_mulai so the live monitor roster can list the student before they
-// ever open the exam.
-func (s *Store) IssueToken(ctx context.Context, schoolID, academicYearID, examID, userID, classroomID, createdBy string, expiresAt time.Time) (*model.ExamToken, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
+// IssueToken creates (or reissues, keeping the same code) a student's
+// voucher — one per student, valid across any exam within [validFrom,
+// validUntil]. No longer creates an exam_attempts row: that's created
+// lazily in EnterExam once the student actually enters a specific exam.
+func (s *Store) IssueToken(ctx context.Context, schoolID, academicYearID, userID, createdBy string, validFrom, validUntil time.Time) (*model.ExamToken, error) {
+	var ayID *string
+	if academicYearID != "" {
+		ayID = &academicYearID
 	}
-	defer tx.Rollback()
-
 	t := &model.ExamToken{
 		SchoolID:       schoolID,
-		AcademicYearID: academicYearID,
-		ExamID:         examID,
+		AcademicYearID: ayID,
 		UserID:         userID,
-		ClassroomID:    classroomID,
 		Code:           GenerateCode(8),
-		ExpiresAt:      expiresAt,
+		ValidFrom:      validFrom,
+		ValidUntil:     validUntil,
 		CreatedBy:      createdBy,
 	}
-	err = tx.QueryRowContext(ctx, `
-		INSERT INTO exam_tokens (school_id, academic_year_id, exam_id, user_id, classroom_id, code, expires_at, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-		ON CONFLICT (exam_id, user_id) DO UPDATE SET expires_at=EXCLUDED.expires_at, classroom_id=EXCLUDED.classroom_id, updated_at=now()
+	err := s.DB.QueryRowContext(ctx, `
+		INSERT INTO exam_tokens (school_id, academic_year_id, user_id, code, valid_from, valid_until, created_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		ON CONFLICT (school_id, user_id) DO UPDATE SET valid_from=EXCLUDED.valid_from, valid_until=EXCLUDED.valid_until, updated_at=now()
 		RETURNING id, code, regenerated_count, created_at, updated_at`,
-		t.SchoolID, t.AcademicYearID, t.ExamID, t.UserID, t.ClassroomID, t.Code, t.ExpiresAt, t.CreatedBy,
+		t.SchoolID, t.AcademicYearID, t.UserID, t.Code, t.ValidFrom, t.ValidUntil, t.CreatedBy,
 	).Scan(&t.ID, &t.Code, &t.RegeneratedCount, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
-		return nil, err
-	}
-
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO exam_attempts (school_id, academic_year_id, exam_id, user_id, classroom_id, token_id, status)
-		VALUES ($1,$2,$3,$4,$5,$6,'belum_mulai')
-		ON CONFLICT (exam_id, user_id) DO UPDATE SET token_id=EXCLUDED.token_id, classroom_id=EXCLUDED.classroom_id`,
-		schoolID, academicYearID, examID, userID, classroomID, t.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return t, nil
 }
 
-func (s *Store) RegenerateToken(ctx context.Context, id, schoolID string, expiresAt *time.Time) (*model.ExamToken, error) {
+func (s *Store) RegenerateToken(ctx context.Context, id, schoolID string, validFrom, validUntil *time.Time) (*model.ExamToken, error) {
 	newCode := GenerateCode(8)
 	var t model.ExamToken
 	var err error
-	if expiresAt != nil {
+	if validFrom != nil && validUntil != nil {
 		err = s.DB.QueryRowContext(ctx, `
-			UPDATE exam_tokens SET code=$1, expires_at=$2, regenerated_count=regenerated_count+1, updated_at=now()
-			WHERE id=$3 AND school_id=$4
-			RETURNING id, school_id, academic_year_id, exam_id, user_id, classroom_id, code, expires_at, regenerated_count, created_by, created_at, updated_at`,
-			newCode, *expiresAt, id, schoolID,
-		).Scan(&t.ID, &t.SchoolID, &t.AcademicYearID, &t.ExamID, &t.UserID, &t.ClassroomID, &t.Code, &t.ExpiresAt, &t.RegeneratedCount, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt)
+			UPDATE exam_tokens SET code=$1, valid_from=$2, valid_until=$3, regenerated_count=regenerated_count+1, updated_at=now()
+			WHERE id=$4 AND school_id=$5
+			RETURNING id, school_id, academic_year_id, user_id, code, valid_from, valid_until, regenerated_count, created_by, created_at, updated_at`,
+			newCode, *validFrom, *validUntil, id, schoolID,
+		).Scan(&t.ID, &t.SchoolID, &t.AcademicYearID, &t.UserID, &t.Code, &t.ValidFrom, &t.ValidUntil, &t.RegeneratedCount, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt)
 	} else {
 		err = s.DB.QueryRowContext(ctx, `
 			UPDATE exam_tokens SET code=$1, regenerated_count=regenerated_count+1, updated_at=now()
 			WHERE id=$2 AND school_id=$3
-			RETURNING id, school_id, academic_year_id, exam_id, user_id, classroom_id, code, expires_at, regenerated_count, created_by, created_at, updated_at`,
+			RETURNING id, school_id, academic_year_id, user_id, code, valid_from, valid_until, regenerated_count, created_by, created_at, updated_at`,
 			newCode, id, schoolID,
-		).Scan(&t.ID, &t.SchoolID, &t.AcademicYearID, &t.ExamID, &t.UserID, &t.ClassroomID, &t.Code, &t.ExpiresAt, &t.RegeneratedCount, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt)
+		).Scan(&t.ID, &t.SchoolID, &t.AcademicYearID, &t.UserID, &t.Code, &t.ValidFrom, &t.ValidUntil, &t.RegeneratedCount, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt)
 	}
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -97,10 +81,12 @@ func (s *Store) RegenerateToken(ctx context.Context, id, schoolID string, expire
 	return &t, nil
 }
 
-func (s *Store) ListTokens(ctx context.Context, examID, schoolID string) ([]model.ExamToken, error) {
+// ListTokens returns every student voucher issued for the school (Data
+// Siswa's voucher column reads this).
+func (s *Store) ListTokens(ctx context.Context, schoolID string) ([]model.ExamToken, error) {
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT id, school_id, academic_year_id, exam_id, user_id, classroom_id, code, expires_at, regenerated_count, created_by, created_at, updated_at
-		FROM exam_tokens WHERE exam_id=$1 AND school_id=$2 ORDER BY created_at`, examID, schoolID)
+		SELECT id, school_id, academic_year_id, user_id, code, valid_from, valid_until, regenerated_count, created_by, created_at, updated_at
+		FROM exam_tokens WHERE school_id=$1 ORDER BY created_at`, schoolID)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +94,7 @@ func (s *Store) ListTokens(ctx context.Context, examID, schoolID string) ([]mode
 	var out []model.ExamToken
 	for rows.Next() {
 		var t model.ExamToken
-		if err := rows.Scan(&t.ID, &t.SchoolID, &t.AcademicYearID, &t.ExamID, &t.UserID, &t.ClassroomID, &t.Code, &t.ExpiresAt, &t.RegeneratedCount, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.SchoolID, &t.AcademicYearID, &t.UserID, &t.Code, &t.ValidFrom, &t.ValidUntil, &t.RegeneratedCount, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -116,12 +102,12 @@ func (s *Store) ListTokens(ctx context.Context, examID, schoolID string) ([]mode
 	return out, rows.Err()
 }
 
-func (s *Store) FindTokenByCode(ctx context.Context, examID, code string) (*model.ExamToken, error) {
+func (s *Store) GetTokenForUser(ctx context.Context, schoolID, userID string) (*model.ExamToken, error) {
 	var t model.ExamToken
 	err := s.DB.QueryRowContext(ctx, `
-		SELECT id, school_id, academic_year_id, exam_id, user_id, classroom_id, code, expires_at, regenerated_count, created_by, created_at, updated_at
-		FROM exam_tokens WHERE exam_id=$1 AND code=$2`, examID, code,
-	).Scan(&t.ID, &t.SchoolID, &t.AcademicYearID, &t.ExamID, &t.UserID, &t.ClassroomID, &t.Code, &t.ExpiresAt, &t.RegeneratedCount, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt)
+		SELECT id, school_id, academic_year_id, user_id, code, valid_from, valid_until, regenerated_count, created_by, created_at, updated_at
+		FROM exam_tokens WHERE school_id=$1 AND user_id=$2`, schoolID, userID,
+	).Scan(&t.ID, &t.SchoolID, &t.AcademicYearID, &t.UserID, &t.Code, &t.ValidFrom, &t.ValidUntil, &t.RegeneratedCount, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

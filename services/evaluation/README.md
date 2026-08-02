@@ -70,6 +70,32 @@ via `internal/store/default_forms.go` / `FormStore.BootstrapDefaults` — this
 runs automatically (idempotent) the first time `GET /forms` or any period
 create/update is called for a school.
 
+### Upward-feedback track (guru rates a leader)
+
+A separate, unblended track: guru rate the Kepala Sekolah / Waka Kurikulum /
+Waka Kesiswaan (the opposite direction of the 6 categories above). Three
+more forms (`G`/`H`/`I`, `evaluator_type` `guru_to_kepsek` /
+`guru_to_waka_kurikulum` / `guru_to_waka_kesiswaan`), Weight `0` since they
+are explicitly **not** part of the 100% teacher score — there's no room in
+that split and it's the reverse rating direction (teacher rating their
+supervisor, not the supervisor's report card). Generic leader-evaluation
+criteria (clarity of direction/communication, support for teacher
+development, responsiveness, fairness, administrative effectiveness,
+leadership integrity), same 6-item/1–4 rubric shape as the other forms —
+see `store.upwardItems`.
+
+Reuses all the same infrastructure: `regenerateTasks` (period.go) creates one
+task per in-scope guru per assigned leader role, target/evaluator swapped
+relative to the `kepala_sekolah`/`waka_*` types (target = the leader,
+evaluator = the guru). Submission goes through the same
+`POST /periods/{id}/evaluations`. `computeResults`/`GET /results` and
+`GET /guru/{id}/report` explicitly skip these 3 forms (see
+`model.IsUpwardEvalType`) so they never leak into a guru's weighted score.
+Their own simple report lives at `GET /periods/{id}/leadership-results` — one
+row per assigned leader role with `submitted_count`/`expected_count` (=
+number of in-scope guru) and a plain average `avg_score`, no per-item
+weighting story needed since there's only one "category" per leader.
+
 **Scoring math**: a task (one evaluator's submission for one guru under one
 form) gets `raw_score` = weighted average of that evaluator's item scores,
 using each item's own weight, renormalized by the sum of weights of items
@@ -95,11 +121,12 @@ All routes except `/healthz` require `Authorization: Bearer <JWT>`.
 - `POST /periods`, `GET /periods`, `GET/PUT/DELETE /periods/{id}` — period CRUD. `POST`/`PUT` regenerate the eagerly-known tasks (see below).
 - `GET /periods/{id}/confirm-delete` — returns `{message: "apakah anda yakin ingin menghapus <title>"}` for the frontend's confirm dialog; the actual delete is a separate `DELETE`.
 - `POST /periods/{id}/publish` / `POST /periods/{id}/unpublish` — toggles the `published` flag.
-- `GET /periods/{id}/available-peer-evaluators` — guru list for field K(b), server-side filtered to exclude anyone already in K(a) (`peer_evaluatee_ids`).
+- `GET /periods/{id}/available-peer-evaluators` — guru list for field K(b) (full school guru pool; overlap with K(a) is allowed, see Assumptions #2).
 - `POST /periods/{id}/evaluations` — submit one evaluator's scores; body `{evaluator_type, target_teacher_id, classroom_id?, answers:[{item_id,score}]}`. Server validates the caller is actually authorized for that `evaluator_type` → `target_teacher_id` pairing under the period's config.
 - `GET /periods/{id}/my-tasks` — caller's own assignment list (bonus convenience endpoint, not in spec but useful for a "to-do" UI).
 - `GET /periods/{id}/results?guru_id=` — per-category progress + weighted final score.
 - `GET /periods/{id}/guru/{guru_id}/report` — printable report payload.
+- `GET /periods/{id}/leadership-results` — upward-feedback track: per-leader (kepsek/waka_kurikulum/waka_kesiswaan) aggregate of all guru ratings for that role, see "Upward-feedback track" above. Not blended into any guru's score.
 
 ## curl examples
 
@@ -169,13 +196,13 @@ curl "http://localhost:8085/periods/<period-id>/results?guru_id=<guru1-uuid>" -H
 - Full happy path with minted JWTs for 7 personas (admin, 2 guru, kepsek, waka-kurikulum, waka-kesiswaan, siswa):
   1. `POST /periods` → created in `Draft` (verified `published:false`, computed `status:"Draft"` even though today was inside the publish window — confirms the flag, not just dates, gates Draft vs Published).
   2. `POST /periods/{id}/publish` → status flipped to `Sedang Berlangsung`.
-  3. `GET /periods/{id}/available-peer-evaluators` → correctly returned an empty list because the only in-scope guru was already in `peer_evaluatee_ids` (also exercised the identity-service-unreachable fallback path, `source` field reported it).
+  3. `GET /periods/{id}/available-peer-evaluators` → returned the full guru pool regardless of `peer_evaluatee_ids` overlap (also exercised the identity-service-unreachable fallback path, `source` field reported it).
   4. `GET /forms` → bootstrapped all 6 forms + 47 items on first call, weights matched the spreadsheet (A totals 19% due to a rounding artifact in the source sheet itself — see Assumptions).
   5. Submitted all 6 evaluator-category evaluations (self=4, peer=3, kepala_sekolah=4, waka_kurikulum=3, waka_kesiswaan=4, siswa=3) via `POST /periods/{id}/evaluations`.
   6. `GET /periods/{id}/results?guru_id=` → `final_score: 3.55` = `0.25*4 + 0.22*3 + 0.20*4 + 0.18*3 + 0.10*4 + 0.05*3`, hand-verified correct; `promotif_label: "Promotif"`.
   7. `GET /periods/{id}/guru/{guru_id}/report` → same score rekap plus title/guru/school placeholder fields (identity/academic unreachable in this standalone test, so name/NUPTK/kelas fell back to documented placeholders).
   8. Re-submitted self-assessment with different scores (2 instead of 4) → confirmed idempotent overwrite (`raw_score` updated in place, not duplicated) and `final_score` dropped by exactly `0.25*(4-2)=0.5` to `3.05`, still `Promotif`.
-  9. Business-rule rejection: creating a period with the same guru in both `peer_evaluatee_ids` and `peer_evaluator_ids` → `400` with a clear message.
+  9. Reciprocal full-mesh peer evaluation: creating a period with the same 2 guru in both `peer_evaluatee_ids` and `peer_evaluator_ids` (the "Pilih Semua Guru" on both sides scenario) → each guru gets a peer task rating the OTHER (2 tasks total, no self-pairs) -- confirms overlap between K(a)/K(b) is allowed and produces the expected teman-sejawat mesh, not a 400.
   10. Authorization rejection: guru2 attempting to submit `evaluator_type:"self"` for guru1 → `403`.
   11. `GET /periods/{id}/confirm-delete` → returned `{"message":"apakah anda yakin ingin menghapus <title>"}`.
   12. A second period with `publish_end_date` in the past → after publish, status correctly computed as `Selesai`; `DELETE /periods/{id}` removed it (soft delete), subsequent `GET` → `404`.
@@ -197,7 +224,7 @@ couldn't block on clarification):
    - `GET /internal/users/{id}`, `GET /internal/users?role=guru&school_id=`, `GET /internal/users?jabatan=<jabatan>&school_id=` (identity)
    - `GET /internal/classrooms/{id}/students`, `GET /internal/academic-years?school_id=`, `GET /internal/teaching-assignments?guru_id=` (academic)
    These need reconciling once identity/academic ship their real routes.
-2. **"J" (target guru) vs "K(a)/K(b)" (peer cross-assign) are independent lists**, not required to be subsets of each other, per the spec's literal wording. The cross-filter rule (`available-peer-evaluators` excludes K(a) from K(b)'s pool) is enforced both server-side on that read endpoint AND validated at period create/update time (rejects overlapping IDs outright, stricter than "just filter the dropdown" but prevents bad data entering the DB).
+2. **"J" (target guru) vs "K(a)/K(b)" (peer cross-assign) are independent lists, and K(a)/K(b) MAY overlap** (client clarification, supersedes an earlier reading of this doc that treated them as mutually exclusive). Overlap is the whole point of "Pilih Semua Guru" on both fields: with the same N guru in both K(a) and K(b), every guru ends up rating, and being rated by, every OTHER guru in the set -- a full N×(N-1) teman-sejawat mesh (self-pairs skipped, see #3 below). `available-peer-evaluators` returns the unfiltered guru pool and period create/update no longer rejects overlapping IDs.
 3. **Peer assignment is a full cross-product**: every guru in `peer_evaluator_ids` gets a peer-evaluation task against every guru in `peer_evaluatee_ids` (self-pairs skipped). The old Laravel schema stored this as an opaque `peer_assignments` JSON blob with no documented shape, so this is the simplest faithful interpretation of "select-all checkboxes on both sides."
 4. **Task generation is eager for 5 of the 6 categories** (kepala_sekolah, waka_kurikulum, waka_kesiswaan, self, peer) — computable entirely from IDs already in the period config, regenerated (idempotently, via `ON CONFLICT DO NOTHING`-style upsert) on every `POST`/`PUT /periods`. **Siswa tasks are lazy** — created on first `POST .../evaluations` from a student — because the actual student roster belongs to academic-service and periodically re-fetching + eagerly materializing a task per student on every period edit felt like unnecessary coupling/cost for a local-dev service. The tradeoff: `expected_count` for the siswa category in `/results` is `null` with an explanatory note whenever academic-service's roster endpoint is unreachable (rather than a guessed number), and `is_complete` conservatively becomes `false` in that case.
 5. **Evaluator-type is client-supplied, not purely inferred**, in `POST /periods/{id}/evaluations` (`evaluator_type` field in the body). The frontend already knows which form/tab a user is filling (e.g. a "Self-Assessment" screen vs a "Peer" screen), so this avoids a genuinely ambiguous inference problem (e.g. a Kepala Sekolah who is also in `target_teacher_ids` could plausibly submit either a `self` or `kepala_sekolah` task for themselves — the intent has to come from the UI). The server still fully re-validates the caller is authorized for the claimed `evaluator_type` → `target_teacher_id` pair against the period's stored config (see `authorizeEvaluation` in `internal/handler/evaluation.go`) — the client can't just claim any type.

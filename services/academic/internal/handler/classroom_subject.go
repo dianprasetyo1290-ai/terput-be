@@ -341,6 +341,36 @@ func (h *Handler) GetStudentActiveSubjects(w http.ResponseWriter, r *http.Reques
 	common.WriteJSON(w, http.StatusOK, items, nil)
 }
 
+// GetStudentClassroom: GET /students/{id}/classroom?academic_year_id= —
+// resolves the one classroom a student is actively enrolled in. Consumed by
+// exam-service's siswa dashboard (item 20) to scope "Ujian Hari Ini /
+// Mendatang / Histori" to exams assigned to the student's own class, and by
+// its live-monitor (item 10). A student can have an active enrollment row
+// in more than one academic year (e.g. seeded/created ahead of a promotion),
+// so when the caller omits academic_year_id we must resolve the school's
+// CURRENT year via identity-service (scopeAcademicYearID) rather than
+// picking "most recently created" — that picked whichever enrollment was
+// inserted last in wall-clock time, not the one for the running year, and
+// silently returned the wrong classroom (found live: a student's exam went
+// missing from their dashboard because a later admin action had created a
+// next-year enrollment row after the exam's own classroom enrollment).
+func (h *Handler) GetStudentClassroom(w http.ResponseWriter, r *http.Request) {
+	schoolID, ok := scopeSchoolID(w, r)
+	if !ok {
+		return
+	}
+	academicYearID, ok := h.scopeAcademicYearID(w, r, schoolID)
+	if !ok {
+		return
+	}
+	classroomID, err := h.Store.StudentClassroomID(r.Context(), schoolID, chi.URLParam(r, "id"), academicYearID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]string{"classroom_id": classroomID}, nil)
+}
+
 // GetTeachingAssignments: GET /internal/teaching-assignments?guru_id=
 // evaluation-service calls this to populate "Kelas yang Diampu"/"Mata
 // Pelajaran" on the printed Rapor Kinerja Guru. Previously unimplemented —

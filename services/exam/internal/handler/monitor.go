@@ -10,19 +10,30 @@ import (
 )
 
 type rosterRow struct {
-	No             int      `json:"no"`
-	AttemptID      string   `json:"attempt_id"`
-	UserID         string   `json:"user_id"`
-	NamaSiswa      string   `json:"nama_siswa"`
-	WaktuSelesai   *string  `json:"waktu_selesai"`
-	JawabanBenar   string   `json:"jawaban_benar"` // e.g. "15/20"
-	Nilai          *float64 `json:"nilai"`
-	Status         string   `json:"status"`
+	No           int      `json:"no"`
+	AttemptID    string   `json:"attempt_id"`
+	UserID       string   `json:"user_id"`
+	NamaSiswa    string   `json:"nama_siswa"`
+	WaktuSelesai *string  `json:"waktu_selesai"`
+	JawabanBenar string   `json:"jawaban_benar"` // e.g. "15/20"
+	Nilai        *float64 `json:"nilai"`
+	Status       string   `json:"status"`
 }
 
-// Monitor: live per-classroom roster for a published exam. classroom_id
-// defaults to the exam's own classroom if omitted (the "first classroom
-// shown by default" rule).
+// Monitor: live per-classroom roster for a published exam.
+//
+// Item 10 fix: an exam only ever has ONE classroom_id (exam_attempts.
+// classroom_id is always denormalized from the exam itself at EnterExam
+// time — see store/attempts.go), so a classroom filter that lets the caller
+// switch to an unrelated class was always going to show an empty roster
+// for anything but the exam's own class. classroomID is now pinned to
+// exam.ClassroomID regardless of any ?classroom_id= passed, and the roster
+// is the FULL class roster (fetched from academic-service), left-joined
+// with exam_attempts — a student who was issued a voucher but has never
+// opened the exam yet still shows up as "belum_mulai" instead of being
+// invisible (the old query only ever returned rows that already existed in
+// exam_attempts, which — since a voucher no longer pre-creates that row —
+// meant "never entered" students never appeared at all).
 func (h *Handler) Monitor(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
 	if !requireRole(w, c, "admin", "superadmin", "guru") {
@@ -42,10 +53,7 @@ func (h *Handler) Monitor(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusForbidden, "you may only monitor your own exams")
 		return
 	}
-	classroomID := r.URL.Query().Get("classroom_id")
-	if classroomID == "" {
-		classroomID = exam.ClassroomID
-	}
+	classroomID := exam.ClassroomID
 
 	attempts, err := h.Store.ListAttemptsByClassroom(r.Context(), examID, classroomID)
 	if err != nil {
@@ -59,32 +67,70 @@ func (h *Handler) Monitor(w http.ResponseWriter, r *http.Request) {
 	}
 	questionCount := len(examQuestions)
 
-	rows := make([]rosterRow, 0, len(attempts))
-	for i, a := range attempts {
-		row := rosterRow{
-			No:        i + 1,
-			AttemptID: a.ID,
-			UserID:    a.UserID,
-			NamaSiswa: h.Internal.UserName(a.UserID), // best-effort; "" if identity-service unreachable, see README
-			Status:    a.Status,
-		}
-		if a.SubmittedAt != nil {
-			s := a.SubmittedAt.Format("2006-01-02T15:04:05Z07:00")
-			row.WaktuSelesai = &s
-		}
-		if a.CorrectCount != nil {
-			row.JawabanBenar = itoaSimple(*a.CorrectCount) + "/" + itoaSimple(questionCount)
-		} else {
-			row.JawabanBenar = "-/" + itoaSimple(questionCount)
-		}
-		row.Nilai = a.Score
-		rows = append(rows, row)
+	attemptByUser := make(map[string]model.ExamAttempt, len(attempts))
+	for _, a := range attempts {
+		attemptByUser[a.UserID] = a
 	}
 
-	counts, err := h.Store.MonitorCounts(r.Context(), examID, classroomID)
-	if err != nil {
-		writeStoreErr(w, err)
-		return
+	// Best-effort full roster; if academic-service is unreachable, fall back
+	// to only the students who already have an attempt (old behavior)
+	// rather than showing an empty roster.
+	roster := h.Internal.ClassroomStudents(classroomID)
+	seen := make(map[string]bool, len(roster))
+	rows := make([]rosterRow, 0, len(roster)+len(attempts))
+	counts := &monitorCounters{}
+
+	addRow := func(userID string) {
+		if seen[userID] {
+			return
+		}
+		seen[userID] = true
+		a, hasAttempt := attemptByUser[userID]
+
+		// Item 13 / Filter Constraint: If the student doesn't have an attempt yet,
+		// only show them in the monitor list if they are actually enrolled in this
+		// specific subject. This perfectly handles Agama exams (e.g. Agama Kristen
+		// only shows Christian students) because ActiveSubjectIDs already resolves
+		// religion exclusivity. We fail-open (include them) if academic-service
+		// is unreachable (nil). Students who ALREADY have an attempt are never hidden.
+		if !hasAttempt {
+			activeSubjects := h.Internal.ActiveSubjectIDs(exam.SchoolID, userID, exam.AcademicYearID)
+			if activeSubjects != nil && !activeSubjects[exam.SubjectID] {
+				return
+			}
+		}
+
+		row := rosterRow{
+			No:           len(rows) + 1,
+			UserID:       userID,
+			NamaSiswa:    h.Internal.UserName(userID), // best-effort; "" if identity-service unreachable, see README
+			Status:       model.StatusBelumMulai,
+			JawabanBenar: "-/" + itoaSimple(questionCount),
+		}
+		if hasAttempt {
+			row.AttemptID = a.ID
+			row.Status = a.Status
+			if a.SubmittedAt != nil {
+				s := a.SubmittedAt.Format("2006-01-02T15:04:05Z07:00")
+				row.WaktuSelesai = &s
+			}
+			if a.CorrectCount != nil {
+				row.JawabanBenar = itoaSimple(*a.CorrectCount) + "/" + itoaSimple(questionCount)
+			}
+			row.Nilai = a.Score
+		}
+		rows = append(rows, row)
+		countStatus(counts, row.Status)
+	}
+
+	for _, s := range roster {
+		addRow(s.StudentUserID)
+	}
+	// Any attempt whose student wasn't in the academic roster (roster call
+	// failed, or the student was later removed from the class) still shows
+	// up — we never want to silently drop a real in-progress attempt.
+	for _, a := range attempts {
+		addRow(a.UserID)
 	}
 
 	common.WriteJSON(w, http.StatusOK, map[string]interface{}{
@@ -92,6 +138,28 @@ func (h *Handler) Monitor(w http.ResponseWriter, r *http.Request) {
 		"roster":       rows,
 		"counters":     counts,
 	}, nil)
+}
+
+type monitorCounters struct {
+	BelumMengerjakan int `json:"belum_mengerjakan"`
+	SedangUjian      int `json:"sedang_ujian"`
+	Selesai          int `json:"selesai"`
+	DilarangUjian    int `json:"dilarang_ujian"`
+	Total            int `json:"total"`
+}
+
+func countStatus(c *monitorCounters, status string) {
+	switch status {
+	case model.StatusBelumMulai:
+		c.BelumMengerjakan++
+	case model.StatusAktif, model.StatusBlokir:
+		c.SedangUjian++
+	case model.StatusSelesai:
+		c.Selesai++
+	case model.StatusDilarang:
+		c.DilarangUjian++
+	}
+	c.Total++
 }
 
 func itoaSimple(n int) string {
@@ -160,13 +228,13 @@ func (h *Handler) AttemptDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type detailRow struct {
-		No             int                       `json:"no"`
-		ExamQuestionID string                    `json:"exam_question_id"`
-		QuestionType   string                     `json:"question_type"`
-		Content        string                     `json:"content"`
-		Points         float64                    `json:"points"`
-		Answer         *model.ExamAttemptAnswer   `json:"answer"`
-		CanOverride    bool                       `json:"can_override"` // essay only, per spec
+		No             int                      `json:"no"`
+		ExamQuestionID string                   `json:"exam_question_id"`
+		QuestionType   string                   `json:"question_type"`
+		Content        string                   `json:"content"`
+		Points         float64                  `json:"points"`
+		Answer         *model.ExamAttemptAnswer `json:"answer"`
+		CanOverride    bool                     `json:"can_override"` // essay only, per spec
 	}
 	var rows []detailRow
 	for i, eq := range examQuestions {
@@ -214,6 +282,50 @@ func (h *Handler) LarangUjian(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Store.LarangUjian(r.Context(), attemptID, c.UserID, req.Alasan); err != nil {
+		writeTransitionErr(w, err)
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]string{
+		"attempt_id": attemptID,
+		"message":    "Anda akan melarang siswa dari ujian ini. Siswa tidak akan bisa mengikuti ujian sampai larangan dibuka.",
+		"exam_id":    exam.ID,
+	}, nil)
+}
+
+// LarangUjianByUser: same action as LarangUjian, but for a student who has
+// never entered the exam yet (no attempt_id exists for the monitor row to
+// key on) — the client's primary scenario for this feature. Route is keyed
+// by userId instead of attemptId for exactly that reason.
+func (h *Handler) LarangUjianByUser(w http.ResponseWriter, r *http.Request) {
+	c := common.FromCtx(r)
+	if !requireRole(w, c, "admin", "superadmin") {
+		return
+	}
+	examID := chi.URLParam(r, "id")
+	userID := chi.URLParam(r, "userId")
+	exam, err := h.Store.GetExam(r.Context(), examID, common.EffectiveSchoolID(r, c))
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	if exam == nil {
+		common.WriteError(w, http.StatusNotFound, "exam not found")
+		return
+	}
+	if c.ActiveRole == "guru" && exam.TeacherID != c.UserID {
+		common.WriteError(w, http.StatusForbidden, "you may only act on your own exam's attempts")
+		return
+	}
+	var req reasonReq
+	if !common.DecodeJSON(w, r, &req) {
+		return
+	}
+	if req.Alasan == "" {
+		common.WriteError(w, http.StatusBadRequest, "alasan is required")
+		return
+	}
+	attemptID, err := h.Store.LarangUjianPreEntry(r.Context(), examID, userID, c.UserID, req.Alasan)
+	if err != nil {
 		writeTransitionErr(w, err)
 		return
 	}

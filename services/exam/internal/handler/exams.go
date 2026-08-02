@@ -12,27 +12,44 @@ import (
 	"skci/exam/internal/store"
 )
 
+// classroomSubjectPair is one checked "{Subject} - {Class}" row in Buat
+// Ujian Baru's Mata Pelajaran picker (item 3): a guru can tick several,
+// fanning out to one exam per pair in a single CreateExam call (see
+// ClassroomAssignments below) since the exams table only carries a single
+// classroom_id/subject_id per row.
+type classroomSubjectPair struct {
+	ClassroomID string `json:"classroom_id"`
+	SubjectID   string `json:"subject_id"`
+}
+
 type examReq struct {
 	AcademicYearID string  `json:"academic_year_id"`
-	TermID         string  `json:"term_id"`       // Semester/Tahun Ajaran
-	ExamTypeID     string  `json:"exam_type_id"`  // Tipe Ujian
-	Title          string  `json:"title"`         // Judul Ujian
-	Description    *string `json:"description"`   // Deskripsi/catatan (optional)
-	ClassroomID    string  `json:"classroom_id"`  // Mata Pelajaran: kelas
-	SubjectID      string  `json:"subject_id"`    // Mata Pelajaran: mapel
-	TeacherID      string  `json:"teacher_id"`    // admin assigns explicitly; guru defaults to self
-	StartAt        string  `json:"start_at"`      // RFC3339, Tanggal Mulai
-	EndAt          string  `json:"end_at"`        // RFC3339, Tanggal Selesai
-	IsShuffled     bool    `json:"is_shuffled"`   // Acak Soal
+	TermID         string  `json:"term_id"`      // Semester/Tahun Ajaran
+	ExamTypeID     string  `json:"exam_type_id"` // Tipe Ujian
+	Title          string  `json:"title"`        // Judul Ujian
+	Description    *string `json:"description"`  // Deskripsi/catatan (optional)
+	ClassroomID    string  `json:"classroom_id"` // Mata Pelajaran: kelas (single-classroom path)
+	SubjectID      string  `json:"subject_id"`   // Mata Pelajaran: mapel (single-classroom path)
+	// ClassroomAssignments: when set (guru's multi-select Mata Pelajaran
+	// checkboxes), ClassroomID/SubjectID above are ignored and one exam is
+	// created per pair instead — see CreateExam.
+	ClassroomAssignments []classroomSubjectPair `json:"classroom_assignments,omitempty"`
+	TeacherID            string                 `json:"teacher_id"`  // admin assigns explicitly; guru defaults to self
+	StartAt              string                 `json:"start_at"`    // RFC3339, Tanggal Mulai
+	EndAt                string                 `json:"end_at"`      // RFC3339, Tanggal Selesai
+	IsShuffled           bool                   `json:"is_shuffled"` // Acak Soal
+	FolderID             *string                `json:"folder_id"`   // Bank Soal folder this exam was created from, if any
 }
 
 // validateExamReq enforces the spec's "ALL mandatory" header fields, the
 // no-past-date rule, and (for guru) that they can only assign themselves as
 // teacher. See README Assumptions re: trusting classroom_id/subject_id
 // straight from the JWT+payload instead of round-tripping academic-service.
-func (h *Handler) validateExamReq(req examReq, c *common.Claims) (string, bool, time.Time, time.Time) {
+// skipClassroomSubject is set by CreateExam's multi-classroom path (item 3),
+// where classroom_id/subject_id come from ClassroomAssignments instead.
+func (h *Handler) validateExamReq(req examReq, c *common.Claims, skipClassroomSubject bool) (string, bool, time.Time, time.Time) {
 	if req.AcademicYearID == "" || req.TermID == "" || req.ExamTypeID == "" || req.Title == "" ||
-		req.ClassroomID == "" || req.SubjectID == "" {
+		(!skipClassroomSubject && (req.ClassroomID == "" || req.SubjectID == "")) {
 		return "academic_year_id, term_id, exam_type_id, title, classroom_id and subject_id are all mandatory", false, time.Time{}, time.Time{}
 	}
 	start, err := time.Parse(time.RFC3339, req.StartAt)
@@ -44,9 +61,7 @@ func (h *Handler) validateExamReq(req examReq, c *common.Claims) (string, bool, 
 		return "end_at must be RFC3339", false, time.Time{}, time.Time{}
 	}
 	now := time.Now()
-	if start.Before(now) {
-		return "start_at must not be in the past", false, time.Time{}, time.Time{}
-	}
+	// start_at can be in the past as long as end_at is in the future
 	if end.Before(now) {
 		return "end_at must not be in the past", false, time.Time{}, time.Time{}
 	}
@@ -73,7 +88,52 @@ func (h *Handler) CreateExam(w http.ResponseWriter, r *http.Request) {
 		teacherID = c.UserID
 	}
 	req.TeacherID = teacherID
-	msg, ok, start, end := h.validateExamReq(req, c)
+
+	// Item 3: guru's multi-select Mata Pelajaran checkboxes — one exam per
+	// {classroom_id, subject_id} pair, everything else (title/dates/type/...)
+	// shared across all of them.
+	if len(req.ClassroomAssignments) > 0 {
+		for _, pair := range req.ClassroomAssignments {
+			if pair.ClassroomID == "" || pair.SubjectID == "" {
+				common.WriteError(w, http.StatusBadRequest, "each classroom_assignments entry requires classroom_id and subject_id")
+				return
+			}
+		}
+		msg, ok, start, end := h.validateExamReq(req, c, true)
+		if !ok {
+			common.WriteError(w, http.StatusBadRequest, msg)
+			return
+		}
+		schoolID := common.EffectiveSchoolID(r, c)
+		created := make([]*model.Exam, 0, len(req.ClassroomAssignments))
+		for _, pair := range req.ClassroomAssignments {
+			e := &model.Exam{
+				SchoolID:       schoolID,
+				AcademicYearID: req.AcademicYearID,
+				TermID:         req.TermID,
+				ExamTypeID:     req.ExamTypeID,
+				Title:          req.Title,
+				Description:    req.Description,
+				ClassroomID:    pair.ClassroomID,
+				SubjectID:      pair.SubjectID,
+				TeacherID:      teacherID,
+				StartAt:        start,
+				EndAt:          end,
+				IsShuffled:     req.IsShuffled,
+				CreatedBy:      c.UserID,
+				FolderID:       req.FolderID,
+			}
+			if err := h.Store.CreateExam(r.Context(), e); err != nil {
+				writeStoreErr(w, err)
+				return
+			}
+			created = append(created, e)
+		}
+		common.WriteJSON(w, http.StatusCreated, created, nil)
+		return
+	}
+
+	msg, ok, start, end := h.validateExamReq(req, c, false)
 	if !ok {
 		common.WriteError(w, http.StatusBadRequest, msg)
 		return
@@ -92,6 +152,7 @@ func (h *Handler) CreateExam(w http.ResponseWriter, r *http.Request) {
 		EndAt:          end,
 		IsShuffled:     req.IsShuffled,
 		CreatedBy:      c.UserID,
+		FolderID:       req.FolderID,
 	}
 	if err := h.Store.CreateExam(r.Context(), e); err != nil {
 		writeStoreErr(w, err)
@@ -107,6 +168,8 @@ func (h *Handler) ListExams(w http.ResponseWriter, r *http.Request) {
 		AcademicYearID: r.URL.Query().Get("academic_year_id"),
 		TermID:         r.URL.Query().Get("term_id"),
 		ClassroomID:    r.URL.Query().Get("classroom_id"),
+		FolderID:       r.URL.Query().Get("folder_id"),
+		Title:          r.URL.Query().Get("title"),
 	}
 	if c != nil && (r.URL.Query().Get("mine") == "true" || c.ActiveRole == "guru") {
 		f.TeacherID = c.UserID
@@ -170,7 +233,7 @@ func (h *Handler) UpdateExam(w http.ResponseWriter, r *http.Request) {
 	if req.TeacherID == "" {
 		req.TeacherID = existing.TeacherID
 	}
-	msg, ok, start, end := h.validateExamReq(req, c)
+	msg, ok, start, end := h.validateExamReq(req, c, false)
 	if !ok {
 		common.WriteError(w, http.StatusBadRequest, msg)
 		return
@@ -198,6 +261,22 @@ func (h *Handler) DeleteExam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
+	// Item 3 (V4): Hapus is newly wired up on the frontend (Kelola Ujian /
+	// Bank Soal folder rows) — match the same guru-may-only-touch-their-own
+	// ownership check already enforced on Update/Publish/Duplicate above.
+	existing, err := h.Store.GetExam(r.Context(), id, common.EffectiveSchoolID(r, c))
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	if existing == nil {
+		common.WriteError(w, http.StatusNotFound, "exam not found")
+		return
+	}
+	if c.ActiveRole == "guru" && existing.TeacherID != c.UserID {
+		common.WriteError(w, http.StatusForbidden, "you may only delete your own exams")
+		return
+	}
 	if err := h.Store.DeleteExam(r.Context(), id, common.EffectiveSchoolID(r, c)); err != nil {
 		if errors.Is(err, store.ErrNotEditable) {
 			common.WriteError(w, http.StatusConflict, "exam is published (or not found) and cannot be deleted")
@@ -307,6 +386,42 @@ func (h *Handler) PublishExam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Store.NormalizeAndPublish(r.Context(), examID, exam.SchoolID); err != nil {
+		if errors.Is(err, store.ErrNotEditable) {
+			common.WriteError(w, http.StatusConflict, "exam not found or already published")
+			return
+		}
+		common.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	updated, _ := h.Store.GetExam(r.Context(), examID, exam.SchoolID)
+	common.WriteJSON(w, http.StatusOK, updated, nil)
+}
+
+// NormalizeDraftPoints: POST /exams/{id}/normalize-points — the "Simpan
+// sebagai Draft" action. Re-distributes 100 points evenly across the exam's
+// current questions (see Store.NormalizeDraftPoints) WITHOUT publishing, so
+// a guru can save a draft, add/remove questions, and save again with points
+// always summing to exactly 100.
+func (h *Handler) NormalizeDraftPoints(w http.ResponseWriter, r *http.Request) {
+	c := common.FromCtx(r)
+	if !requireRole(w, c, "admin", "superadmin", "guru") {
+		return
+	}
+	examID := chi.URLParam(r, "id")
+	exam, err := h.Store.GetExam(r.Context(), examID, common.EffectiveSchoolID(r, c))
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	if exam == nil {
+		common.WriteError(w, http.StatusNotFound, "exam not found")
+		return
+	}
+	if c.ActiveRole == "guru" && exam.TeacherID != c.UserID {
+		common.WriteError(w, http.StatusForbidden, "you may only save your own exams as draft")
+		return
+	}
+	if err := h.Store.NormalizeDraftPoints(r.Context(), examID, exam.SchoolID); err != nil {
 		if errors.Is(err, store.ErrNotEditable) {
 			common.WriteError(w, http.StatusConflict, "exam not found or already published")
 			return

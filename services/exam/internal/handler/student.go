@@ -21,12 +21,42 @@ func (h *Handler) MyExams(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "status must be one of today|upcoming|history")
 		return
 	}
-	rows, err := h.Store.ListMyExams(r.Context(), c.UserID, bucket)
+	// The student's own classroom lives in academic-service (exam-service
+	// has no enrollment table of its own) — best-effort cross-service call,
+	// see httpclient.StudentClassroomID. An empty result just means "no
+	// classroom resolved yet", so the dashboard shows empty buckets instead
+	// of erroring.
+	classroomID := h.Internal.StudentClassroomID(c.UserID, c.SchoolID, "")
+	rows, err := h.Store.ListMyExams(r.Context(), c.UserID, classroomID, bucket)
 	if err != nil {
 		writeStoreErr(w, err)
 		return
 	}
+	rows = h.filterRowsByActiveSubjects(c, rows)
 	common.WriteJSON(w, http.StatusOK, rows, nil)
+}
+
+// filterRowsByActiveSubjects (item 13, V4 — Agama religion-based question
+// filtering): drops any exam whose subject isn't one this student is
+// currently active in per academic-service's Auto-Enroll Agama resolution
+// (httpclient.ActiveSubjectIDs) — for a non-Agama subject this is always a
+// no-op (every active classroom_subject comes back regardless of subject
+// group), but for Agama it means a student only ever sees the exam for
+// their OWN religion's variant, never another one's. Best-effort: if the
+// lookup fails (nil map, academic-service unreachable), rows pass through
+// unfiltered rather than the dashboard going blank.
+func (h *Handler) filterRowsByActiveSubjects(c *common.Claims, rows []store.StudentExamRow) []store.StudentExamRow {
+	allowed := h.Internal.ActiveSubjectIDs(c.SchoolID, c.UserID, "")
+	if allowed == nil {
+		return rows
+	}
+	out := rows[:0]
+	for _, row := range rows {
+		if allowed[row.Exam.SubjectID] {
+			out = append(out, row)
+		}
+	}
+	return out
 }
 
 type enterExamReq struct {
@@ -47,6 +77,23 @@ func (h *Handler) EnterExam(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Code == "" {
 		common.WriteError(w, http.StatusBadRequest, "code is required")
+		return
+	}
+	// Item 13 (V4): hard-gate entry, not just dashboard visibility — a
+	// student guessing/bookmarking an examId shouldn't be able to start an
+	// Agama exam that isn't their own religion's variant just because it's
+	// hidden from their dashboard list.
+	exam, err := h.Store.GetExam(r.Context(), examID, common.EffectiveSchoolID(r, c))
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	if exam == nil {
+		common.WriteError(w, http.StatusNotFound, "exam not found")
+		return
+	}
+	if allowed := h.Internal.ActiveSubjectIDs(exam.SchoolID, c.UserID, exam.AcademicYearID); allowed != nil && !allowed[exam.SubjectID] {
+		common.WriteError(w, http.StatusForbidden, "this exam's subject is not active for your enrollment")
 		return
 	}
 	attempt, err := h.Store.EnterExam(r.Context(), examID, c.UserID, req.Code)
@@ -102,10 +149,10 @@ func (h *Handler) MyAttempt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type qSummary struct {
-		No             int    `json:"no"`
-		ExamQuestionID string `json:"exam_question_id"`
+		No             int     `json:"no"`
+		ExamQuestionID string  `json:"exam_question_id"`
 		Points         float64 `json:"points"`
-		Answered       bool   `json:"answered"`
+		Answered       bool    `json:"answered"`
 	}
 	var summary []qSummary
 	for i, eqID := range attempt.QuestionOrder {
@@ -133,13 +180,13 @@ type studentAnswerOption struct {
 }
 
 type studentQuestionView struct {
-	ExamQuestionID string                 `json:"exam_question_id"`
-	No             int                    `json:"no"`
-	QuestionType   string                 `json:"question_type"`
-	Content        string                 `json:"content"`
-	ImageURL       *string                `json:"image_url,omitempty"`
-	Points         float64                `json:"points"`
-	AnswerOptions  []studentAnswerOption  `json:"answer_options,omitempty"`
+	ExamQuestionID string                   `json:"exam_question_id"`
+	No             int                      `json:"no"`
+	QuestionType   string                   `json:"question_type"`
+	Content        string                   `json:"content"`
+	ImageURL       *string                  `json:"image_url,omitempty"`
+	Points         float64                  `json:"points"`
+	AnswerOptions  []studentAnswerOption    `json:"answer_options,omitempty"`
 	YourAnswer     *model.ExamAttemptAnswer `json:"your_answer,omitempty"`
 }
 

@@ -142,6 +142,33 @@ func (s *Store) ListClassEnrollments(ctx context.Context, schoolID, classroomID 
 	return out, rows.Err()
 }
 
+// ListClassEnrollmentsByYear returns every active enrollment for an academic
+// year across ALL classrooms (not just one) — used by the frontend to know
+// which students already have a classroom assignment this year (a student
+// belongs to exactly one classroom per year, per the class_enrollments
+// UNIQUE(academic_year_id, student_user_id) constraint) and to render a
+// student->classroom roster view.
+func (s *Store) ListClassEnrollmentsByYear(ctx context.Context, schoolID, academicYearID string) ([]model.ClassEnrollment, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT id, school_id, academic_year_id, classroom_id, student_user_id, status, enrolled_at, created_at, updated_at
+		FROM class_enrollments WHERE ($1 = '' OR school_id::text = $1) AND academic_year_id = $2 AND status = 'active'
+		ORDER BY enrolled_at
+	`, schoolID, academicYearID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.ClassEnrollment{}
+	for rows.Next() {
+		e, err := scanClassEnrollmentRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *e)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) RemoveClassEnrollment(ctx context.Context, schoolID, classroomID, studentUserID string) error {
 	_, err := s.DB.ExecContext(ctx, `
 		DELETE FROM class_enrollments WHERE school_id = $1 AND classroom_id = $2 AND student_user_id = $3

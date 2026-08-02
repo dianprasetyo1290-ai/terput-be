@@ -15,12 +15,22 @@ func NewAcademicClient(baseURL, internalKey string, timeout time.Duration) *Acad
 	return &AcademicClient{c: newClient(baseURL, internalKey, "academic", timeout)}
 }
 
+// GradeLevel is *string, not *int: academic-service's Classroom.GradeLevel
+// is a string column (grade labels like "7" are stored/returned as text,
+// see services/academic/internal/model/model.go) -- decoding it into *int
+// here silently failed every GetClassroom call with a JSON unmarshal error,
+// which is the actual root cause of "Kelas" (and, transitively, "Wali
+// Kelas") never auto-filling on the generated report card: GetClassroom
+// returned an error, classroomName/homeroomTeacherName were never resolved,
+// and the whole failure was swallowed into a generic warning entry instead
+// of surfacing as an obvious type-mismatch bug.
 type Classroom struct {
-	ID             string `json:"id"`
-	SchoolID       string `json:"school_id"`
-	AcademicYearID string `json:"academic_year_id"`
-	Name           string `json:"name"`
-	GradeLevel     *int   `json:"grade_level"`
+	ID                    string  `json:"id"`
+	SchoolID              string  `json:"school_id"`
+	AcademicYearID        string  `json:"academic_year_id"`
+	Name                  string  `json:"name"`
+	GradeLevel            *string `json:"grade_level"`
+	HomeroomTeacherUserID *string `json:"homeroom_teacher_user_id"`
 }
 
 type Term struct {

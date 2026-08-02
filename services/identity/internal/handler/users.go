@@ -5,9 +5,12 @@ import (
 	"database/sql/driver"
 	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/xuri/excelize/v2"
 
 	"skci/identity/internal/common"
 	"skci/identity/internal/model"
@@ -23,11 +26,11 @@ import (
 // "admin can reset a student's password" for both, rather than duplicating
 // separate edit/reset handlers per entity (see README Assumptions).
 
-const userCols = `u.id, u.name, u.email, u.phone, u.default_password, u.password_changed, u.photo, u.birth_date, u.birth_place, u.address, u.religion, u.is_superadmin, u.created_at, u.updated_at`
+const userCols = `u.id, u.name, u.email, u.phone, u.default_password, u.password_changed, u.photo, u.birth_date, u.birth_place, u.address, u.religion, u.nisn, u.is_superadmin, u.created_at, u.updated_at`
 
 func scanUser(row interface{ Scan(...interface{}) error }) (model.User, error) {
 	var u model.User
-	err := row.Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.DefaultPassword, &u.PasswordChanged, &u.Photo, &u.BirthDate, &u.BirthPlace, &u.Address, &u.Religion, &u.IsSuperadmin, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.DefaultPassword, &u.PasswordChanged, &u.Photo, &u.BirthDate, &u.BirthPlace, &u.Address, &u.Religion, &u.NISN, &u.IsSuperadmin, &u.CreatedAt, &u.UpdatedAt)
 	if err == nil && u.PasswordChanged {
 		u.DefaultPassword = nil // hide once the user has changed it from the default
 	}
@@ -63,11 +66,20 @@ func (a *App) ListUsers(w http.ResponseWriter, r *http.Request) {
 	a.listUsersByRole(w, r, role, !privileged)
 }
 
+// ListStudents backs Data Siswa (admin/superadmin, full fields) and also
+// the guru daily attendance roster (name lookup only, directoryOnly=true —
+// same non-sensitive-fields tradeoff as the guru directory exception in
+// ListUsers above; a guru taking presensi for their own classroom needs
+// student names, which /classrooms/{id}/students in academic-service alone
+// can't supply since it only returns bare student_user_id).
 func (a *App) ListStudents(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	claims := common.FromCtx(r)
+	privileged := claims != nil && (claims.ActiveRole == common.RoleAdmin || claims.ActiveRole == common.RoleSuperadmin)
+	if !privileged && (claims == nil || claims.ActiveRole != common.RoleGuru) {
+		common.WriteError(w, http.StatusForbidden, "forbidden: requires role admin")
 		return
 	}
-	a.listUsersByRole(w, r, common.RoleSiswa, false)
+	a.listUsersByRole(w, r, common.RoleSiswa, !privileged)
 }
 
 func (a *App) ListTeachers(w http.ResponseWriter, r *http.Request) {
@@ -83,6 +95,7 @@ func (a *App) ListTeachers(w http.ResponseWriter, r *http.Request) {
 func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role string, directoryOnly bool) {
 	schoolID, filtered := resolveSchoolScope(r)
 	status := r.URL.Query().Get("status") // aktif/nonaktif filter for guru, optional
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
 
 	where := `u.deleted_at IS NULL`
 	args := []interface{}{}
@@ -103,6 +116,13 @@ func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role strin
 			where += ` AND usr.status = $` + placeholder(len(args))
 		}
 		where += `)`
+	}
+	// Search must run inside the same tenant-scoped WHERE above, not as a client-side filter
+	// over one page — a query for an existing user must find them regardless of which page
+	// they'd otherwise sort onto (name/email match, case-insensitive).
+	if q != "" {
+		args = append(args, "%"+q+"%")
+		where += ` AND (u.name ILIKE $` + placeholder(len(args)) + ` OR u.email ILIKE $` + placeholder(len(args)) + `)`
 	}
 
 	var total int
@@ -162,6 +182,7 @@ func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role strin
 			out[i].BirthDate = nil
 			out[i].BirthPlace = nil
 			out[i].Religion = nil
+			out[i].NISN = nil
 			out[i].Photo = nil
 			out[i].Roles = []model.UserSchoolRole{}
 		}
@@ -191,6 +212,15 @@ func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if !common.IsValidRole(req.Role) {
 		common.WriteError(w, http.StatusBadRequest, "invalid role")
+		return
+	}
+	// Privilege-escalation guard: an admin (as opposed to superadmin) may only
+	// ever create guru/siswa accounts here — never another admin or a
+	// superadmin. The frontend already hides those options from the role
+	// picker when active_role=admin, but that's UI-only; enforce it
+	// server-side too since this is a real escalation path otherwise.
+	if claims.ActiveRole == common.RoleAdmin && req.Role != common.RoleGuru && req.Role != common.RoleSiswa {
+		common.WriteError(w, http.StatusForbidden, "admin may only create guru or siswa accounts")
 		return
 	}
 	schoolID := claims.SchoolID
@@ -287,6 +317,7 @@ type updateUserRequest struct {
 	BirthPlace *string `json:"birth_place"`
 	Address    *string `json:"address"`
 	Religion   *string `json:"religion"`
+	NISN       *string `json:"nisn"`
 }
 
 // UpdateUser: "admin can edit account data" for Data Siswa / Data Guru /
@@ -301,9 +332,9 @@ func (a *App) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	row := a.DB.QueryRow(`UPDATE users AS u SET name=$1, phone=$2, photo=$3, birth_date=$4, birth_place=$5, address=$6, religion=$7, updated_at=now()
-		WHERE id=$8 AND deleted_at IS NULL RETURNING `+userCols,
-		req.Name, req.Phone, req.Photo, req.BirthDate, req.BirthPlace, req.Address, req.Religion, id)
+	row := a.DB.QueryRow(`UPDATE users AS u SET name=$1, phone=$2, photo=$3, birth_date=$4, birth_place=$5, address=$6, religion=$7, nisn=$8, updated_at=now()
+		WHERE id=$9 AND deleted_at IS NULL RETURNING `+userCols,
+		req.Name, req.Phone, req.Photo, req.BirthDate, req.BirthPlace, req.Address, req.Religion, req.NISN, id)
 	u, err := scanUser(row)
 	if err == sql.ErrNoRows {
 		common.WriteError(w, http.StatusNotFound, "user not found")
@@ -341,6 +372,7 @@ func (a *App) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	if !requireRole(w, r, common.RoleAdmin) {
 		return
 	}
+	claims := common.FromCtx(r)
 	id := chi.URLParam(r, "id")
 	newPassword := common.GenDefaultPassword()
 	hash, err := common.HashPassword(newPassword)
@@ -348,8 +380,16 @@ func (a *App) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusInternalServerError, "failed to reset password")
 		return
 	}
-	res, err := a.DB.Exec(`UPDATE users SET password_hash=$1, default_password=$2, password_changed=false, updated_at=now()
-		WHERE id=$3 AND deleted_at IS NULL`, hash, newPassword, id)
+	// A non-superadmin admin may only reset passwords for users who hold a role at their own
+	// school — otherwise a School A admin could reset any user's password by ID alone.
+	query := `UPDATE users SET password_hash=$1, default_password=$2, password_changed=false, updated_at=now()
+		WHERE id=$3 AND deleted_at IS NULL`
+	args := []interface{}{hash, newPassword, id}
+	if claims.ActiveRole != common.RoleSuperadmin {
+		args = append(args, claims.SchoolID)
+		query += ` AND EXISTS (SELECT 1 FROM user_school_roles usr WHERE usr.user_id = users.id AND usr.school_id = $` + placeholder(len(args)) + `)`
+	}
+	res, err := a.DB.Exec(query, args...)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to reset password")
 		return
@@ -378,6 +418,12 @@ func (a *App) AssignUserRole(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "valid role is required")
 		return
 	}
+	// Same privilege-escalation guard as CreateUser: an admin can't grant
+	// themselves/anyone the admin or superadmin role via this endpoint either.
+	if claims.ActiveRole == common.RoleAdmin && req.Role != common.RoleGuru && req.Role != common.RoleSiswa {
+		common.WriteError(w, http.StatusForbidden, "admin may only assign guru or siswa roles")
+		return
+	}
 	schoolID := claims.SchoolID
 	if claims.ActiveRole == common.RoleSuperadmin && req.SchoolID != "" {
 		schoolID = req.SchoolID
@@ -392,6 +438,34 @@ func (a *App) AssignUserRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, map[string]string{"user_id": id, "role": req.Role}, nil)
+}
+
+// RemoveUserRole: "Data Peran" — an admin managing role assignments (as opposed to Data
+// Jabatan's org-chart positions) needs to be able to take a role back off an account, not just
+// add one.
+func (a *App) RemoveUserRole(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, common.RoleAdmin) {
+		return
+	}
+	claims := common.FromCtx(r)
+	id := chi.URLParam(r, "id")
+	role := chi.URLParam(r, "role")
+	query := `DELETE FROM user_school_roles WHERE user_id=$1 AND role=$2`
+	args := []interface{}{id, role}
+	if claims.ActiveRole != common.RoleSuperadmin {
+		query += ` AND school_id=$3`
+		args = append(args, claims.SchoolID)
+	}
+	res, err := a.DB.Exec(query, args...)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to remove role")
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		common.WriteError(w, http.StatusNotFound, "role assignment not found")
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]string{"user_id": id, "role": role}, nil)
 }
 
 func (a *App) setTeacherStatus(w http.ResponseWriter, r *http.Request, status string) {
@@ -474,6 +548,130 @@ func (a *App) ExportUsers(w http.ResponseWriter, r *http.Request) {
 	cw.Flush()
 }
 
+type userImportRowError struct {
+	Row   int    `json:"row"`
+	Issue string `json:"issue"`
+}
+
+type userImportReport struct {
+	Created int                  `json:"created"`
+	Errors  []userImportRowError `json:"errors"`
+}
+
+// ImportUsers: "Import Excel" button on Data Siswa / Data Guru. Columns:
+// Nama, Email, No Telepon (optional). Role + school come from the caller's
+// context (role is required — Data Pengguna's own "Tambah Pengguna" already
+// covers ad hoc single-role creation, so bulk import here is deliberately
+// scoped to the role the admin is currently viewing, same as
+// listUsersByRole's role parameter).
+func (a *App) ImportUsers(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, common.RoleAdmin) {
+		return
+	}
+	claims := common.FromCtx(r)
+	role := r.FormValue("role")
+	// If role is provided in the request (Data Siswa/Data Guru), validate it.
+	// If empty (Data Pengguna), we will read it per-row from the 4th column.
+	if role != "" {
+		if !common.IsValidRole(role) {
+			common.WriteError(w, http.StatusBadRequest, "valid role is required")
+			return
+		}
+		if claims.ActiveRole == common.RoleAdmin && role != common.RoleGuru && role != common.RoleSiswa {
+			common.WriteError(w, http.StatusForbidden, "admin may only import guru or siswa accounts")
+			return
+		}
+	}
+	schoolID := claims.SchoolID
+	if claims.ActiveRole == common.RoleSuperadmin {
+		if sid := r.FormValue("school_id"); sid != "" {
+			schoolID = sid
+		}
+	}
+	if role != common.RoleSuperadmin && schoolID == "" {
+		common.WriteError(w, http.StatusBadRequest, "school_id is required for non-superadmin roles")
+		return
+	}
+
+	if err := r.ParseMultipartForm(20 << 20); err != nil {
+		common.WriteError(w, http.StatusBadRequest, "failed to parse multipart form")
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		common.WriteError(w, http.StatusBadRequest, "file is required (multipart field 'file')")
+		return
+	}
+	defer file.Close()
+	f, err := excelize.OpenReader(file)
+	if err != nil {
+		common.WriteError(w, http.StatusBadRequest, "invalid .xlsx file")
+		return
+	}
+	defer f.Close()
+	rows, err := f.GetRows(f.GetSheetName(0))
+	if err != nil || len(rows) < 2 {
+		common.WriteError(w, http.StatusBadRequest, "sheet is empty or unreadable")
+		return
+	}
+
+	report := userImportReport{Errors: []userImportRowError{}}
+	for i, row := range rows[1:] {
+		rowNum := i + 2
+		name := strings.TrimSpace(cellAt(row, 0))
+		email := strings.TrimSpace(cellAt(row, 1))
+		phone := strings.TrimSpace(cellAt(row, 2))
+		if name == "" && email == "" {
+			continue
+		}
+		if name == "" || email == "" {
+			report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: "Nama dan Email wajib diisi"})
+			continue
+		}
+
+		rowRole := role
+		if rowRole == "" {
+			rowRole = strings.ToLower(strings.TrimSpace(cellAt(row, 3)))
+			if rowRole == "" {
+				report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: "Peran (Siswa/Guru) wajib diisi"})
+				continue
+			}
+			if rowRole != common.RoleGuru && rowRole != common.RoleSiswa {
+				report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: "Peran harus 'guru' atau 'siswa'"})
+				continue
+			}
+		}
+
+		tx, err := a.DB.Begin()
+		if err != nil {
+			report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: "gagal menyimpan"})
+			continue
+		}
+		userID, _, err := createImportedUser(tx, name, email, phone, "", "", "", "", nil)
+		if err != nil {
+			tx.Rollback()
+			report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: fmt.Sprintf("gagal membuat pengguna (email %q mungkin sudah digunakan)", email)})
+			continue
+		}
+		var schoolIDArg interface{}
+		if schoolID != "" {
+			schoolIDArg = schoolID
+		}
+		if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id, school_id, role) VALUES ($1,$2,$3)`, userID, schoolIDArg, rowRole); err != nil {
+			tx.Rollback()
+			report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: "gagal menetapkan peran"})
+			continue
+		}
+		if err := tx.Commit(); err != nil {
+			report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: "gagal menyimpan"})
+			continue
+		}
+		report.Created++
+	}
+
+	common.WriteJSON(w, http.StatusOK, report, nil)
+}
+
 func boolStr(b bool) string {
 	if b {
 		return "true"
@@ -515,4 +713,22 @@ func (a stringArray) Value() (driver.Value, error) {
 	}
 	out += "}"
 	return out, nil
+}
+
+// DownloadUsersTemplate: "Download Template" button for bulk user import
+func (a *App) DownloadUsersTemplate(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, common.RoleAdmin) {
+		return
+	}
+	f := excelize.NewFile()
+	defer f.Close()
+	sheetName := "Data Pengguna"
+	f.SetSheetName("Sheet1", sheetName)
+	headers := []string{"Nama", "Email", "Telepon", "Peran (guru/siswa)"}
+	f.SetSheetRow(sheetName, "A1", &headers)
+	f.SetSheetRow(sheetName, "A2", &[]string{"Budi Santoso", "budi@example.com", "08123456789", "siswa"})
+
+	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	w.Header().Set("Content-Disposition", "attachment; filename=template_data_pengguna.xlsx")
+	_ = f.Write(w)
 }

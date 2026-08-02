@@ -29,6 +29,11 @@ func (h *Handler) ActiveTeachers(w http.ResponseWriter, r *http.Request) {
 		if c, err := h.Client.GetClassroom(bg(r), list[i].ClassroomID); err == nil && c != nil {
 			list[i].ClassroomName = c.Name
 		}
+		if list[i].SubjectID != "" {
+			if s, err := h.Client.GetSubject(bg(r), list[i].SubjectID); err == nil && s != nil {
+				list[i].SubjectName = s.Name
+			}
+		}
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
 }

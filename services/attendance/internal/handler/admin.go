@@ -11,9 +11,13 @@ import (
 
 // ---- Presensi Siswa (admin) --------------------------------------------
 
-// StudentAttendanceAdmin serves the "Presensi Siswa" admin view: per
-// classroom, filterable by academic year (including past years), bulan,
-// hari, tanggal.
+// StudentAttendanceAdmin serves the "Presensi Siswa" admin view's per-record
+// detail table: per classroom, filterable by academic year (including past
+// years), bulan, tanggal. Shown only when an admin has picked a specific
+// Tanggal — the "hari" filter was removed per client (V4 revision: redundant
+// once Tanggal exists) and the no-filter default view is now
+// StudentAttendanceSummaryAdmin below (one row per student, not one row per
+// record).
 func (h *Handler) StudentAttendanceAdmin(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if !requireRole(w, claims, "admin", "superadmin") {
@@ -27,7 +31,6 @@ func (h *Handler) StudentAttendanceAdmin(w http.ResponseWriter, r *http.Request)
 		ClassroomID:    q.Get("classroom_id"),
 		Date:           q.Get("date"),
 		Month:          q.Get("month"),
-		Day:            normalizeDay(q.Get("day")),
 		Page:           page,
 		PerPage:        perPage,
 	})
@@ -36,6 +39,26 @@ func (h *Handler) StudentAttendanceAdmin(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, map[string]interface{}{"page": page, "per_page": perPage, "total": total})
+}
+
+// StudentAttendanceSummaryAdmin serves the "Presensi Siswa" admin view's
+// DEFAULT display (client V4 revision, item 1): one row per student per
+// classroom, Hadir/Sakit/Izin/Tanpa Keterangan counts aggregated over one
+// month (defaults to the current month server-side if omitted) — no
+// duplicate student rows, re-aggregates when the month filter changes.
+func (h *Handler) StudentAttendanceSummaryAdmin(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if !requireRole(w, claims, "admin", "superadmin") {
+		return
+	}
+	q := r.URL.Query()
+	list, err := h.Store.StudentAttendanceMonthlySummary(r.Context(),
+		scopeFromRequest(claims, r), academicYearFromRequest(r), q.Get("classroom_id"), q.Get("month"))
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, list, nil)
 }
 
 // StudentAttendanceExport returns the same filtered set as
@@ -53,7 +76,6 @@ func (h *Handler) StudentAttendanceExport(w http.ResponseWriter, r *http.Request
 		ClassroomID:    q.Get("classroom_id"),
 		Date:           q.Get("date"),
 		Month:          q.Get("month"),
-		Day:            normalizeDay(q.Get("day")),
 		Page:           1,
 		PerPage:        500,
 	})

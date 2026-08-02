@@ -17,8 +17,8 @@ type answerInput struct {
 }
 
 type submitEvaluationRequest struct {
-	EvaluatorType   string        `json:"evaluator_type"` // self|peer|siswa|kepala_sekolah|waka_kurikulum|waka_kesiswaan
-	TargetTeacherID string        `json:"target_teacher_id"`
+	EvaluatorType   string        `json:"evaluator_type"` // self|peer|siswa|kepala_sekolah|waka_kurikulum|waka_kesiswaan|guru_to_kepsek|guru_to_waka_kurikulum|guru_to_waka_kesiswaan
+	TargetTeacherID string        `json:"target_teacher_id"` // for guru_to_* upward types, this is the LEADER being rated
 	ClassroomID     string        `json:"classroom_id"` // required only when evaluator_type=siswa
 	Answers         []answerInput `json:"answers"`
 }
@@ -28,7 +28,11 @@ type submitEvaluationRequest struct {
 // This is the server-side enforcement point ("scoped to the caller's
 // identity + role-category" from the spec).
 func authorizeEvaluation(claims *common.Claims, p *model.Period, req submitEvaluationRequest) error {
-	if !containsStr(p.TargetTeacherIDs, req.TargetTeacherID) && req.EvaluatorType != model.EvalTypePeer {
+	// For peer and the upward-feedback (guru_to_*) types, target_teacher_id
+	// isn't a member of the "J" target-guru list (it's the peer evaluatee or
+	// the leader being rated respectively) -- those cases validate their own
+	// target below instead.
+	if !containsStr(p.TargetTeacherIDs, req.TargetTeacherID) && req.EvaluatorType != model.EvalTypePeer && !model.IsUpwardEvalType(req.EvaluatorType) {
 		return fmt.Errorf("target_teacher_id is not in this period's target guru list")
 	}
 	switch req.EvaluatorType {
@@ -60,6 +64,36 @@ func authorizeEvaluation(claims *common.Claims, p *model.Period, req submitEvalu
 	case model.EvalTypeWakaKesiswaan:
 		if p.StudentAffairsVPUserID == nil || *p.StudentAffairsVPUserID != claims.UserID {
 			return fmt.Errorf("caller is not the Waka Kesiswaan assigned to this period")
+		}
+	case model.EvalTypeGuruToKepsek:
+		if !hasRole(claims, "guru") {
+			return fmt.Errorf("only guru can submit this evaluation type")
+		}
+		if !containsStr(p.TargetTeacherIDs, claims.UserID) {
+			return fmt.Errorf("caller is not in this period's target guru list")
+		}
+		if p.HeadmasterUserID == nil || *p.HeadmasterUserID != req.TargetTeacherID {
+			return fmt.Errorf("target_teacher_id must be the Kepala Sekolah assigned to this period")
+		}
+	case model.EvalTypeGuruToWakaKurikulum:
+		if !hasRole(claims, "guru") {
+			return fmt.Errorf("only guru can submit this evaluation type")
+		}
+		if !containsStr(p.TargetTeacherIDs, claims.UserID) {
+			return fmt.Errorf("caller is not in this period's target guru list")
+		}
+		if p.CurriculumVPUserID == nil || *p.CurriculumVPUserID != req.TargetTeacherID {
+			return fmt.Errorf("target_teacher_id must be the Waka Kurikulum assigned to this period")
+		}
+	case model.EvalTypeGuruToWakaKesiswaan:
+		if !hasRole(claims, "guru") {
+			return fmt.Errorf("only guru can submit this evaluation type")
+		}
+		if !containsStr(p.TargetTeacherIDs, claims.UserID) {
+			return fmt.Errorf("caller is not in this period's target guru list")
+		}
+		if p.StudentAffairsVPUserID == nil || *p.StudentAffairsVPUserID != req.TargetTeacherID {
+			return fmt.Errorf("target_teacher_id must be the Waka Kesiswaan assigned to this period")
 		}
 	case model.EvalTypeSiswa:
 		if !hasRole(claims, "siswa") {

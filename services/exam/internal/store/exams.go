@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 
 	"skci/exam/internal/model"
@@ -11,11 +12,11 @@ import (
 func (s *Store) CreateExam(ctx context.Context, e *model.Exam) error {
 	return s.DB.QueryRowContext(ctx, `
 		INSERT INTO exams (school_id, academic_year_id, term_id, exam_type_id, title, description,
-			classroom_id, subject_id, teacher_id, start_at, end_at, is_shuffled, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+			classroom_id, subject_id, teacher_id, start_at, end_at, is_shuffled, created_by, folder_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 		RETURNING id, is_published, created_at, updated_at`,
 		e.SchoolID, e.AcademicYearID, e.TermID, e.ExamTypeID, e.Title, e.Description,
-		e.ClassroomID, e.SubjectID, e.TeacherID, e.StartAt, e.EndAt, e.IsShuffled, e.CreatedBy,
+		e.ClassroomID, e.SubjectID, e.TeacherID, e.StartAt, e.EndAt, e.IsShuffled, e.CreatedBy, e.FolderID,
 	).Scan(&e.ID, &e.IsPublished, &e.CreatedAt, &e.UpdatedAt)
 }
 
@@ -26,6 +27,13 @@ type ExamFilter struct {
 	ClassroomID    string
 	TeacherID      string // "mine" scoping for guru
 	IsPublished    *bool
+	FolderID       string
+	// Title: exact-match filter used by the live monitor's Kelas switcher
+	// (item 6, V4) to find an exam's "siblings" — the classroom_assignments
+	// fan-out (item 3/5) creates one Exam row per selected class, all
+	// sharing the same title, so grouping by title is how the frontend
+	// reconstructs "the same ujian, several classes" for that dropdown.
+	Title string
 }
 
 func (s *Store) ListExams(ctx context.Context, f ExamFilter, page, perPage int) ([]model.Exam, int64, error) {
@@ -50,6 +58,12 @@ func (s *Store) ListExams(ctx context.Context, f ExamFilter, page, perPage int) 
 	if f.IsPublished != nil {
 		add("e.is_published", *f.IsPublished)
 	}
+	if f.FolderID != "" {
+		add("e.folder_id", f.FolderID)
+	}
+	if f.Title != "" {
+		add("e.title", f.Title)
+	}
 
 	var total int64
 	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM exams e WHERE `+where, args...).Scan(&total); err != nil {
@@ -60,7 +74,7 @@ func (s *Store) ListExams(ctx context.Context, f ExamFilter, page, perPage int) 
 	q := fmt.Sprintf(`
 		SELECT e.id, e.school_id, e.academic_year_id, e.term_id, e.exam_type_id, e.title, e.description,
 			e.classroom_id, e.subject_id, e.teacher_id, e.start_at, e.end_at, e.is_shuffled, e.is_published,
-			e.published_at, e.created_by, e.created_at, e.updated_at,
+			e.published_at, e.created_by, e.created_at, e.updated_at, e.folder_id,
 			COALESCE((SELECT SUM(points) FROM exam_questions eq WHERE eq.exam_id = e.id), 0),
 			COALESCE((SELECT COUNT(*) FROM exam_questions eq WHERE eq.exam_id = e.id), 0)
 		FROM exams e WHERE %s ORDER BY e.created_at DESC LIMIT $%d OFFSET $%d`,
@@ -76,7 +90,7 @@ func (s *Store) ListExams(ctx context.Context, f ExamFilter, page, perPage int) 
 		var e model.Exam
 		if err := rows.Scan(&e.ID, &e.SchoolID, &e.AcademicYearID, &e.TermID, &e.ExamTypeID, &e.Title, &e.Description,
 			&e.ClassroomID, &e.SubjectID, &e.TeacherID, &e.StartAt, &e.EndAt, &e.IsShuffled, &e.IsPublished,
-			&e.PublishedAt, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt, &e.TotalPoints, &e.QuestionCount); err != nil {
+			&e.PublishedAt, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt, &e.FolderID, &e.TotalPoints, &e.QuestionCount); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, e)
@@ -89,13 +103,13 @@ func (s *Store) GetExam(ctx context.Context, id, schoolID string) (*model.Exam, 
 	err := s.DB.QueryRowContext(ctx, `
 		SELECT e.id, e.school_id, e.academic_year_id, e.term_id, e.exam_type_id, e.title, e.description,
 			e.classroom_id, e.subject_id, e.teacher_id, e.start_at, e.end_at, e.is_shuffled, e.is_published,
-			e.published_at, e.created_by, e.created_at, e.updated_at,
+			e.published_at, e.created_by, e.created_at, e.updated_at, e.folder_id,
 			COALESCE((SELECT SUM(points) FROM exam_questions eq WHERE eq.exam_id = e.id), 0),
 			COALESCE((SELECT COUNT(*) FROM exam_questions eq WHERE eq.exam_id = e.id), 0)
 		FROM exams e WHERE e.id=$1 AND ($2 = '' OR e.school_id::text=$2) AND e.deleted_at IS NULL`, id, schoolID,
 	).Scan(&e.ID, &e.SchoolID, &e.AcademicYearID, &e.TermID, &e.ExamTypeID, &e.Title, &e.Description,
 		&e.ClassroomID, &e.SubjectID, &e.TeacherID, &e.StartAt, &e.EndAt, &e.IsShuffled, &e.IsPublished,
-		&e.PublishedAt, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt, &e.TotalPoints, &e.QuestionCount)
+		&e.PublishedAt, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt, &e.FolderID, &e.TotalPoints, &e.QuestionCount)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -189,27 +203,50 @@ func (s *Store) ListExamQuestions(ctx context.Context, examID string) ([]model.E
 		eq.Question = &q
 		out = append(out, eq)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if err := s.loadQuestionOptions(ctx, out[i].Question); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 // StudentExamRow is the siswa-dashboard view: an exam joined with that
 // student's own attempt (if any voucher was ever issued to them for it).
 type StudentExamRow struct {
-	Exam    model.Exam        `json:"exam"`
+	Exam    model.Exam         `json:"exam"`
 	Attempt *model.ExamAttempt `json:"attempt"`
 }
 
-// ListMyExams buckets by "today" (window currently open), "upcoming"
-// (start_at in the future), or "history" (window closed / attempt selesai).
-// Only exams the student holds a voucher (hence an exam_attempts row) for
-// are returned; see README Assumptions.
-func (s *Store) ListMyExams(ctx context.Context, userID, bucket string) ([]StudentExamRow, error) {
-	where := "ea.user_id = $1 AND e.deleted_at IS NULL"
+// ListMyExams buckets a student's PUBLISHED exams (scoped to their own
+// classroom_id — resolved cross-service via academic-service, see
+// httpclient.StudentClassroomID and handler/student.go's MyExams) into:
+//   - "today": start_at falls on today's calendar date, and the exam hasn't
+//     already been completed or missed (end_at passed) — a same-day exam
+//     that hasn't opened yet still belongs here, just with a "belum_mulai"
+//     attempt (or none at all).
+//   - "upcoming": start_at falls on a future calendar date.
+//   - "history": the student's attempt is 'selesai', OR the exam's window
+//     has already closed (end_at < now) whether or not they ever attempted it.
+//
+// This LEFT JOINs exam_attempts rather than requiring one to already exist —
+// the old INNER JOIN meant a freshly published exam was invisible on the
+// dashboard until the student had already voucher-entered it once, which is
+// backwards (see client bug report: "nothing shows up after guru
+// publishes"). attempt is nil in the returned row until the student enters.
+func (s *Store) ListMyExams(ctx context.Context, userID, classroomID, bucket string) ([]StudentExamRow, error) {
+	if classroomID == "" {
+		return nil, nil
+	}
+	where := "e.classroom_id = $1 AND e.is_published = true AND e.deleted_at IS NULL"
 	switch bucket {
 	case "today":
-		where += " AND e.start_at <= now() AND e.end_at >= now() AND ea.status != 'selesai'"
+		where += " AND e.start_at::date = now()::date AND (ea.status IS NULL OR ea.status != 'selesai') AND e.end_at >= now()"
 	case "upcoming":
-		where += " AND e.start_at > now()"
+		where += " AND e.start_at::date > now()::date"
 	case "history":
 		where += " AND (ea.status = 'selesai' OR e.end_at < now())"
 	}
@@ -217,11 +254,14 @@ func (s *Store) ListMyExams(ctx context.Context, userID, bucket string) ([]Stude
 		SELECT e.id, e.school_id, e.academic_year_id, e.term_id, e.exam_type_id, e.title, e.description,
 			e.classroom_id, e.subject_id, e.teacher_id, e.start_at, e.end_at, e.is_shuffled, e.is_published,
 			e.published_at, e.created_by, e.created_at, e.updated_at,
-			`+attemptColsQualified+`
-		FROM exam_attempts ea
-		JOIN exams e ON e.id = ea.exam_id
+			ea.id, ea.school_id, ea.academic_year_id, ea.exam_id, ea.user_id, ea.classroom_id, ea.token_id, ea.status,
+			ea.question_order, ea.current_position, ea.focus_lost_count, ea.started_at, ea.submitted_at,
+			ea.blocked_at, ea.blocked_reason, ea.blocked_by, ea.banned_at, ea.banned_reason, ea.banned_by,
+			ea.score, ea.correct_count, ea.graded_at, ea.created_at, ea.updated_at
+		FROM exams e
+		LEFT JOIN exam_attempts ea ON ea.exam_id = e.id AND ea.user_id = $2
 		WHERE `+where+`
-		ORDER BY e.start_at`, userID)
+		ORDER BY e.start_at`, classroomID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -229,18 +269,79 @@ func (s *Store) ListMyExams(ctx context.Context, userID, bucket string) ([]Stude
 	var out []StudentExamRow
 	for rows.Next() {
 		var e model.Exam
-		var qOrderJSON []byte
 		var a model.ExamAttempt
+		var qOrderJSON []byte
+		var attemptID, aSchoolID, aAcademicYearID, aExamID, aUserID, aClassroomID, aStatus sql.NullString
+		var tokenID sql.NullString
+		var currentPosition, focusLostCount, correctCount sql.NullInt64
+		var startedAt, submittedAt, blockedAt, bannedAt, gradedAt, aCreatedAt, aUpdatedAt sql.NullTime
+		var blockedReason, blockedBy, bannedReason, bannedBy sql.NullString
+		var score sql.NullFloat64
 		if err := rows.Scan(&e.ID, &e.SchoolID, &e.AcademicYearID, &e.TermID, &e.ExamTypeID, &e.Title, &e.Description,
 			&e.ClassroomID, &e.SubjectID, &e.TeacherID, &e.StartAt, &e.EndAt, &e.IsShuffled, &e.IsPublished,
 			&e.PublishedAt, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt,
-			&a.ID, &a.SchoolID, &a.AcademicYearID, &a.ExamID, &a.UserID, &a.ClassroomID, &a.TokenID, &a.Status,
-			&qOrderJSON, &a.CurrentPosition, &a.FocusLostCount, &a.StartedAt, &a.SubmittedAt,
-			&a.BlockedAt, &a.BlockedReason, &a.BlockedBy, &a.BannedAt, &a.BannedReason, &a.BannedBy,
-			&a.Score, &a.CorrectCount, &a.GradedAt, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			&attemptID, &aSchoolID, &aAcademicYearID, &aExamID, &aUserID, &aClassroomID, &tokenID, &aStatus,
+			&qOrderJSON, &currentPosition, &focusLostCount, &startedAt, &submittedAt,
+			&blockedAt, &blockedReason, &blockedBy, &bannedAt, &bannedReason, &bannedBy,
+			&score, &correctCount, &gradedAt, &aCreatedAt, &aUpdatedAt); err != nil {
 			return nil, err
 		}
-		out = append(out, StudentExamRow{Exam: e, Attempt: &a})
+		row := StudentExamRow{Exam: e}
+		if attemptID.Valid {
+			a = model.ExamAttempt{
+				ID: attemptID.String, SchoolID: aSchoolID.String, AcademicYearID: aAcademicYearID.String,
+				ExamID: aExamID.String, UserID: aUserID.String, ClassroomID: aClassroomID.String,
+				Status: aStatus.String, CurrentPosition: int(currentPosition.Int64), FocusLostCount: int(focusLostCount.Int64),
+			}
+			if tokenID.Valid {
+				a.TokenID = &tokenID.String
+			}
+			if len(qOrderJSON) > 0 {
+				_ = json.Unmarshal(qOrderJSON, &a.QuestionOrder)
+			}
+			if startedAt.Valid {
+				a.StartedAt = &startedAt.Time
+			}
+			if submittedAt.Valid {
+				a.SubmittedAt = &submittedAt.Time
+			}
+			if blockedAt.Valid {
+				a.BlockedAt = &blockedAt.Time
+			}
+			if blockedReason.Valid {
+				a.BlockedReason = &blockedReason.String
+			}
+			if blockedBy.Valid {
+				a.BlockedBy = &blockedBy.String
+			}
+			if bannedAt.Valid {
+				a.BannedAt = &bannedAt.Time
+			}
+			if bannedReason.Valid {
+				a.BannedReason = &bannedReason.String
+			}
+			if bannedBy.Valid {
+				a.BannedBy = &bannedBy.String
+			}
+			if score.Valid {
+				a.Score = &score.Float64
+			}
+			if correctCount.Valid {
+				c := int(correctCount.Int64)
+				a.CorrectCount = &c
+			}
+			if gradedAt.Valid {
+				a.GradedAt = &gradedAt.Time
+			}
+			if aCreatedAt.Valid {
+				a.CreatedAt = aCreatedAt.Time
+			}
+			if aUpdatedAt.Valid {
+				a.UpdatedAt = aUpdatedAt.Time
+			}
+			row.Attempt = &a
+		}
+		out = append(out, row)
 	}
 	return out, rows.Err()
 }
@@ -373,6 +474,61 @@ func round2(f float64) float64 {
 	return float64(int64(f*100+0.5)) / 100
 }
 
+// NormalizeDraftPoints is the "Simpan sebagai Draft" action (client spec
+// items 5/6): distribute 100 points evenly across the exam's current
+// questions using distributeEqualPoints (integer remainder distribution, so
+// the sum is always exactly 100 — never 99.99999999). Unlike
+// NormalizeAndPublish, this does NOT flip is_published and may be called
+// repeatedly (e.g. every time a question is added/removed) as long as the
+// exam is still a draft; each call re-normalizes from scratch, discarding
+// any previous scaling.
+func (s *Store) NormalizeDraftPoints(ctx context.Context, examID, schoolID string) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var isPublished bool
+	err = tx.QueryRowContext(ctx, `SELECT is_published FROM exams WHERE id=$1 AND ($2 = '' OR school_id::text=$2) AND deleted_at IS NULL`, examID, schoolID).Scan(&isPublished)
+	if err == sql.ErrNoRows {
+		return ErrNotEditable
+	}
+	if err != nil {
+		return err
+	}
+	if isPublished {
+		return ErrNotEditable
+	}
+
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM exam_questions WHERE exam_id=$1 ORDER BY order_index`, examID)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if len(ids) == 0 {
+		return fmt.Errorf("exam has no questions")
+	}
+
+	points := distributeEqualPoints(len(ids))
+	for i, id := range ids {
+		if _, err := tx.ExecContext(ctx, `UPDATE exam_questions SET points=$1 WHERE id=$2`, points[i], id); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
 // DuplicateExam copies an exam's settings and its exam_questions into a new,
 // always-unpublished exam row (see ErrNotEditable-adjacent lifecycle rule:
 // a duplicate is a fresh draft, not a clone of the source's publish state).
@@ -396,16 +552,16 @@ func (s *Store) DuplicateExam(ctx context.Context, id, schoolID, actorUserID str
 	e := &model.Exam{}
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO exams (school_id, academic_year_id, term_id, exam_type_id, title, description,
-			classroom_id, subject_id, teacher_id, start_at, end_at, is_shuffled, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+			classroom_id, subject_id, teacher_id, start_at, end_at, is_shuffled, created_by, folder_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 		RETURNING id, school_id, academic_year_id, term_id, exam_type_id, title, description,
 			classroom_id, subject_id, teacher_id, start_at, end_at, is_shuffled, is_published,
-			published_at, created_by, created_at, updated_at`,
+			published_at, created_by, created_at, updated_at, folder_id`,
 		src.SchoolID, src.AcademicYearID, src.TermID, src.ExamTypeID, src.Title+" (Salinan)", src.Description,
-		src.ClassroomID, src.SubjectID, src.TeacherID, src.StartAt, src.EndAt, src.IsShuffled, actorUserID,
+		src.ClassroomID, src.SubjectID, src.TeacherID, src.StartAt, src.EndAt, src.IsShuffled, actorUserID, src.FolderID,
 	).Scan(&e.ID, &e.SchoolID, &e.AcademicYearID, &e.TermID, &e.ExamTypeID, &e.Title, &e.Description,
 		&e.ClassroomID, &e.SubjectID, &e.TeacherID, &e.StartAt, &e.EndAt, &e.IsShuffled, &e.IsPublished,
-		&e.PublishedAt, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt)
+		&e.PublishedAt, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt, &e.FolderID)
 	if err != nil {
 		return nil, err
 	}

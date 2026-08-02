@@ -66,18 +66,15 @@ func NewRouter(h *Handler, jwtSecret, internalKey string, corsOrigins []string) 
 			rt.Post("/{id}/questions", h.AddExamQuestion)
 			rt.Delete("/{id}/questions/{eqId}", h.RemoveExamQuestion)
 			rt.Post("/{id}/questions/import", h.ImportQuestions)
+			rt.Post("/{id}/normalize-points", h.NormalizeDraftPoints)
 			rt.Post("/{id}/publish", h.PublishExam)
 			rt.Post("/{id}/duplicate", h.DuplicateExam)
-
-			// Exam Token / Voucher
-			rt.Post("/{id}/tokens", h.IssueToken)
-			rt.Post("/{id}/tokens/bulk", h.BulkIssueTokens)
-			rt.Get("/{id}/tokens", h.ListTokens)
 
 			// Live monitoring
 			rt.Get("/{id}/monitor", h.Monitor)
 			rt.Get("/{id}/attempts/{attemptId}", h.AttemptDetail)
 			rt.Post("/{id}/attempts/{attemptId}/larang", h.LarangUjian)
+			rt.Post("/{id}/students/{userId}/larang", h.LarangUjianByUser)
 			rt.Post("/{id}/attempts/{attemptId}/buka-larangan", h.BukaLarangan)
 			rt.Post("/{id}/attempts/{attemptId}/blokir", h.Blokir)
 			rt.Post("/{id}/attempts/{attemptId}/buka-blokir", h.BukaBlokir)
@@ -92,9 +89,11 @@ func NewRouter(h *Handler, jwtSecret, internalKey string, corsOrigins []string) 
 			rt.Post("/{id}/attempt/focus-lost", h.FocusLost)
 		})
 
-		pr.Route("/tokens", func(rt chi.Router) {
-			rt.Post("/{tokenId}/regenerate", h.RegenerateToken)
-		})
+		// Voucher (student-level, not exam-scoped — see internal/handler/tokens.go)
+		pr.Get("/vouchers", h.ListTokens)
+		pr.Post("/vouchers/bulk", h.BulkIssueTokens)
+		pr.Post("/vouchers/{tokenId}/regenerate", h.RegenerateToken)
+		pr.Post("/students/{userId}/voucher", h.IssueToken)
 
 		pr.Get("/me/exams", h.MyExams)
 	})

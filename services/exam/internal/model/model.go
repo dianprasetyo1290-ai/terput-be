@@ -81,6 +81,7 @@ type Exam struct {
 	UpdatedAt      time.Time  `json:"updated_at"`
 	TotalPoints    float64    `json:"total_points,omitempty"`
 	QuestionCount  int        `json:"question_count,omitempty"`
+	FolderID       *string    `json:"folder_id,omitempty"`
 }
 
 type ExamQuestion struct {
@@ -93,19 +94,21 @@ type ExamQuestion struct {
 	Question   *Question `json:"question,omitempty"`
 }
 
+// ExamToken is a student-level voucher (client spec 2026-07-24: usable
+// across any exam within [ValidFrom, ValidUntil], not tied to one exam) —
+// see EnterExam in store/attempts.go for how it gates exam entry.
 type ExamToken struct {
-	ID                string    `json:"id"`
-	SchoolID          string    `json:"school_id"`
-	AcademicYearID    string    `json:"academic_year_id"`
-	ExamID            string    `json:"exam_id"`
-	UserID            string    `json:"user_id"`
-	ClassroomID       string    `json:"classroom_id"`
-	Code              string    `json:"code"`
-	ExpiresAt         time.Time `json:"expires_at"`
-	RegeneratedCount  int       `json:"regenerated_count"`
-	CreatedBy         string    `json:"created_by"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID               string    `json:"id"`
+	SchoolID         string    `json:"school_id"`
+	AcademicYearID   *string   `json:"academic_year_id,omitempty"`
+	UserID           string    `json:"user_id"`
+	Code             string    `json:"code"`
+	ValidFrom        time.Time `json:"valid_from"`
+	ValidUntil       time.Time `json:"valid_until"`
+	RegeneratedCount int       `json:"regenerated_count"`
+	CreatedBy        string    `json:"created_by"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 const (

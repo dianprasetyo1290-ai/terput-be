@@ -17,6 +17,7 @@ import (
 
 type positionRequest struct {
 	Name     string `json:"name"`
+	Priority int    `json:"priority"`
 	SchoolID string `json:"school_id"` // only honored for superadmin; admin is forced to own school
 }
 
@@ -26,8 +27,8 @@ func (a *App) ListPositions(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "school_id is required")
 		return
 	}
-	rows, err := a.DB.Query(`SELECT id, school_id, name, created_at, updated_at FROM positions
-		WHERE school_id = $1 AND deleted_at IS NULL ORDER BY name`, schoolID)
+	rows, err := a.DB.Query(`SELECT id, school_id, name, priority, created_at, updated_at FROM positions
+		WHERE school_id = $1 AND deleted_at IS NULL ORDER BY priority, name`, schoolID)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to list positions")
 		return
@@ -36,7 +37,7 @@ func (a *App) ListPositions(w http.ResponseWriter, r *http.Request) {
 	out := []model.Position{}
 	for rows.Next() {
 		var p model.Position
-		if err := rows.Scan(&p.ID, &p.SchoolID, &p.Name, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.SchoolID, &p.Name, &p.Priority, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			common.WriteError(w, http.StatusInternalServerError, "failed to list positions")
 			return
 		}
@@ -64,10 +65,10 @@ func (a *App) CreatePosition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var p model.Position
-	err := a.DB.QueryRow(`INSERT INTO positions (school_id, name) VALUES ($1, $2)
-		ON CONFLICT (school_id, name) DO UPDATE SET name = EXCLUDED.name, deleted_at = NULL, updated_at = now()
-		RETURNING id, school_id, name, created_at, updated_at`, schoolID, req.Name).
-		Scan(&p.ID, &p.SchoolID, &p.Name, &p.CreatedAt, &p.UpdatedAt)
+	err := a.DB.QueryRow(`INSERT INTO positions (school_id, name, priority) VALUES ($1, $2, $3)
+		ON CONFLICT (school_id, name) DO UPDATE SET name = EXCLUDED.name, priority = EXCLUDED.priority, deleted_at = NULL, updated_at = now()
+		RETURNING id, school_id, name, priority, created_at, updated_at`, schoolID, req.Name, req.Priority).
+		Scan(&p.ID, &p.SchoolID, &p.Name, &p.Priority, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to create position: "+err.Error())
 		return
@@ -86,15 +87,15 @@ func (a *App) UpdatePosition(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	query := `UPDATE positions SET name=$1, updated_at=now() WHERE id=$2 AND deleted_at IS NULL`
-	args := []interface{}{req.Name, id}
+	query := `UPDATE positions SET name=$1, priority=$2, updated_at=now() WHERE id=$3 AND deleted_at IS NULL`
+	args := []interface{}{req.Name, req.Priority, id}
 	if claims.ActiveRole != common.RoleSuperadmin {
-		query += ` AND school_id=$3`
+		query += ` AND school_id=$4`
 		args = append(args, claims.SchoolID)
 	}
-	query += ` RETURNING id, school_id, name, created_at, updated_at`
+	query += ` RETURNING id, school_id, name, priority, created_at, updated_at`
 	var p model.Position
-	err := a.DB.QueryRow(query, args...).Scan(&p.ID, &p.SchoolID, &p.Name, &p.CreatedAt, &p.UpdatedAt)
+	err := a.DB.QueryRow(query, args...).Scan(&p.ID, &p.SchoolID, &p.Name, &p.Priority, &p.CreatedAt, &p.UpdatedAt)
 	if err == sql.ErrNoRows {
 		common.WriteError(w, http.StatusNotFound, "position not found")
 		return
@@ -236,7 +237,7 @@ func (a *App) Organization(w http.ResponseWriter, r *http.Request) {
 		JOIN positions p ON p.id = pa.position_id AND p.deleted_at IS NULL
 		JOIN users u ON u.id = pa.user_id AND u.deleted_at IS NULL
 		WHERE pa.school_id = $1
-		ORDER BY p.name, u.name`, schoolID)
+		ORDER BY p.priority, p.name, u.name`, schoolID)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to load organization")
 		return

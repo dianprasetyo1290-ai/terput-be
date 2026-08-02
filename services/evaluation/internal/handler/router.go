@@ -61,6 +61,7 @@ func NewRouter(h *Handler, jwtSecret string, corsOrigins []string) http.Handler 
 				pr2.Get("/my-tasks", h.MyTasks)
 				pr2.Get("/results", h.PeriodResults)
 				pr2.Get("/guru/{guru_id}/report", h.GuruReport)
+				pr2.Get("/leadership-results", h.LeadershipResults)
 			})
 		})
 	})
