@@ -43,6 +43,8 @@ func NewRouter(d *Deps, jwtSecret string, corsOrigins []string) http.Handler {
 
 		// Penilaian Formatif
 		pr.Get("/me/teaching-assignments", h.MyTeachingAssignments)
+		pr.Get("/formative/headers", h.ListFormativeHeaders)
+		pr.Put("/formative/headers", h.UpsertFormativeHeader)
 		pr.Get("/formative", h.ListFormativeGrades)
 		pr.Put("/formative", h.UpsertFormativeGrades)
 

@@ -731,9 +731,18 @@ func (a *App) DownloadUsersTemplate(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 	sheetName := "Data Pengguna"
 	f.SetSheetName("Sheet1", sheetName)
-	headers := []string{"Nama", "Email", "Telepon", "Peran (guru/siswa)"}
+	// Nama/Email/Peran are validated as required by ImportUsers above;
+	// Telepon is optional. Marked with a red asterisk so the mandatory
+	// columns are visually obvious in the downloaded file.
+	headers := []string{"Nama *", "Email *", "Telepon", "Peran (guru/siswa) *"}
 	f.SetSheetRow(sheetName, "A1", &headers)
 	f.SetSheetRow(sheetName, "A2", &[]string{"Budi Santoso", "budi@example.com", "08123456789", "siswa"})
+	mandatoryStyle, err := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true, Color: "C00000"}})
+	if err == nil {
+		for _, cellRef := range []string{"A1", "B1", "D1"} {
+			f.SetCellStyle(sheetName, cellRef, cellRef, mandatoryStyle)
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 	w.Header().Set("Content-Disposition", "attachment; filename=template_data_pengguna.xlsx")

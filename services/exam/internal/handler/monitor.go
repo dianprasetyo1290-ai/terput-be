@@ -15,6 +15,7 @@ type rosterRow struct {
 	AttemptID    string   `json:"attempt_id"`
 	UserID       string   `json:"user_id"`
 	NamaSiswa    string   `json:"nama_siswa"`
+	ClassroomID  string   `json:"classroom_id"` // Added for Pantau Ujian finding
 	WaktuSelesai *string  `json:"waktu_selesai"`
 	JawabanBenar string   `json:"jawaban_benar"` // e.g. "15/20"
 	Nilai        *float64 `json:"nilai"`
@@ -77,14 +78,14 @@ func (h *Handler) Monitor(w http.ResponseWriter, r *http.Request) {
 		attemptByUser[a.UserID] = a
 	}
 
-	// Best-effort full roster, unioned across every classroom this exam
-	// targets; if academic-service is unreachable for one, the others still
-	// come through rather than the whole roster going empty. addRow's `seen`
-	// guard also protects against a student double-counted if a classroom
-	// lookup ever returned them more than once.
+	studentClassroomMap := make(map[string]string)
 	var roster []httpclient.ClassroomStudentDTO
 	for _, cid := range classroomIDs {
-		roster = append(roster, h.Internal.ClassroomStudents(cid)...)
+		students := h.Internal.ClassroomStudents(cid)
+		for _, s := range students {
+			studentClassroomMap[s.StudentUserID] = cid
+		}
+		roster = append(roster, students...)
 	}
 	seen := make(map[string]bool, len(roster))
 	rows := make([]rosterRow, 0, len(roster)+len(attempts))
@@ -96,6 +97,11 @@ func (h *Handler) Monitor(w http.ResponseWriter, r *http.Request) {
 		}
 		seen[userID] = true
 		a, hasAttempt := attemptByUser[userID]
+
+		cid := studentClassroomMap[userID]
+		if cid == "" && hasAttempt {
+			cid = a.ClassroomID
+		}
 
 		// Item 13 / Filter Constraint: If the student doesn't have an attempt yet,
 		// only show them in the monitor list if they are actually enrolled in this
@@ -114,6 +120,7 @@ func (h *Handler) Monitor(w http.ResponseWriter, r *http.Request) {
 			No:           len(rows) + 1,
 			UserID:       userID,
 			NamaSiswa:    h.Internal.UserName(userID), // best-effort; "" if identity-service unreachable, see README
+			ClassroomID:  cid,
 			Status:       model.StatusBelumMulai,
 			JawabanBenar: "-/" + itoaSimple(questionCount),
 		}

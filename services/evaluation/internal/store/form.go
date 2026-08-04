@@ -31,6 +31,7 @@ func (s *FormStore) BootstrapDefaults(ctx context.Context, schoolID string) erro
 		if err != nil {
 			return err
 		}
+		var keepCodes []string
 		for i, it := range f.Items {
 			labels, _ := json.Marshal(it.ScoreLabels)
 			if _, err := tx.Exec(ctx, `
@@ -45,6 +46,10 @@ func (s *FormStore) BootstrapDefaults(ctx context.Context, schoolID string) erro
 				formID, schoolID, it.Code, it.Indicator, it.IndicatorEn, it.Weight, labels, i+1); err != nil {
 				return err
 			}
+			keepCodes = append(keepCodes, it.Code)
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM teacher_evaluation_items WHERE form_id = $1 AND code != ALL($2)`, formID, keepCodes); err != nil {
+			return err
 		}
 	}
 	return tx.Commit(ctx)

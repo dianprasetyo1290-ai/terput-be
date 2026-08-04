@@ -28,8 +28,9 @@ type examReq struct {
 	ExamTypeID     string  `json:"exam_type_id"` // Tipe Ujian
 	Title          string  `json:"title"`        // Judul Ujian
 	Description    *string `json:"description"`  // Deskripsi/catatan (optional)
-	ClassroomID    string  `json:"classroom_id"` // Mata Pelajaran: kelas (single-classroom path)
-	SubjectID      string  `json:"subject_id"`   // Mata Pelajaran: mapel (single-classroom path)
+	ClassroomID    string   `json:"classroom_id"`  // Mata Pelajaran: kelas (single-classroom path)
+	ClassroomIDs   []string `json:"classroom_ids"` // for multi select update
+	SubjectID      string   `json:"subject_id"`    // Mata Pelajaran: mapel (single-classroom path)
 	// ClassroomAssignments: when set (guru's multi-select Mata Pelajaran
 	// checkboxes), ClassroomID/SubjectID above are ignored and one exam is
 	// created per pair instead — see CreateExam.
@@ -49,7 +50,7 @@ type examReq struct {
 // where classroom_id/subject_id come from ClassroomAssignments instead.
 func (h *Handler) validateExamReq(req examReq, c *common.Claims, skipClassroomSubject bool) (string, bool, time.Time, time.Time) {
 	if req.AcademicYearID == "" || req.TermID == "" || req.ExamTypeID == "" || req.Title == "" ||
-		(!skipClassroomSubject && (req.ClassroomID == "" || req.SubjectID == "")) {
+		(!skipClassroomSubject && ((req.ClassroomID == "" && len(req.ClassroomIDs) == 0) || req.SubjectID == "")) {
 		return "academic_year_id, term_id, exam_type_id, title, classroom_id and subject_id are all mandatory", false, time.Time{}, time.Time{}
 	}
 	start, err := time.Parse(time.RFC3339, req.StartAt)
@@ -163,6 +164,7 @@ func (h *Handler) CreateExam(w http.ResponseWriter, r *http.Request) {
 		Title:          req.Title,
 		Description:    req.Description,
 		ClassroomID:    req.ClassroomID,
+		ClassroomIDs:   req.ClassroomIDs,
 		SubjectID:      req.SubjectID,
 		TeacherID:      teacherID,
 		StartAt:        start,
@@ -258,7 +260,7 @@ func (h *Handler) UpdateExam(w http.ResponseWriter, r *http.Request) {
 	e := &model.Exam{
 		ID: id, SchoolID: existing.SchoolID,
 		TermID: req.TermID, ExamTypeID: req.ExamTypeID, Title: req.Title, Description: req.Description,
-		ClassroomID: req.ClassroomID, SubjectID: req.SubjectID, TeacherID: req.TeacherID,
+		ClassroomID: req.ClassroomID, ClassroomIDs: req.ClassroomIDs, SubjectID: req.SubjectID, TeacherID: req.TeacherID,
 		StartAt: start, EndAt: end, IsShuffled: req.IsShuffled,
 	}
 	if err := h.Store.UpdateExam(r.Context(), e); err != nil {

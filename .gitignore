@@ -8,3 +8,6 @@ tmp/
 vendor/
 *.dump
 .claude/
+*.tar.gz
+web/playwright-report/
+web/test-results/

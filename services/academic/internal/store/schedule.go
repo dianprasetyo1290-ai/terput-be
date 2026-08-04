@@ -170,6 +170,12 @@ func (s *Store) ListSchedulesForTeacher(ctx context.Context, schoolID, teacherUs
 // they've actually checked in (attendance only ever sees a class_sessions
 // row once check-in happens).
 func (s *Store) ListSchedulesActiveNow(ctx context.Context, schoolID string) ([]model.Schedule, error) {
+	// schedule_periods.start_time/end_time are wall-clock Indonesian local
+	// time (WIB, Asia/Jakarta), but the Postgres server (this Docker image,
+	// no explicit timezone config) runs its clock in UTC -- so CURRENT_TIME/
+	// now() are 7 hours off from what the schedule times mean. Evaluate
+	// "now" in Asia/Jakarta explicitly, or this silently misses every
+	// active class.
 	q := `
 		SELECT s.id, s.school_id, s.academic_year_id, s.classroom_id, s.schedule_period_id, s.classroom_subject_id, s.created_at, s.updated_at,
 		       sub.name, c.name, sp.day_of_week, sp.period_no, sp.start_time, sp.end_time, cs.teacher_user_id, sub.id
@@ -179,9 +185,10 @@ func (s *Store) ListSchedulesActiveNow(ctx context.Context, schoolID string) ([]
 		JOIN subjects sub ON sub.id = cs.subject_id
 		JOIN classrooms c ON c.id = s.classroom_id
 		WHERE s.school_id = $1
-		  AND sp.day_of_week = EXTRACT(ISODOW FROM now())::int
+		  AND sp.day_of_week = EXTRACT(ISODOW FROM (now() AT TIME ZONE 'Asia/Jakarta'))::int
 		  AND sp.start_time ~ '^[0-9]{2}:[0-9]{2}' AND sp.end_time ~ '^[0-9]{2}:[0-9]{2}'
-		  AND sp.start_time::time <= CURRENT_TIME AND sp.end_time::time > CURRENT_TIME
+		  AND sp.start_time::time <= (now() AT TIME ZONE 'Asia/Jakarta')::time
+		  AND sp.end_time::time > (now() AT TIME ZONE 'Asia/Jakarta')::time
 		ORDER BY sp.period_no
 	`
 	rows, err := s.DB.QueryContext(ctx, q, schoolID)

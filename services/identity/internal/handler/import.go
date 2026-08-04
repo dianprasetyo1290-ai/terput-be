@@ -151,6 +151,7 @@ func parseImportFile(f *excelize.File, schoolNameOverride string) *parsedImport 
 				"address": cell(row, hdr, "alamat"), "religion": cell(row, hdr, "agama"),
 				"nuptk": cell(row, hdr, "nuptk"), "tahun_akademik": cell(row, hdr, "tahun akademik"),
 				"pendidikan_terakhir": cell(row, hdr, "pendidikan terakhir"),
+				"row_number": fmt.Sprintf("%d", i+1),
 			})
 			pi.guruOrder = append(pi.guruOrder, email)
 			if name != "" {
@@ -186,6 +187,7 @@ func parseImportFile(f *excelize.File, schoolNameOverride string) *parsedImport 
 				"nisn": cell(row, hdr, "nisn"), "kelas": cell(row, hdr, "kelas"),
 				"tahun_akademik": cell(row, hdr, "tahun akademik"), "asal_sekolah": cell(row, hdr, "asal sekolah"),
 				"nama_orang_tua": cell(row, hdr, "nama orang tua"),
+				"row_number": fmt.Sprintf("%d", i+1),
 			})
 			pi.siswaOrder = append(pi.siswaOrder, email)
 		}
@@ -261,7 +263,11 @@ func parseGenericStagedSheet(f *excelize.File, sheet string) (rows []map[string]
 func indexHeader(header []string) map[string]int {
 	idx := map[string]int{}
 	for i, h := range header {
-		idx[strings.ToLower(strings.TrimSpace(h))] = i
+		// Template's mandatory columns are marked "Header *" (red asterisk) —
+		// strip the marker so a downloaded-then-refilled template still
+		// matches the plain column-name lookups below.
+		h = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(h)), " *")
+		idx[h] = i
 	}
 	return idx
 }
@@ -303,6 +309,7 @@ func (a *App) DryRunImport(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	a.checkExistingEmails(pi)
 	common.WriteJSON(w, http.StatusOK, pi.report, nil)
 }
 
@@ -324,6 +331,9 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "academic_year is required")
 		return
 	}
+	
+	a.checkExistingEmails(pi)
+	
 	if !pi.report.OK {
 		common.WriteValidationError(w, http.StatusUnprocessableEntity, "dry run found problems; fix them before importing", pi.report.Errors)
 		return
@@ -519,6 +529,66 @@ func (a *App) readImportUpload(r *http.Request) (*parsedImport, error) {
 	return parseImportFile(f, schoolNameOverride), nil
 }
 
+func (a *App) checkExistingEmails(pi *parsedImport) {
+	if len(pi.guru) == 0 && len(pi.siswa) == 0 {
+		return
+	}
+
+	args := []interface{}{}
+	placeholders := []string{}
+	emailToLoc := map[string][]importRowError{}
+	seenInQuery := map[string]bool{}
+
+	addEmail := func(e, sheet, rowStr string) {
+		if e == "" {
+			return
+		}
+		rowNum := 0
+		fmt.Sscanf(rowStr, "%d", &rowNum)
+		emailToLoc[e] = append(emailToLoc[e], importRowError{
+			Sheet: sheet,
+			Row:   rowNum,
+			Field: "email",
+		})
+		if !seenInQuery[e] {
+			args = append(args, e)
+			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+			seenInQuery[e] = true
+		}
+	}
+
+	for _, g := range pi.guru {
+		addEmail(g["email"], sheetGuru, g["row_number"])
+	}
+	for _, s := range pi.siswa {
+		addEmail(s["email"], sheetSiswa, s["row_number"])
+	}
+
+	if len(args) == 0 {
+		return
+	}
+
+	// Postgres can error if there are too many parameters, but realistically an import file
+	// has less than ~10,000 rows, which fits in the 65535 parameter limit.
+	query := "SELECT email FROM users WHERE email IN (" + strings.Join(placeholders, ",") + ")"
+	rows, err := a.DB.Query(query, args...)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var email string
+		if err := rows.Scan(&email); err == nil {
+			for _, loc := range emailToLoc[email] {
+				loc.Issue = "Username/email sudah terdaftar di sistem"
+				pi.report.Errors = append(pi.report.Errors, loc)
+				pi.report.OK = false
+			}
+		}
+	}
+}
+
 // DownloadTemplate serves a blank .xlsx with the 8 required sheets, header
 // rows, and one example data row each, for the "Download Template" button.
 // Sheet names/headers match the reference file verbatim — see task notes.
@@ -530,20 +600,23 @@ func (a *App) DownloadTemplate(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 
 	type sheetDef struct {
-		headers []string
-		example []string
+		headers   []string
+		mandatory map[string]bool // header text (as in `headers`) that is required by parseImportFile/Import
+		example   []string
 	}
 	sheets := []struct {
 		name string
 		def  sheetDef
 	}{
 		{sheetIdentitas, sheetDef{
-			headers: []string{"Nama Sekolah", "Alamat", "Kelurahan", "Kecamatan", "Kota/Kabupaten", "Provinsi", "Nomor Induk", "Tahun Berdiri", "Nomor telpon", "Email", "Link Logo sekolah (opsional)"},
-			example: []string{"SD Negeri 1 Menteng", "Jl. Cikini Raya No. 10", "Menteng", "Menteng", "Jakarta Pusat", "DKI Jakarta", "20100001", "1985", "021-31923456", "info@sdn1menteng.sch.id", "https://sdn1menteng.sch.id/logo.png"},
+			headers:   []string{"Nama Sekolah", "Alamat", "Kelurahan", "Kecamatan", "Kota/Kabupaten", "Provinsi", "Nomor Induk", "Tahun Berdiri", "Nomor telpon", "Email", "Link Logo sekolah (opsional)"},
+			mandatory: map[string]bool{"Nama Sekolah": true},
+			example:   []string{"SD Negeri 1 Menteng", "Jl. Cikini Raya No. 10", "Menteng", "Menteng", "Jakarta Pusat", "DKI Jakarta", "20100001", "1985", "021-31923456", "info@sdn1menteng.sch.id", "https://sdn1menteng.sch.id/logo.png"},
 		}},
 		{sheetGuru, sheetDef{
-			headers: []string{"Nama Guru", "NUPTK", "Tahun Akademik", "Tanggal Lahir", "Tempat Lahir", "Alamat", "No Telepon", "Email", "Pendidikan Terakhir", "Agama"},
-			example: []string{"Siti Rahmawati, S.Pd", "1234567890123456", "2026/2027", "1985-04-12", "Jakarta", "Jl. Kebon Sirih No. 5, Jakarta Pusat", "081234567890", "siti.rahmawati@sdn1menteng.sch.id", "S1 Pendidikan Guru SD", "Islam"},
+			headers:   []string{"Nama Guru", "NUPTK", "Tahun Akademik", "Tanggal Lahir", "Tempat Lahir", "Alamat", "No Telepon", "Email", "Pendidikan Terakhir", "Agama"},
+			mandatory: map[string]bool{"Email": true},
+			example:   []string{"Siti Rahmawati, S.Pd", "1234567890123456", "2026/2027", "1985-04-12", "Jakarta", "Jl. Kebon Sirih No. 5, Jakarta Pusat", "081234567890", "siti.rahmawati@sdn1menteng.sch.id", "S1 Pendidikan Guru SD", "Islam"},
 		}},
 		{sheetOrangTua, sheetDef{
 			headers: []string{"Nama", "Email", "No Telepon", "Alamat"},
@@ -554,12 +627,14 @@ func (a *App) DownloadTemplate(w http.ResponseWriter, r *http.Request) {
 			example: []string{"X", "A", "Siti Rahmawati, S.Pd"},
 		}},
 		{sheetSiswa, sheetDef{
-			headers: []string{"Nama", "NISN", "Kelas", "Tahun Akademik", "Tanggal Lahir", "Tempat Lahir", "Alamat", "No Telepon", "Email", "Asal Sekolah", "Agama", "Nama Orang Tua"},
-			example: []string{"Ahmad Fauzan", "0051234567", "X A", "2026/2027", "2012-08-20", "Jakarta", "Jl. Mangga No. 3, Jakarta Pusat", "081298765432", "ahmad.fauzan@gmail.com", "TK Islam Bunga Bangsa", "Islam", "Budi Santoso"},
+			headers:   []string{"Nama", "NISN", "Kelas", "Tahun Akademik", "Tanggal Lahir", "Tempat Lahir", "Alamat", "No Telepon", "Email", "Asal Sekolah", "Agama", "Nama Orang Tua"},
+			mandatory: map[string]bool{"Email": true},
+			example:   []string{"Ahmad Fauzan", "0051234567", "X A", "2026/2027", "2012-08-20", "Jakarta", "Jl. Mangga No. 3, Jakarta Pusat", "081298765432", "ahmad.fauzan@gmail.com", "TK Islam Bunga Bangsa", "Islam", "Budi Santoso"},
 		}},
 		{sheetOrganisasi, sheetDef{
-			headers: []string{"Jabatan", "Nama"},
-			example: []string{"Kepala Sekolah", "Siti Rahmawati, S.Pd"},
+			headers:   []string{"Jabatan", "Nama"},
+			mandatory: map[string]bool{"Jabatan": true, "Nama": true},
+			example:   []string{"Kepala Sekolah", "Siti Rahmawati, S.Pd"},
 		}},
 		{sheetMataPelajaran, sheetDef{
 			headers: []string{"Mata Pelajaran", "Guru Mata Pelajaran"},
@@ -569,6 +644,12 @@ func (a *App) DownloadTemplate(w http.ResponseWriter, r *http.Request) {
 			headers: []string{"Nama Ekstrakurikuler", "Nama Pembina"},
 			example: []string{"Pramuka", "Siti Rahmawati, S.Pd"},
 		}},
+	}
+
+	mandatoryStyle, err := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true, Color: "C00000"}})
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to build template style")
+		return
 	}
 
 	first := true
@@ -582,7 +663,12 @@ func (a *App) DownloadTemplate(w http.ResponseWriter, r *http.Request) {
 		}
 		for i, h := range s.def.headers {
 			cellRef, _ := excelize.CoordinatesToCellName(i+1, 1)
-			f.SetCellValue(name, cellRef, h)
+			if s.def.mandatory[h] {
+				f.SetCellValue(name, cellRef, h+" *")
+				f.SetCellStyle(name, cellRef, cellRef, mandatoryStyle)
+			} else {
+				f.SetCellValue(name, cellRef, h)
+			}
 		}
 		for i, v := range s.def.example {
 			cellRef, _ := excelize.CoordinatesToCellName(i+1, 2)

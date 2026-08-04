@@ -10,6 +10,11 @@ type FormativeRow struct {
 	Scores    []float64 `json:"scores"`
 }
 
+type FormativeHeader struct {
+	OrderIndex int    `json:"order_index"`
+	HeaderName string `json:"header_name"`
+}
+
 // ListFormativeGrades returns every student's formative score columns for a
 // (term, classroom_subject), ordered by order_index — the guru's
 // spreadsheet-style grid (see old app's TeacherFormativeLite).
@@ -81,4 +86,34 @@ func (s *Store) SumFormativeGrades(ctx context.Context, termID, classroomSubject
 		return 0, 0
 	}
 	return s2.Float64, c
+}
+
+func (s *Store) ListFormativeHeaders(ctx context.Context, termID, classroomSubjectID string) ([]FormativeHeader, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT order_index, header_name FROM formative_headers
+		WHERE term_id = $1 AND classroom_subject_id = $2
+		ORDER BY order_index`, termID, classroomSubjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var headers []FormativeHeader
+	for rows.Next() {
+		var h FormativeHeader
+		if err := rows.Scan(&h.OrderIndex, &h.HeaderName); err != nil {
+			return nil, err
+		}
+		headers = append(headers, h)
+	}
+	return headers, rows.Err()
+}
+
+func (s *Store) UpsertFormativeHeader(ctx context.Context, termID, classroomSubjectID string, orderIndex int, headerName string) error {
+	_, err := s.DB.ExecContext(ctx, `
+		INSERT INTO formative_headers (term_id, classroom_subject_id, order_index, header_name)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (classroom_subject_id, term_id, order_index) DO UPDATE SET header_name = EXCLUDED.header_name, updated_at = NOW()`,
+		termID, classroomSubjectID, orderIndex, headerName)
+	return err
 }

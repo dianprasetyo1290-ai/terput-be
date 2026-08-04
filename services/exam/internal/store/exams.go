@@ -215,7 +215,19 @@ func (s *Store) GetExam(ctx context.Context, id, schoolID string) (*model.Exam, 
 }
 
 func (s *Store) UpdateExam(ctx context.Context, e *model.Exam) error {
-	res, err := s.DB.ExecContext(ctx, `
+	classroomIDs := e.ClassroomIDs
+	if len(classroomIDs) == 0 {
+		classroomIDs = []string{e.ClassroomID}
+	}
+	e.ClassroomID = classroomIDs[0]
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.ExecContext(ctx, `
 		UPDATE exams SET term_id=$1, exam_type_id=$2, title=$3, description=$4, classroom_id=$5, subject_id=$6,
 			teacher_id=$7, start_at=$8, end_at=$9, is_shuffled=$10, updated_at=now()
 		WHERE id=$11 AND school_id=$12 AND is_published=false AND deleted_at IS NULL`,
@@ -228,7 +240,19 @@ func (s *Store) UpdateExam(ctx context.Context, e *model.Exam) error {
 	if n == 0 {
 		return ErrNotEditable
 	}
-	return nil
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM exam_classrooms WHERE exam_id=$1`, e.ID); err != nil {
+		return err
+	}
+	for _, cid := range classroomIDs {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO exam_classrooms (exam_id, classroom_id) VALUES ($1,$2)
+			ON CONFLICT (exam_id, classroom_id) DO NOTHING`, e.ID, cid); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 var ErrNotEditable = fmt.Errorf("exam is not editable (published or not found)")

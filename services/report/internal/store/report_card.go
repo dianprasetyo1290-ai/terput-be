@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/lib/pq"
+
 	"skci/report/internal/model"
 )
 
@@ -288,6 +290,21 @@ func (s *Store) UpsertSubjectComputed(ctx context.Context, reportCardID, schoolI
 			sync_error = EXCLUDED.sync_error,
 			updated_at = now()`,
 		reportCardID, schoolID, subjectID, subjectName, subjectCode, computedScore, stsScore, sasScore, sourceCount, syncedAt, syncErr)
+	return err
+}
+
+// DeleteSubjectsNotIn removes report_card_subjects rows for subjects that
+// are no longer in the student's allowed set (e.g. a religion-mismatched
+// Agama variant provisioned before the allowed-subjects filter existed, or
+// before a student's religion was corrected) -- otherwise a subject the
+// filter now skips upserting still lingers forever with its old row.
+func (s *Store) DeleteSubjectsNotIn(ctx context.Context, reportCardID string, allowedSubjectIDs []string) error {
+	if len(allowedSubjectIDs) == 0 {
+		_, err := s.DB.ExecContext(ctx, `DELETE FROM report_card_subjects WHERE report_card_id = $1`, reportCardID)
+		return err
+	}
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM report_card_subjects WHERE report_card_id = $1 AND NOT (subject_id::text = ANY($2))`,
+		reportCardID, pq.Array(allowedSubjectIDs))
 	return err
 }
 

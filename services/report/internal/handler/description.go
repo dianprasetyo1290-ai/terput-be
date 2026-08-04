@@ -62,10 +62,23 @@ func (h *Handler) GetSubjectDescriptionGrid(w http.ResponseWriter, r *http.Reque
 		if err != nil {
 			continue
 		}
+		
+		var allowedSubjects map[string]bool
+		allowedFetched := false
+		
 		for _, sub := range subjects {
 			if sub.SubjectID != subjectID {
 				continue
 			}
+			
+			if !allowedFetched {
+				allowedSubjects = h.d.Academic.ActiveSubjectIDs(ctx, rc.StudentID, claims.SchoolID, rc.AcademicYearID)
+				allowedFetched = true
+			}
+			if allowedSubjects != nil && !allowedSubjects[sub.SubjectID] {
+				continue // Skip if this student is not enrolled in this specific religion's variant of Agama
+			}
+			
 			name := ""
 			if rc.StudentName != nil {
 				name = *rc.StudentName

@@ -33,12 +33,16 @@ import (
 func classifyMapping(mappingRapor string) string {
 	lower := strings.ToLower(strings.TrimSpace(mappingRapor))
 	switch {
-	case strings.Contains(lower, "sts"), lower == "mid_exam":
+	case strings.Contains(lower, "sts") || lower == "mid_exam":
 		return "sts"
-	case strings.Contains(lower, "sas"), lower == "final_exam":
+	case strings.Contains(lower, "sas") || lower == "final_exam":
 		return "sas"
+	case strings.Contains(lower, "sumatif"):
+		return "sumatif"
+	case strings.Contains(lower, "formatif"):
+		return "formatif"
 	default:
-		return ""
+		return "other"
 	}
 }
 
@@ -278,44 +282,64 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 		// just their own. nil (lookup failed) fails open -- don't drop a
 		// student's real subjects just because academic-service hiccuped.
 		allowedSubjects := h.d.Academic.ActiveSubjectIDs(ctx, studentID, schoolID, academicYearID)
+		if allowedSubjects != nil {
+			allowedIDs := make([]string, 0, len(allowedSubjects))
+			for sid := range allowedSubjects {
+				allowedIDs = append(allowedIDs, sid)
+			}
+			if err := h.d.Store.DeleteSubjectsNotIn(ctx, rc.ID, allowedIDs); err != nil {
+				warnings["subject_cleanup_"+studentID] = err.Error()
+			}
+		}
 		for _, subj := range subjects {
 			if allowedSubjects != nil && !allowedSubjects[subj.SubjectID] {
 				continue
 			}
 			var computed, stsScore, sasScore *float64
-			count := 0
 			var sErr *string
 			examIDs := examsBySubject[subj.SubjectID]
+			
+			sumatifSum := 0.0
+			sumatifCount := 0
+			formatifExamSum := 0.0
+			formatifExamCount := 0
+			
+			stsSum, sasSum := 0.0, 0.0
+			stsCount, sasCount := 0, 0
+			
 			if len(examIDs) == 0 {
 				if exams == nil {
 					e := "exam-service unavailable"
 					sErr = &e
 				}
 			} else {
-				sum := 0.0
-				stsSum, sasSum := 0.0, 0.0
-				stsCount, sasCount := 0, 0
 				for _, eid := range examIDs {
 					scoresForExam, ok := scoresByExam[eid]
 					if !ok {
 						continue
 					}
 					if sc, ok := scoresForExam[studentID]; ok && sc != nil {
-						sum += *sc
-						count++
-						switch examCategory[eid] {
+						cat := examCategory[eid]
+						switch cat {
 						case "sts":
 							stsSum += *sc
 							stsCount++
+							sumatifSum += *sc
+							sumatifCount++
 						case "sas":
 							sasSum += *sc
 							sasCount++
+							sumatifSum += *sc
+							sumatifCount++
+						case "sumatif":
+							sumatifSum += *sc
+							sumatifCount++
+						default:
+							// "formatif" or anything else mapped
+							formatifExamSum += *sc
+							formatifExamCount++
 						}
 					}
-				}
-				if count > 0 {
-					avg := sum / float64(count)
-					computed = &avg
 				}
 				if stsCount > 0 {
 					avg := stsSum / float64(stsCount)
@@ -326,19 +350,34 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 					sasScore = &avg
 				}
 			}
-			formativeSum, formativeCount := h.d.Store.SumFormativeGrades(ctx, termID, subj.ID, studentID)
-			if formativeCount > 0 {
-				sum := formativeSum + (func() float64 {
-					if computed != nil {
-						return *computed * float64(count)
-					}
-					return 0
-				}())
-				totalCount := count + formativeCount
-				avg := sum / float64(totalCount)
-				computed = &avg
-				count = totalCount
+			
+			dbFormativeSum, dbFormativeCount := h.d.Store.SumFormativeGrades(ctx, termID, subj.ID, studentID)
+			
+			totalFormatifSum := formatifExamSum + dbFormativeSum
+			totalFormatifCount := formatifExamCount + dbFormativeCount
+			
+			var avgFormatif *float64
+			if totalFormatifCount > 0 {
+				avg := totalFormatifSum / float64(totalFormatifCount)
+				avgFormatif = &avg
 			}
+			
+			var avgSumatif *float64
+			if sumatifCount > 0 {
+				avg := sumatifSum / float64(sumatifCount)
+				avgSumatif = &avg
+			}
+			
+			if avgSumatif != nil && avgFormatif != nil {
+				val := 0.7*(*avgFormatif) + 0.3*(*avgSumatif)
+				computed = &val
+			} else if avgFormatif != nil {
+				computed = avgFormatif
+			} else if avgSumatif != nil {
+				computed = avgSumatif
+			}
+			
+			count := totalFormatifCount + sumatifCount
 			// Nilai Akhir = weighted blend of academic performance (exam +
 			// formatif, pooled above) and kehadiran -- illustrative weights
 			// per the spec ("bobot bisa disesuaikan kebijakan sekolah"), not

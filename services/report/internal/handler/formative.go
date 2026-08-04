@@ -110,3 +110,63 @@ func (h *Handler) UpsertFormativeGrades(w http.ResponseWriter, r *http.Request) 
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"}, nil)
 }
+
+type FormativeHeaderOut struct {
+	OrderIndex int    `json:"order_index"`
+	HeaderName string `json:"header_name"`
+}
+
+// ListFormativeHeaders: GET /formative/headers?term_id=&classroom_subject_id=
+func (h *Handler) ListFormativeHeaders(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if !isStaff(claims) {
+		common.WriteError(w, http.StatusForbidden, "admin/superadmin/guru only")
+		return
+	}
+	termID := r.URL.Query().Get("term_id")
+	scsID := r.URL.Query().Get("classroom_subject_id")
+	if termID == "" || scsID == "" {
+		common.WriteError(w, http.StatusBadRequest, "term_id and classroom_subject_id are required")
+		return
+	}
+	headers, err := h.d.Store.ListFormativeHeaders(r.Context(), termID, scsID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to fetch headers")
+		return
+	}
+	out := make([]FormativeHeaderOut, len(headers))
+	for i, hdr := range headers {
+		out[i] = FormativeHeaderOut{OrderIndex: hdr.OrderIndex, HeaderName: hdr.HeaderName}
+	}
+	common.WriteJSON(w, http.StatusOK, out, nil)
+}
+
+type upsertFormativeHeaderBody struct {
+	TermID             string `json:"term_id"`
+	ClassroomSubjectID string `json:"classroom_subject_id"`
+	OrderIndex         int    `json:"order_index"`
+	HeaderName         string `json:"header_name"`
+}
+
+// UpsertFormativeHeader: PUT /formative/headers
+func (h *Handler) UpsertFormativeHeader(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if claims == nil || claims.ActiveRole != "guru" {
+		common.WriteError(w, http.StatusForbidden, "only guru can enter formative headers")
+		return
+	}
+	var body upsertFormativeHeaderBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if body.TermID == "" || body.ClassroomSubjectID == "" || body.HeaderName == "" {
+		common.WriteError(w, http.StatusBadRequest, "term_id, classroom_subject_id and header_name are required")
+		return
+	}
+	if err := h.d.Store.UpsertFormativeHeader(r.Context(), body.TermID, body.ClassroomSubjectID, body.OrderIndex, body.HeaderName); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to save formative header")
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"}, nil)
+}
