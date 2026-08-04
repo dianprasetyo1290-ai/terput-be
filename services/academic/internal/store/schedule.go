@@ -180,6 +180,7 @@ func (s *Store) ListSchedulesActiveNow(ctx context.Context, schoolID string) ([]
 		JOIN classrooms c ON c.id = s.classroom_id
 		WHERE s.school_id = $1
 		  AND sp.day_of_week = EXTRACT(ISODOW FROM now())::int
+		  AND sp.start_time ~ '^[0-9]{2}:[0-9]{2}' AND sp.end_time ~ '^[0-9]{2}:[0-9]{2}'
 		  AND sp.start_time::time <= CURRENT_TIME AND sp.end_time::time > CURRENT_TIME
 		ORDER BY sp.period_no
 	`
