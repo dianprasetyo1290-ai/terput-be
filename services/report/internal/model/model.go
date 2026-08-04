@@ -57,6 +57,7 @@ type ReportCardSubject struct {
 	SubjectName   *string  `json:"subject_name,omitempty"`
 	SubjectCode   *string  `json:"subject_code,omitempty"`
 	ComputedScore *float64 `json:"computed_score"`
+	FormatifScore *float64 `json:"formatif_score"`
 	OverrideScore *float64 `json:"override_score"`
 	FinalScore    *float64 `json:"final_score"`
 	// StsScore/SasScore: same aggregation as ComputedScore but scoped to

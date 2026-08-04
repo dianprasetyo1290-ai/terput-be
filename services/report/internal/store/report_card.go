@@ -275,21 +275,22 @@ func (s *Store) UpdateAttendance(ctx context.Context, id string, hadir, sakit, i
 // UpsertSubjectComputed writes/refreshes the computed_score for one
 // subject row on a report card. It never touches override_score, notes, or
 // overridden_* columns — an admin's manual adjustment survives a regenerate.
-func (s *Store) UpsertSubjectComputed(ctx context.Context, reportCardID, schoolID, subjectID string, subjectName, subjectCode *string, computedScore, stsScore, sasScore *float64, sourceCount int, syncedAt *time.Time, syncErr *string) error {
+func (s *Store) UpsertSubjectComputed(ctx context.Context, reportCardID, schoolID, subjectID string, subjectName, subjectCode *string, computedScore, formatifScore, stsScore, sasScore *float64, sourceCount int, syncedAt *time.Time, syncErr *string) error {
 	_, err := s.DB.ExecContext(ctx, `
-		INSERT INTO report_card_subjects (report_card_id, school_id, subject_id, subject_name, subject_code, computed_score, sts_score, sas_score, source_exam_count, last_synced_at, sync_error)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		INSERT INTO report_card_subjects (report_card_id, school_id, subject_id, subject_name, subject_code, computed_score, formatif_score, sts_score, sas_score, source_exam_count, last_synced_at, sync_error)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 		ON CONFLICT (report_card_id, subject_id) DO UPDATE SET
 			subject_name = EXCLUDED.subject_name,
 			subject_code = EXCLUDED.subject_code,
 			computed_score = EXCLUDED.computed_score,
+			formatif_score = EXCLUDED.formatif_score,
 			sts_score = EXCLUDED.sts_score,
 			sas_score = EXCLUDED.sas_score,
 			source_exam_count = EXCLUDED.source_exam_count,
 			last_synced_at = EXCLUDED.last_synced_at,
 			sync_error = EXCLUDED.sync_error,
 			updated_at = now()`,
-		reportCardID, schoolID, subjectID, subjectName, subjectCode, computedScore, stsScore, sasScore, sourceCount, syncedAt, syncErr)
+		reportCardID, schoolID, subjectID, subjectName, subjectCode, computedScore, formatifScore, stsScore, sasScore, sourceCount, syncedAt, syncErr)
 	return err
 }
 
@@ -311,7 +312,7 @@ func (s *Store) DeleteSubjectsNotIn(ctx context.Context, reportCardID string, al
 func (s *Store) ListSubjects(ctx context.Context, reportCardID string) ([]model.ReportCardSubject, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, report_card_id, school_id, subject_id, subject_name, subject_code, computed_score,
-			sts_score, sas_score,
+			formatif_score, sts_score, sas_score,
 			override_score, source_exam_count, grade_label, notes, mid_note, final_note, overridden_by, overridden_at,
 			last_synced_at, sync_error, created_at, updated_at
 		FROM report_card_subjects WHERE report_card_id = $1 ORDER BY subject_name NULLS LAST, created_at`, reportCardID)
@@ -324,12 +325,12 @@ func (s *Store) ListSubjects(ctx context.Context, reportCardID string) ([]model.
 	for rows.Next() {
 		var sub model.ReportCardSubject
 		var subjectName, subjectCode, gradeLabel, notes, midNote, finalNote, overriddenBy, syncError sql.NullString
-		var computedScore, stsScore, sasScore, overrideScore sql.NullFloat64
+		var computedScore, formatifScore, stsScore, sasScore, overrideScore sql.NullFloat64
 		var overriddenAt, lastSyncedAt sql.NullTime
 
 		if err := rows.Scan(
 			&sub.ID, &sub.ReportCardID, &sub.SchoolID, &sub.SubjectID, &subjectName, &subjectCode, &computedScore,
-			&stsScore, &sasScore,
+			&formatifScore, &stsScore, &sasScore,
 			&overrideScore, &sub.SourceExamCount, &gradeLabel, &notes, &midNote, &finalNote, &overriddenBy, &overriddenAt,
 			&lastSyncedAt, &syncError, &sub.CreatedAt, &sub.UpdatedAt,
 		); err != nil {
@@ -358,6 +359,10 @@ func (s *Store) ListSubjects(ctx context.Context, reportCardID string) ([]model.
 		if computedScore.Valid {
 			v := computedScore.Float64
 			sub.ComputedScore = &v
+		}
+		if formatifScore.Valid {
+			v := formatifScore.Float64
+			sub.FormatifScore = &v
 		}
 		if overrideScore.Valid {
 			v := overrideScore.Float64

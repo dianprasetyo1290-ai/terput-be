@@ -33,9 +33,9 @@ import (
 func classifyMapping(mappingRapor string) string {
 	lower := strings.ToLower(strings.TrimSpace(mappingRapor))
 	switch {
-	case strings.Contains(lower, "sts") || lower == "mid_exam":
+	case strings.Contains(lower, "sts") || lower == "mid_exam" || strings.Contains(lower, "tengah semester"):
 		return "sts"
-	case strings.Contains(lower, "sas") || lower == "final_exam":
+	case strings.Contains(lower, "sas") || lower == "final_exam" || strings.Contains(lower, "akhir jenjang") || strings.Contains(lower, "akhir semester"):
 		return "sas"
 	case strings.Contains(lower, "sumatif"):
 		return "sumatif"
@@ -44,6 +44,22 @@ func classifyMapping(mappingRapor string) string {
 	default:
 		return "other"
 	}
+}
+
+// classifyExamType is classifyMapping plus a fallback to the exam type's
+// own Name. Real prod data shows mapping_rapor and Name can drift apart —
+// e.g. exam_types rows named "Sumatif Tengah Semester"/"Sumatif Akhir
+// Jenjang" (the spec's literal categorization anchor: "dikategorikan
+// dengan tipe ujian ... merujuk pada master data di fitur Kelola Tipe
+// Ujian") but with mapping_rapor mistakenly left as "Semester 1"/"AKHIR
+// SEM" — both free-text fields an admin can type anything into. Name is
+// checked only when mapping_rapor doesn't resolve to sts/sas, so an
+// explicit mapping_rapor still wins.
+func classifyExamType(mappingRapor, name string) string {
+	if cat := classifyMapping(mappingRapor); cat == "sts" || cat == "sas" {
+		return cat
+	}
+	return classifyMapping(name)
 }
 
 func isAdmin(c *common.Claims) bool {
@@ -175,8 +191,10 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 		warnings["exam_types"] = err.Error()
 	}
 	mappingByExamType := map[string]string{}
+	nameByExamType := map[string]string{}
 	for _, et := range examTypes {
 		mappingByExamType[et.ID] = et.MappingRapor
+		nameByExamType[et.ID] = et.Name
 	}
 
 	examsBySubject := map[string][]string{}
@@ -187,7 +205,7 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 			continue // not mapped to any report bucket, e.g. old "TKA" type
 		}
 		examsBySubject[e.SubjectID] = append(examsBySubject[e.SubjectID], e.ID)
-		examCategory[e.ID] = classifyMapping(m)
+		examCategory[e.ID] = classifyExamType(m, nameByExamType[e.ExamTypeID])
 	}
 	scoresByExam := map[string]map[string]*float64{}
 	for _, e := range exams {
@@ -353,6 +371,12 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 			
 			dbFormativeSum, dbFormativeCount := h.d.Store.SumFormativeGrades(ctx, termID, subj.ID, studentID)
 			
+			var pureFormatif *float64
+			if dbFormativeCount > 0 {
+				avg := dbFormativeSum / float64(dbFormativeCount)
+				pureFormatif = &avg
+			}
+			
 			totalFormatifSum := formatifExamSum + dbFormativeSum
 			totalFormatifCount := formatifExamCount + dbFormativeCount
 			
@@ -392,7 +416,7 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 				computed = &blended
 			}
 			name, code := subj.Name, subj.Code
-			_ = h.d.Store.UpsertSubjectComputed(ctx, rc.ID, schoolID, subj.SubjectID, &name, &code, computed, stsScore, sasScore, count, nowPtr(), sErr)
+			_ = h.d.Store.UpsertSubjectComputed(ctx, rc.ID, schoolID, subj.SubjectID, &name, &code, computed, pureFormatif, stsScore, sasScore, count, nowPtr(), sErr)
 		}
 
 		full, _ := h.loadReportCard(ctx, rc.ID)

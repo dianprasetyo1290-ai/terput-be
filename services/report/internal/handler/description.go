@@ -13,6 +13,7 @@ type descriptionRow struct {
 	StudentName   string   `json:"student_name"`
 	ReportCardID  string   `json:"report_card_id"`
 	ComputedScore *float64 `json:"computed_score"`
+	FormatifScore *float64 `json:"formatif_score"`
 	OverrideScore *float64 `json:"override_score"`
 	FinalScore    *float64 `json:"final_score"` // "Nilai Berjalan" — override wins over computed
 	// StsScore/SasScore: the actual computed Sumatif Tengah/Akhir Semester
@@ -85,7 +86,7 @@ func (h *Handler) GetSubjectDescriptionGrid(w http.ResponseWriter, r *http.Reque
 			}
 			rows = append(rows, descriptionRow{
 				StudentID: rc.StudentID, StudentName: name, ReportCardID: rc.ID,
-				ComputedScore: sub.ComputedScore, OverrideScore: sub.OverrideScore, FinalScore: sub.Final(),
+				ComputedScore: sub.ComputedScore, FormatifScore: sub.FormatifScore, OverrideScore: sub.OverrideScore, FinalScore: sub.Final(),
 				StsScore: sub.StsScore, SasScore: sub.SasScore,
 				MidNote: sub.MidNote, FinalNote: sub.FinalNote,
 			})
