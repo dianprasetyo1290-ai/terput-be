@@ -98,6 +98,37 @@ func (ac *AcademicClient) GetTerm(ctx context.Context, termID string) (*Term, er
 // academic-service later scopes enrollments by term, but as of this
 // writing academic-service's ListClassroomStudents ignores it (enrollment
 // is classroom-scoped, not term-scoped, in its current schema).
+// ActiveSubjectIDs mirrors exam-service's httpclient.ActiveSubjectIDs and
+// attendance-service's client.activeSubjects (item 13, V4 — Agama
+// religion-based filtering): the set of subject_ids a student is actually
+// enrolled in per academic-service's Auto-Enroll Agama resolution. For
+// Agama specifically this is only the student's own religion's variant,
+// never the others -- report-service needs this so Generate Rapor and
+// E-Raport don't create a row (and show "Belum ada data") for every Agama
+// subject in the classroom, only the one the student actually takes.
+// Returns nil (not an error) on lookup failure -- callers fail open rather
+// than blocking report generation on a network blip.
+func (ac *AcademicClient) ActiveSubjectIDs(ctx context.Context, studentUserID, schoolID, academicYearID string) map[string]bool {
+	// academic-service returns full ClassroomSubject objects here, not a
+	// bare list of subject_id strings -- decoding into []string always
+	// failed silently (getJSON returning an error, this function falling
+	// back to nil/"fail open"), so the religion filter never actually took
+	// effect. Matches exam-service's httpclient.ActiveSubjectIDs, the
+	// working reference implementation.
+	var items []struct {
+		SubjectID string `json:"subject_id"`
+	}
+	path := fmt.Sprintf("/students/%s/active-subjects?school_id=%s&academic_year_id=%s", studentUserID, schoolID, academicYearID)
+	if err := ac.c.getJSON(ctx, "ActiveSubjectIDs", path, &items); err != nil {
+		return nil
+	}
+	out := make(map[string]bool, len(items))
+	for _, it := range items {
+		out[it.SubjectID] = true
+	}
+	return out
+}
+
 func (ac *AcademicClient) ListClassroomStudents(ctx context.Context, classroomID, termID string) ([]StudentEnrollment, error) {
 	var out []StudentEnrollment
 	path := fmt.Sprintf("/classrooms/%s/students?term_id=%s", classroomID, termID)

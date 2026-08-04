@@ -312,6 +312,74 @@ func (h *Handler) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"}, nil)
 }
 
+// GetScheduleByID: GET /schedules/{id}?school_id= — internal-consumable
+// (see main.go's InternalOrJWTMiddleware group). attendance-service's
+// check-in flow calls this to resolve classroom/subject/teacher/time AND
+// the current term for the schedule's academic year, since a guru's own
+// check-in request only ever carries schedule_id + whatever it happened to
+// already have on screen (previously nothing resolved server-side at all,
+// since this route didn't exist).
+func (h *Handler) GetScheduleByID(w http.ResponseWriter, r *http.Request) {
+	schoolID, ok := scopeSchoolID(w, r)
+	if !ok {
+		return
+	}
+	sc, err := h.Store.GetScheduleEnriched(r.Context(), schoolID, chi.URLParam(r, "id"))
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if sc == nil {
+		common.WriteError(w, http.StatusNotFound, "schedule not found")
+		return
+	}
+	termID, err := h.Store.CurrentTermID(r.Context(), sc.SchoolID, sc.AcademicYearID)
+	if err != nil {
+		termID = "" // best-effort: an unresolved term shouldn't block check-in
+	}
+	teacherID := ""
+	if sc.TeacherUserID != nil {
+		teacherID = *sc.TeacherUserID
+	}
+	subjectID := ""
+	if sc.SubjectID != nil {
+		subjectID = *sc.SubjectID
+	}
+	startTime, endTime := "", ""
+	if sc.StartTime != nil {
+		startTime = *sc.StartTime
+	}
+	if sc.EndTime != nil {
+		endTime = *sc.EndTime
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"id":           sc.ID,
+		"classroom_id": sc.ClassroomID,
+		"subject_id":   subjectID,
+		"teacher_id":   teacherID,
+		"start_time":   startTime,
+		"end_time":     endTime,
+		"term_id":      termID,
+	}, nil)
+}
+
+// ActiveSchedulesNow: GET /schedules/active-now?school_id= — every schedule
+// slot in the school whose day/time window covers this exact moment, across
+// ALL classrooms/guru. Internal-consumable (see main.go's InternalOrJWTMiddleware
+// group) — attendance-service's "Guru Sedang Mengajar" widget is the caller.
+func (h *Handler) ActiveSchedulesNow(w http.ResponseWriter, r *http.Request) {
+	schoolID, ok := scopeSchoolID(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.Store.ListSchedulesActiveNow(r.Context(), schoolID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, items, nil)
+}
+
 // MySchedule: GET /me/schedule?day= — guru's own teaching schedule.
 func (h *Handler) MySchedule(w http.ResponseWriter, r *http.Request) {
 	schoolID, ok := scopeSchoolID(w, r)

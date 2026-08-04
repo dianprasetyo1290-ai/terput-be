@@ -9,15 +9,88 @@ import (
 	"skci/exam/internal/model"
 )
 
+// CreateExam persists a single exam row related to one or more classrooms
+// (e.ClassroomIDs — falls back to []string{e.ClassroomID} if unset). See
+// migration 0005: exam_classrooms is the real many-to-many target-audience
+// table; exams.classroom_id is kept as ClassroomIDs[0] for backward compat.
 func (s *Store) CreateExam(ctx context.Context, e *model.Exam) error {
-	return s.DB.QueryRowContext(ctx, `
+	classroomIDs := e.ClassroomIDs
+	if len(classroomIDs) == 0 {
+		classroomIDs = []string{e.ClassroomID}
+	}
+	e.ClassroomID = classroomIDs[0]
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := tx.QueryRowContext(ctx, `
 		INSERT INTO exams (school_id, academic_year_id, term_id, exam_type_id, title, description,
 			classroom_id, subject_id, teacher_id, start_at, end_at, is_shuffled, created_by, folder_id)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 		RETURNING id, is_published, created_at, updated_at`,
 		e.SchoolID, e.AcademicYearID, e.TermID, e.ExamTypeID, e.Title, e.Description,
 		e.ClassroomID, e.SubjectID, e.TeacherID, e.StartAt, e.EndAt, e.IsShuffled, e.CreatedBy, e.FolderID,
-	).Scan(&e.ID, &e.IsPublished, &e.CreatedAt, &e.UpdatedAt)
+	).Scan(&e.ID, &e.IsPublished, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		return err
+	}
+	for _, cid := range classroomIDs {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO exam_classrooms (exam_id, classroom_id) VALUES ($1,$2)
+			ON CONFLICT (exam_id, classroom_id) DO NOTHING`, e.ID, cid); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	e.ClassroomIDs = classroomIDs
+	return nil
+}
+
+// examClassroomIDs returns the full target-audience classroom list for one
+// exam, ordered by insertion (so index 0 matches exams.classroom_id for
+// exams created after migration 0005).
+func (s *Store) examClassroomIDs(ctx context.Context, examID string) ([]string, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT classroom_id FROM exam_classrooms WHERE exam_id=$1 ORDER BY created_at`, examID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// examClassroomIDsBatch is examClassroomIDs for a whole page of exams at
+// once (used by ListExams to avoid N+1 queries).
+func (s *Store) examClassroomIDsBatch(ctx context.Context, examIDs []string) (map[string][]string, error) {
+	out := make(map[string][]string, len(examIDs))
+	if len(examIDs) == 0 {
+		return out, nil
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT exam_id, classroom_id FROM exam_classrooms WHERE exam_id = ANY($1) ORDER BY created_at`, examIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var examID, classroomID string
+		if err := rows.Scan(&examID, &classroomID); err != nil {
+			return nil, err
+		}
+		out[examID] = append(out[examID], classroomID)
+	}
+	return out, rows.Err()
 }
 
 type ExamFilter struct {
@@ -50,7 +123,11 @@ func (s *Store) ListExams(ctx context.Context, f ExamFilter, page, perPage int) 
 		add("e.term_id", f.TermID)
 	}
 	if f.ClassroomID != "" {
-		add("e.classroom_id", f.ClassroomID)
+		// exam_classrooms is the full target-audience set (migration 0005) --
+		// e.classroom_id alone would miss an exam for a student/admin whose
+		// classroom isn't the "primary" one on a multi-classroom exam.
+		args = append(args, f.ClassroomID)
+		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM exam_classrooms ec WHERE ec.exam_id = e.id AND ec.classroom_id::text = $%d)", len(args))
 	}
 	if f.TeacherID != "" {
 		add("e.teacher_id", f.TeacherID)
@@ -95,6 +172,19 @@ func (s *Store) ListExams(ctx context.Context, f ExamFilter, page, perPage int) 
 		}
 		out = append(out, e)
 	}
+	if len(out) > 0 {
+		ids := make([]string, len(out))
+		for i := range out {
+			ids[i] = out[i].ID
+		}
+		batch, err := s.examClassroomIDsBatch(ctx, ids)
+		if err != nil {
+			return nil, 0, err
+		}
+		for i := range out {
+			out[i].ClassroomIDs = batch[out[i].ID]
+		}
+	}
 	return out, total, rows.Err()
 }
 
@@ -116,6 +206,11 @@ func (s *Store) GetExam(ctx context.Context, id, schoolID string) (*model.Exam, 
 	if err != nil {
 		return nil, err
 	}
+	ids, err := s.examClassroomIDs(ctx, e.ID)
+	if err != nil {
+		return nil, err
+	}
+	e.ClassroomIDs = ids
 	return &e, nil
 }
 
@@ -241,7 +336,11 @@ func (s *Store) ListMyExams(ctx context.Context, userID, classroomID, bucket str
 	if classroomID == "" {
 		return nil, nil
 	}
-	where := "e.classroom_id = $1 AND e.is_published = true AND e.deleted_at IS NULL"
+	// exam_classrooms (migration 0005) is the real target-audience set for a
+	// multi-classroom exam -- e.classroom_id alone is only the "primary"
+	// classroom and would hide the exam from students in any OTHER selected
+	// classroom.
+	where := "EXISTS (SELECT 1 FROM exam_classrooms ec WHERE ec.exam_id = e.id AND ec.classroom_id::text = $1) AND e.is_published = true AND e.deleted_at IS NULL"
 	switch bucket {
 	case "today":
 		where += " AND e.start_at::date = now()::date AND (ea.status IS NULL OR ea.status != 'selesai') AND e.end_at >= now()"

@@ -68,6 +68,13 @@ func TestListMyExams_DateBucketing(t *testing.T) {
 			t.Fatalf("insert exam %s: %v", title, err)
 		}
 		t.Cleanup(func() { db.ExecContext(ctx, `DELETE FROM exams WHERE id=$1`, id) })
+		// exam_classrooms (migration 0005) is the real target-audience set
+		// ListMyExams/ListExams filter against now -- CreateExam populates
+		// this in the same transaction as the exams row, so a raw-SQL test
+		// insert has to do the same or the exam is invisible to every query.
+		if _, err := db.ExecContext(ctx, `INSERT INTO exam_classrooms (exam_id, classroom_id) VALUES ($1,$2)`, id, classroomID); err != nil {
+			t.Fatalf("insert exam_classrooms for %s: %v", title, err)
+		}
 		return id
 	}
 

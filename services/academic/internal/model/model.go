@@ -99,6 +99,7 @@ type Schedule struct {
 
 	// Enriched fields for read endpoints (e.g. /me/schedule).
 	SubjectName   *string `json:"subject_name,omitempty"`
+	SubjectID     *string `json:"subject_id,omitempty"`
 	ClassroomName *string `json:"classroom_name,omitempty"`
 	DayOfWeek     *int    `json:"day_of_week,omitempty"`
 	PeriodNo      *int    `json:"period_no,omitempty"`

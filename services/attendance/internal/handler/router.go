@@ -56,7 +56,9 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 		pr.Get("/admin/teacher-attendance/export", h.TeacherAttendanceExport)
 
 		// dashboard
+		pr.Get("/me/sessions/today", h.MySessionsToday)
 		pr.Get("/dashboard/active-teachers", h.ActiveTeachers)
+		pr.Get("/dashboard/teaching-stats", h.TeachingStats)
 		pr.Get("/dashboard/student-attendance-summary", h.StudentAttendanceSummaryDashboard)
 		pr.Get("/dashboard/teacher-attendance-summary", h.TeacherAttendanceSummaryDashboard)
 	})

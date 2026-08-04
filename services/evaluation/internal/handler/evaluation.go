@@ -35,6 +35,17 @@ func authorizeEvaluation(claims *common.Claims, p *model.Period, req submitEvalu
 	if !containsStr(p.TargetTeacherIDs, req.TargetTeacherID) && req.EvaluatorType != model.EvalTypePeer && !model.IsUpwardEvalType(req.EvaluatorType) {
 		return fmt.Errorf("target_teacher_id is not in this period's target guru list")
 	}
+	// A guru holding a structural position (kepsek/waka_*) is still just
+	// themselves for every OTHER category: they cannot rate their own
+	// leadership performance ("kepala_sekolah"/"waka_*"), nor can they submit
+	// an upward-feedback rating targeting themselves-as-leader
+	// ("guru_to_*"), nor peer-evaluate themselves. The only category allowed
+	// when evaluator == target is self-assessment. Checked once here so
+	// every submission path (not just eager task generation in
+	// regenerateTasks) is covered.
+	if req.EvaluatorType != model.EvalTypeSelf && claims.UserID == req.TargetTeacherID {
+		return fmt.Errorf("cannot submit a %s evaluation targeting yourself; self-evaluation must use the self-assessment form", req.EvaluatorType)
+	}
 	switch req.EvaluatorType {
 	case model.EvalTypeSelf:
 		if !hasRole(claims, "guru") {
@@ -50,9 +61,7 @@ func authorizeEvaluation(claims *common.Claims, p *model.Period, req submitEvalu
 		if !containsStr(p.PeerEvaluateeIDs, req.TargetTeacherID) {
 			return fmt.Errorf("target_teacher_id is not in this period's 'guru yang ingin dinilai' list")
 		}
-		if claims.UserID == req.TargetTeacherID {
-			return fmt.Errorf("cannot peer-evaluate yourself")
-		}
+		// self-pair already rejected by the general check above
 	case model.EvalTypeKepalaSekolah:
 		if p.HeadmasterUserID == nil || *p.HeadmasterUserID != claims.UserID {
 			return fmt.Errorf("caller is not the Kepala Sekolah assigned to this period")
@@ -219,5 +228,21 @@ func (h *Handler) MyTasks(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusInternalServerError, "failed to list tasks: "+err.Error())
 		return
 	}
-	common.WriteJSON(w, http.StatusOK, tasks, nil)
+	common.WriteJSON(w, http.StatusOK, filterSelfTargetingTasks(tasks), nil)
+}
+
+// filterSelfTargetingTasks is defense-in-depth for a guru's own task list:
+// regenerateTasks never creates, and SubmitEvaluation's authorizeEvaluation
+// never accepts, a non-self task where evaluator == target (see the guard
+// there), but this strips any such row anyway before it reaches the UI --
+// e.g. leftover rows from before that guard existed.
+func filterSelfTargetingTasks(tasks []*model.EvalTask) []*model.EvalTask {
+	out := tasks[:0]
+	for _, t := range tasks {
+		if t.EvaluatorType != model.EvalTypeSelf && t.EvaluatorUserID == t.TargetTeacherUserID {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }

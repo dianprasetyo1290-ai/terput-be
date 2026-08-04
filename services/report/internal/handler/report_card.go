@@ -255,7 +255,33 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = h.d.Store.UpdateAttendance(ctx, rc.ID, hadir, sakit, izin, tanpa, nowPtr(), attErr)
 
+		// Nilai Akhir's attendance component: kehadiran as a percentage of
+		// every recorded session this term (hadir / total). One value per
+		// student, shared across every subject below -- attendance is a
+		// classroom-level fact, not a per-subject one. nil (not 0) when no
+		// attendance was recorded at all, so a subject with only exam/
+		// formatif data isn't unfairly dragged down by a missing summary.
+		var attendancePct *float64
+		if hadir != nil && sakit != nil && izin != nil && tanpa != nil {
+			total := *hadir + *sakit + *izin + *tanpa
+			if total > 0 {
+				pct := 100 * float64(*hadir) / float64(total)
+				attendancePct = &pct
+			}
+		}
+
+		// Agama religion-based filtering (item 13, V4, same rule already
+		// applied in exam/attendance services): `subjects` above is every
+		// subject assigned to the WHOLE classroom, so without this a
+		// student got a report_card_subjects row (and a "Belum ada data"
+		// placeholder) for every OTHER religion's Agama variant too, not
+		// just their own. nil (lookup failed) fails open -- don't drop a
+		// student's real subjects just because academic-service hiccuped.
+		allowedSubjects := h.d.Academic.ActiveSubjectIDs(ctx, studentID, schoolID, academicYearID)
 		for _, subj := range subjects {
+			if allowedSubjects != nil && !allowedSubjects[subj.SubjectID] {
+				continue
+			}
 			var computed, stsScore, sasScore *float64
 			count := 0
 			var sErr *string
@@ -312,6 +338,19 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 				avg := sum / float64(totalCount)
 				computed = &avg
 				count = totalCount
+			}
+			// Nilai Akhir = weighted blend of academic performance (exam +
+			// formatif, pooled above) and kehadiran -- illustrative weights
+			// per the spec ("bobot bisa disesuaikan kebijakan sekolah"), not
+			// meant to be precise, just a real accumulation instead of an
+			// unweighted "Nilai Berjalan" that ignored attendance entirely.
+			// Skipped when either side has no data, so a subject with only
+			// exam/formatif and no attendance record yet isn't dragged to a
+			// half-weighted score against a phantom 0.
+			const academicWeight, attendanceWeight = 0.9, 0.1
+			if computed != nil && attendancePct != nil {
+				blended := academicWeight*(*computed) + attendanceWeight*(*attendancePct)
+				computed = &blended
 			}
 			name, code := subj.Name, subj.Code
 			_ = h.d.Store.UpsertSubjectComputed(ctx, rc.ID, schoolID, subj.SubjectID, &name, &code, computed, stsScore, sasScore, count, nowPtr(), sErr)

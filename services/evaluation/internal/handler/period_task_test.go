@@ -30,9 +30,16 @@ import (
 //
 // Scenario: guruMain is the period's sole target teacher (so each
 // leadership role yields exactly 1 task) AND is designated as all 3
-// leadership roles AND is assigned N peer-evaluatees. Expected MyTasks count
-// for guruMain = 1 (self) + N (peer) + 3 (leadership) = N+4, with no
-// self/peer duplication (peer evaluatees are distinct guru, not guruMain).
+// leadership roles AND is assigned N peer-evaluatees. Since guruMain holds
+// every leadership role AND is the only target teacher, he'd otherwise be
+// asked to fill out "kepsek/waka rates guruMain" and its upward-feedback
+// mirror "guruMain rates kepsek/waka" targeting himself both ways -- the
+// exact "guru struktural dipaksa menilai dirinya sendiri" bug from the V6
+// gap report. upsert()'s target==evaluator guard (period.go) blocks all 6
+// of those (3 leadership + 3 upward), so they must NOT appear here; only
+// self (which IS allowed to target the caller) and peer remain. Expected
+// MyTasks count for guruMain = 1 (self) + N (peer), with no self/peer
+// duplication (peer evaluatees are distinct guru, not guruMain).
 func TestMyTasks_SelfPeerAndLeadership(t *testing.T) {
 	dbURL := os.Getenv("EVALUATION_TEST_DATABASE_URL")
 	if dbURL == "" {
@@ -88,15 +95,15 @@ func TestMyTasks_SelfPeerAndLeadership(t *testing.T) {
 		t.Fatalf("ListForEvaluator: %v", err)
 	}
 
-	// guruMain also holds all 3 leadership roles AND is a target teacher, so
-	// beyond self/peer/leadership-rates-you he now additionally owes 3
-	// upward-feedback tasks (guru_to_kepsek/waka_kurikulum/waka_kesiswaan),
-	// each targeting himself since he's the current holder of each role --
-	// see TestUpwardEvalTasks_GeneratedPerGuruAndAdditive for the more
-	// realistic case of a guru rating a distinct leader.
-	want := 1 + nPeers + 3 + 3
+	// guruMain also holds all 3 leadership roles AND is the sole target
+	// teacher, so every leadership-rates-you and upward-feedback task would
+	// target himself -- all 6 must be suppressed by the self-assignment
+	// guard, leaving only self + peer. See
+	// TestUpwardEvalTasks_GeneratedPerGuruAndAdditive for the realistic case
+	// of a guru rating a distinct leader (where upward tasks DO appear).
+	want := 1 + nPeers
 	if len(tasks) != want {
-		t.Fatalf("got %d tasks for guruMain, want %d (self=1 + peer=%d + leadership=3 + upward=3): %+v", len(tasks), want, nPeers, tasks)
+		t.Fatalf("got %d tasks for guruMain, want %d (self=1 + peer=%d, leadership+upward all self-blocked): %+v", len(tasks), want, nPeers, tasks)
 	}
 
 	counts := map[string]int{}
@@ -116,12 +123,17 @@ func TestMyTasks_SelfPeerAndLeadership(t *testing.T) {
 	if counts[model.EvalTypePeer] != nPeers {
 		t.Errorf("peer tasks = %d, want %d", counts[model.EvalTypePeer], nPeers)
 	}
-	if counts[model.EvalTypeKepalaSekolah] != 1 || counts[model.EvalTypeWakaKurikulum] != 1 || counts[model.EvalTypeWakaKesiswaan] != 1 {
-		t.Errorf("leadership tasks = kepsek:%d waka_kurikulum:%d waka_kesiswaan:%d, want 1 each",
+	// Self-targeting leadership tasks (guruMain would be asked to evaluate
+	// himself as kepsek/waka rating a target teacher) must be suppressed.
+	if counts[model.EvalTypeKepalaSekolah] != 0 || counts[model.EvalTypeWakaKurikulum] != 0 || counts[model.EvalTypeWakaKesiswaan] != 0 {
+		t.Errorf("leadership tasks = kepsek:%d waka_kurikulum:%d waka_kesiswaan:%d, want 0 each (self-assignment must be blocked)",
 			counts[model.EvalTypeKepalaSekolah], counts[model.EvalTypeWakaKurikulum], counts[model.EvalTypeWakaKesiswaan])
 	}
-	if counts[model.EvalTypeGuruToKepsek] != 1 || counts[model.EvalTypeGuruToWakaKurikulum] != 1 || counts[model.EvalTypeGuruToWakaKesiswaan] != 1 {
-		t.Errorf("upward tasks = guru_to_kepsek:%d guru_to_waka_kurikulum:%d guru_to_waka_kesiswaan:%d, want 1 each",
+	// Self-targeting upward-feedback tasks (guruMain rating himself as
+	// kepsek/waka) must likewise be suppressed -- the "guru struktural
+	// dipaksa menilai dirinya sendiri" bug this guard exists to prevent.
+	if counts[model.EvalTypeGuruToKepsek] != 0 || counts[model.EvalTypeGuruToWakaKurikulum] != 0 || counts[model.EvalTypeGuruToWakaKesiswaan] != 0 {
+		t.Errorf("upward tasks = guru_to_kepsek:%d guru_to_waka_kurikulum:%d guru_to_waka_kesiswaan:%d, want 0 each (self-assignment must be blocked)",
 			counts[model.EvalTypeGuruToKepsek], counts[model.EvalTypeGuruToWakaKurikulum], counts[model.EvalTypeGuruToWakaKesiswaan])
 	}
 	if len(peerTargets) != nPeers {

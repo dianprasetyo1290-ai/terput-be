@@ -63,7 +63,18 @@ func (h *Handler) ListFormativeGrades(w http.ResponseWriter, r *http.Request) {
 		if u, uerr := h.d.Identity.GetUser(r.Context(), stu.StudentUserID); uerr == nil && u != nil {
 			name = u.Name
 		}
-		out = append(out, formativeRowOut{StudentID: stu.StudentUserID, StudentName: name, Scores: grades[stu.StudentUserID]})
+		// grades[...] is a nil slice for a student with no formative_grades
+		// rows yet (the common case for a class no guru has scored yet) --
+		// encoding/json marshals a nil []float64 as JSON null, not [], which
+		// crashed the frontend's r.scores.length/push in loadGrid() and
+		// surfaced as "Gagal memuat data penilaian formatif." even though
+		// this request itself returned 200. Always emit [] so the frontend
+		// always gets an array.
+		scores := grades[stu.StudentUserID]
+		if scores == nil {
+			scores = []float64{}
+		}
+		out = append(out, formativeRowOut{StudentID: stu.StudentUserID, StudentName: name, Scores: scores})
 	}
 	common.WriteJSON(w, http.StatusOK, out, nil)
 }

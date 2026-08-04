@@ -106,6 +106,27 @@ func (s *Store) GetClassSession(ctx context.Context, id string) (*model.ClassSes
 	return scanClassSession(row)
 }
 
+// FindSessionByScheduleAndDate looks up the class_session for a specific
+// academic-service schedule row + date, if a guru has already checked in
+// for it -- same (schedule_id, session_date) key as CheckIn's own upsert.
+// Returns (nil, nil) rather than an error when no session exists yet (a
+// scheduled-but-not-checked-in-yet slot is the normal, expected case for
+// "Guru Sedang Mengajar", not a fault).
+func (s *Store) FindSessionByScheduleAndDate(ctx context.Context, scheduleID, sessionDate string) (*model.ClassSession, error) {
+	row := s.DB.QueryRowContext(ctx, `
+		SELECT id, school_id, academic_year_id, term_id, schedule_id, classroom_id,
+			subject_id, guru_id, session_date, checked_in_at, slot_start_time, slot_end_time,
+			pertemuan, pembahasan, materi_pertemuan, bentuk_kegiatan, agenda_filled_at,
+			created_at, updated_at
+		FROM class_sessions WHERE schedule_id = $1 AND session_date = $2
+	`, scheduleID, sessionDate)
+	cs, err := scanClassSession(row)
+	if err == ErrNotFound {
+		return nil, nil
+	}
+	return cs, err
+}
+
 type ListSessionsFilter struct {
 	SchoolID       string
 	AcademicYearID string
@@ -190,61 +211,6 @@ func (s *Store) ListSessions(ctx context.Context, f ListSessionsFilter) ([]model
 		out = append(out, *cs)
 	}
 	return out, total, rows.Err()
-}
-
-// ActiveTeachers returns sessions still "in progress": checked in today, the
-// slot has actually started, and its end time hasn't passed yet (per the
-// spec's "aktif" rule). Status is derived from agenda_filled_at — the same
-// flag UpdateAgenda sets on "Simpan & Lanjutkan ke Presensi" — rather than a
-// new one: "tidak_aktif" until the guru has filled and saved the agenda,
-// "aktif" once they have.
-func (s *Store) ActiveTeachers(ctx context.Context, schoolID string) ([]model.ActiveTeacher, error) {
-	where := []string{
-		"checked_in_at IS NOT NULL",
-		"session_date = CURRENT_DATE",
-		"(slot_start_time IS NULL OR slot_start_time <= CURRENT_TIME)",
-		"(slot_end_time IS NULL OR slot_end_time > CURRENT_TIME)",
-	}
-	args := []interface{}{}
-	if schoolID != "" {
-		args = append(args, schoolID)
-		where = append(where, fmt.Sprintf("school_id = $%d", len(args)))
-	}
-	query := fmt.Sprintf(`
-		SELECT id, guru_id, classroom_id, subject_id, schedule_id, slot_start_time, slot_end_time, checked_in_at, agenda_filled_at
-		FROM class_sessions WHERE %s
-		ORDER BY checked_in_at DESC
-	`, strings.Join(where, " AND "))
-	rows, err := s.DB.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []model.ActiveTeacher
-	for rows.Next() {
-		var at model.ActiveTeacher
-		var start, end sql.NullString
-		var checkedIn time.Time
-		var agendaFilledAt sql.NullTime
-		var subjectID sql.NullString
-		if err := rows.Scan(&at.SessionID, &at.GuruID, &at.ClassroomID, &subjectID, &at.ScheduleID, &start, &end, &checkedIn, &agendaFilledAt); err != nil {
-			return nil, err
-		}
-		if subjectID.Valid {
-			at.SubjectID = subjectID.String
-		}
-		at.SlotStartTime = start.String
-		at.SlotEndTime = end.String
-		at.CheckedInAt = checkedIn.Format(time.RFC3339)
-		if agendaFilledAt.Valid {
-			at.Status = "aktif"
-		} else {
-			at.Status = "tidak_aktif"
-		}
-		out = append(out, at)
-	}
-	return out, rows.Err()
 }
 
 func scanClassSession(row *sql.Row) (*model.ClassSession, error) {
@@ -608,8 +574,13 @@ func (s *Store) DashboardStudentSummary(ctx context.Context, schoolID, academicY
 		args = append(args, academicYearID)
 		where = append(where, fmt.Sprintf("sa.academic_year_id = $%d", len(args)))
 	}
+	// Grouped by term (semester), not calendar month -- a school year's
+	// worth of monthly bars used to make this chart grow unboundedly tall.
+	// term_id is nullable (older rows / no term resolved at check-in time),
+	// so those fall into one 'unknown'-keyed bucket rather than one row per
+	// legacy month.
 	query := fmt.Sprintf(`
-		SELECT to_char(cs.session_date, 'YYYY-MM') AS month,
+		SELECT COALESCE(sa.term_id::text, 'unknown') AS term_key,
 			count(*) FILTER (WHERE sa.status = 'hadir'),
 			count(*) FILTER (WHERE sa.status = 'sakit'),
 			count(*) FILTER (WHERE sa.status = 'izin'),
@@ -635,8 +606,10 @@ func (s *Store) DashboardTeacherSummary(ctx context.Context, schoolID, academicY
 		args = append(args, academicYearID)
 		where = append(where, fmt.Sprintf("academic_year_id = $%d", len(args)))
 	}
+	// Grouped by term (semester), same rationale as DashboardStudentSummary
+	// above.
 	query := fmt.Sprintf(`
-		SELECT to_char(session_date, 'YYYY-MM') AS month, count(*), 0, 0, 0
+		SELECT COALESCE(term_id::text, 'unknown') AS term_key, count(*), 0, 0, 0
 		FROM class_sessions
 		WHERE %s
 		GROUP BY 1 ORDER BY 1

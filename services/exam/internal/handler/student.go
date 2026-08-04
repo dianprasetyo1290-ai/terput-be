@@ -96,7 +96,12 @@ func (h *Handler) EnterExam(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusForbidden, "this exam's subject is not active for your enrollment")
 		return
 	}
-	attempt, err := h.Store.EnterExam(r.Context(), examID, c.UserID, req.Code)
+	// Resolve the student's OWN classroom (multi-classroom exam, migration
+	// 0005, has no single "the" classroom) so exam_attempts.classroom_id
+	// reflects who actually took it, not just exam.classroom_id's primary —
+	// see Store.EnterExam's doc comment.
+	studentClassroomID := h.Internal.StudentClassroomID(c.UserID, exam.SchoolID, exam.AcademicYearID)
+	attempt, err := h.Store.EnterExam(r.Context(), examID, c.UserID, req.Code, studentClassroomID)
 	if err != nil {
 		switch err {
 		case store.ErrTokenInvalid:

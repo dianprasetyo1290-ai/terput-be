@@ -52,7 +52,14 @@ func scanUser(row interface{ Scan(...interface{}) error }) (model.User, error) {
 func (a *App) ListUsers(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	role := r.URL.Query().Get("role")
-	privileged := claims != nil && (claims.ActiveRole == common.RoleAdmin || claims.ActiveRole == common.RoleSuperadmin)
+	// A trusted sibling-service call (X-Internal-Key, no claims -- see
+	// resolveSchoolScope's identical check) is privileged the same as
+	// admin/superadmin: this route is only reachable via X-Internal-Key on
+	// the internal-or-jwt group in main.go in the first place, so anything
+	// that got here without claims already passed that gate. Missed
+	// originally -- CountUsersByRole-style internal counts 401'd with
+	// "missing token" even though IsInternal(r) was already true.
+	privileged := common.IsInternal(r) || (claims != nil && (claims.ActiveRole == common.RoleAdmin || claims.ActiveRole == common.RoleSuperadmin))
 	if !privileged {
 		if claims == nil {
 			common.WriteError(w, http.StatusUnauthorized, "missing token")

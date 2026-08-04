@@ -89,9 +89,14 @@ func (h *Handler) CreateExam(w http.ResponseWriter, r *http.Request) {
 	}
 	req.TeacherID = teacherID
 
-	// Item 3: guru's multi-select Mata Pelajaran checkboxes — one exam per
-	// {classroom_id, subject_id} pair, everything else (title/dates/type/...)
-	// shared across all of them.
+	// Item 3: guru's multi-select Mata Pelajaran checkboxes. An exam is
+	// fundamentally scoped to ONE subject (one shared question set), so
+	// pairs are grouped by subject_id — same-subject pairs across several
+	// classrooms (e.g. "Agama Islam" ticked for both 1-A and 1-B) become a
+	// SINGLE exam related to all those classrooms via exam_classrooms
+	// (migration 0005), not one duplicate exam per classroom. A genuinely
+	// different subject_id still starts its own exam, since two subjects
+	// can't share one question set.
 	if len(req.ClassroomAssignments) > 0 {
 		for _, pair := range req.ClassroomAssignments {
 			if pair.ClassroomID == "" || pair.SubjectID == "" {
@@ -105,8 +110,19 @@ func (h *Handler) CreateExam(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		schoolID := common.EffectiveSchoolID(r, c)
-		created := make([]*model.Exam, 0, len(req.ClassroomAssignments))
+
+		bySubject := make(map[string][]string) // subject_id -> classroom_ids, insertion order
+		var subjectOrder []string
 		for _, pair := range req.ClassroomAssignments {
+			if _, ok := bySubject[pair.SubjectID]; !ok {
+				subjectOrder = append(subjectOrder, pair.SubjectID)
+			}
+			bySubject[pair.SubjectID] = append(bySubject[pair.SubjectID], pair.ClassroomID)
+		}
+
+		created := make([]*model.Exam, 0, len(subjectOrder))
+		for _, subjectID := range subjectOrder {
+			classroomIDs := bySubject[subjectID]
 			e := &model.Exam{
 				SchoolID:       schoolID,
 				AcademicYearID: req.AcademicYearID,
@@ -114,8 +130,9 @@ func (h *Handler) CreateExam(w http.ResponseWriter, r *http.Request) {
 				ExamTypeID:     req.ExamTypeID,
 				Title:          req.Title,
 				Description:    req.Description,
-				ClassroomID:    pair.ClassroomID,
-				SubjectID:      pair.SubjectID,
+				ClassroomID:    classroomIDs[0],
+				ClassroomIDs:   classroomIDs,
+				SubjectID:      subjectID,
 				TeacherID:      teacherID,
 				StartAt:        start,
 				EndAt:          end,

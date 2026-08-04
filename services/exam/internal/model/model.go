@@ -68,7 +68,13 @@ type Exam struct {
 	ExamTypeID     string     `json:"exam_type_id"`
 	Title          string     `json:"title"`
 	Description    *string    `json:"description,omitempty"`
+	// ClassroomID is the "primary" classroom, kept for backward compat with
+	// existing callers (report-service's upstream.ExamClient.Exam decodes
+	// this field, the ?classroom_id= list filter matches against it). The
+	// real target audience — one exam can now cover several classrooms — is
+	// ClassroomIDs; on create it's always ClassroomIDs[0].
 	ClassroomID    string     `json:"classroom_id"`
+	ClassroomIDs   []string   `json:"classroom_ids,omitempty"`
 	SubjectID      string     `json:"subject_id"`
 	TeacherID      string     `json:"teacher_id"`
 	StartAt        time.Time  `json:"start_at"`

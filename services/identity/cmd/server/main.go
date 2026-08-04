@@ -128,7 +128,12 @@ func main() {
 		pr.Route("/users", func(ur chi.Router) {
 			ur.Post("/", app.CreateUser)
 			ur.Post("/import", app.ImportUsers)
-			ur.Get("/import-template", app.DownloadUsersTemplate)
+			// GET /users/import-template is NOT registered here — see the
+			// /users/export precedence comment in the ir group below; it hits
+			// the exact same chi Mount-boundary bug (was 500ing with GetUser's
+			// "failed to get user" because ir's directly-registered
+			// /users/{id} wildcard was matching "import-template" as {id}
+			// before this mounted sub-router ever got a chance).
 			ur.Put("/{id}", app.UpdateUser)
 			ur.Delete("/{id}", app.DeleteUser)
 			ur.Post("/{id}/reset-password", app.ResetPassword)
@@ -192,19 +197,20 @@ func main() {
 	r.Group(func(ir chi.Router) {
 		ir.Use(common.InternalOrJWTMiddleware(jwtSecret, internalKey))
 
-		// GET /users/export is registered here (a static sibling of
-		// /users/{id}), not in the JWT-only /users route block above:
-		// chi's route groups are independent sub-routers, so a static
-		// route registered in one Group and a wildcard registered in
+		// GET /users/export and /users/import-template are registered here
+		// (static siblings of /users/{id}), not in the JWT-only /users route
+		// block above: chi's route groups are independent sub-routers, so a
+		// static route registered in one Group and a wildcard registered in
 		// ANOTHER Group covering the same path space do NOT get correctly
 		// precedence-resolved against each other (only routes within the
 		// SAME router/group get correct static-over-wildcard priority) —
 		// found via a real 500 ("failed to get user") when /users/export
-		// was being matched by GetUser's {id} wildcard from this group.
-		// ExportUsers still does its own requireRole(Admin) check
-		// (bypassed only for a trusted X-Internal-Key caller, same as
-		// every other route in this group).
+		// (and later /users/import-template) was being matched by GetUser's
+		// {id} wildcard from this group. Both handlers still do their own
+		// requireRole(Admin) check (bypassed only for a trusted
+		// X-Internal-Key caller, same as every other route in this group).
 		ir.Get("/users/export", app.ExportUsers)
+		ir.Get("/users/import-template", app.DownloadUsersTemplate)
 		ir.Get("/users/{id}", app.GetUser)
 		ir.Get("/users", app.ListUsers)
 		ir.Get("/students", app.ListStudents)

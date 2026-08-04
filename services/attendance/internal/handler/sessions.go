@@ -54,7 +54,7 @@ func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
 	subjectID := ptrOrNil(req.SubjectID)
 	termID := ptrOrNil(req.TermID)
 
-	if sched, err := h.Client.GetSchedule(bg(r), req.ScheduleID); err == nil && sched != nil {
+	if sched, err := h.Client.GetSchedule(bg(r), req.ScheduleID, claims.SchoolID); err == nil && sched != nil {
 		if sched.ClassroomID != "" {
 			classroomID = sched.ClassroomID
 		}
@@ -118,7 +118,11 @@ func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
 	// unmarked students to hadir. Best-effort: academic-service being down
 	// shouldn't fail the check-in itself (Roster()/frontend still fall back
 	// sensibly for students that don't have a row yet).
-	if roster, err := h.Client.GetRoster(bg(r), cs.ClassroomID); err == nil {
+	initSubjectID := ""
+	if cs.SubjectID != nil {
+		initSubjectID = *cs.SubjectID
+	}
+	if roster, err := h.Client.GetRosterForSubject(bg(r), cs.ClassroomID, initSubjectID, cs.SchoolID); err == nil {
 		ids := make([]string, len(roster))
 		for i, s := range roster {
 			ids[i] = s.StudentID
@@ -239,7 +243,17 @@ func (h *Handler) Roster(w http.ResponseWriter, r *http.Request) {
 		statusByStudent[sa.StudentID] = sa
 	}
 
-	roster, err := h.Client.GetRoster(bg(r), cs.ClassroomID)
+	// Subject-filtered, not the full classroom: two Agama variants (Islam/
+	// Kristen/...) can share the same classroom+period, each with its own
+	// class_session — a guru must only ever see/mark their OWN religion's
+	// students here, never the whole classroom, or two guru's roster screens
+	// for the same slot silently collide over the same (classroom_id,
+	// session_date) rows.
+	subjectID := ""
+	if cs.SubjectID != nil {
+		subjectID = *cs.SubjectID
+	}
+	roster, err := h.Client.GetRosterForSubject(bg(r), cs.ClassroomID, subjectID, cs.SchoolID)
 	if err != nil {
 		// academic-service unreachable: fall back to whatever we already
 		// have recorded rather than failing the whole screen.
@@ -384,6 +398,31 @@ func (h *Handler) MarkOneStudent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.WriteJSONMsg(w, http.StatusOK, sa, nil, "Status kehadiran siswa berhasil diubah")
+}
+
+// MySessionsToday: GET /me/sessions/today (guru) -- the calling guru's own
+// class_sessions rows for today, keyed by schedule_id, so the guru's own
+// dashboard can tell whether "Mulai Pelajaran" has already been done for
+// the currently-showing slot (and its agenda filled in) even after a page
+// reload, instead of only knowing it within the current browser session.
+func (h *Handler) MySessionsToday(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if !requireRole(w, claims, "guru") {
+		return
+	}
+	today := time.Now().Format("2006-01-02")
+	list, _, err := h.Store.ListSessions(r.Context(), store.ListSessionsFilter{
+		SchoolID: claims.SchoolID,
+		GuruID:   claims.UserID,
+		Date:     today,
+		PerPage:  100,
+		Page:     1,
+	})
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, list, nil)
 }
 
 // ---- admin: list sessions (also serves as "Presensi Guru" raw feed) ---

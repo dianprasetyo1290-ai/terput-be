@@ -126,7 +126,6 @@ func main() {
 		// Data Mata Pelajaran: subjects catalog
 		r.Post("/subjects", h.CreateSubject)
 		r.Get("/subjects", h.ListSubjects)
-		r.Get("/subjects/{id}", h.GetSubject)
 		r.Put("/subjects/{id}", h.UpdateSubject)
 		r.Delete("/subjects/{id}", h.DeleteSubject)
 
@@ -173,6 +172,9 @@ func main() {
 		r.Get("/students/{id}/active-subjects", h.GetStudentActiveSubjects)
 		r.Get("/students/{id}/classroom", h.GetStudentClassroom)
 		r.Get("/teaching-assignments", h.GetTeachingAssignments)
+		r.Get("/subjects/{id}", h.GetSubject)
+		r.Get("/schedules/active-now", h.ActiveSchedulesNow)
+		r.Get("/schedules/{id}", h.GetScheduleByID)
 	})
 
 	log.Printf("academic-service listening on :%s", port)

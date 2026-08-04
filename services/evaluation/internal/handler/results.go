@@ -102,7 +102,13 @@ func (h *Handler) computeResults(ctx context.Context, p *model.Period, targetTea
 		res.Categories = append(res.Categories, cr)
 	}
 
-	res.IsComplete = overallComplete
+	// A final score is only "official" once every expected rater has
+	// submitted (overallComplete) OR the period itself has closed (Selesai)
+	// -- an admin can close a period with stragglers still missing, and the
+	// score at that point is final by policy even though not 100% collected.
+	// attachStatus must have been called on p by the caller so p.Status is
+	// populated (GetByID alone doesn't compute it).
+	res.IsComplete = overallComplete || p.Status == model.StatusFinished
 	res.PromotifLabel = domain.FinalScoreLabel(res.FinalScore)
 	res.PerformanceCategory = domain.PerformanceCategory(res.FinalScore)
 	return res, nil
@@ -154,6 +160,7 @@ func (h *Handler) PeriodResults(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusNotFound, "period not found")
 		return
 	}
+	attachStatus(p)
 	res, err := h.computeResults(r.Context(), p, guruID)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to compute results: "+err.Error())
@@ -191,6 +198,7 @@ func (h *Handler) GuruReport(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusNotFound, "period not found")
 		return
 	}
+	attachStatus(p)
 	res, err := h.computeResults(r.Context(), p, guruID)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to compute results: "+err.Error())

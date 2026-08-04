@@ -66,8 +66,13 @@ func (s *Store) GetAttemptByID(ctx context.Context, id, schoolID string) (*model
 	return a, err
 }
 
-func (s *Store) ListAttemptsByClassroom(ctx context.Context, examID, classroomID string) ([]model.ExamAttempt, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+attemptCols+` FROM exam_attempts WHERE exam_id=$1 AND classroom_id=$2 ORDER BY created_at`, examID, classroomID)
+// ListAttemptsByExam returns every attempt for an exam regardless of
+// classroom_id — a multi-classroom exam (migration 0005) has attempts
+// denormalized across several classrooms, so filtering by a single one (the
+// old ListAttemptsByClassroom) silently dropped every non-primary-classroom
+// student from the monitor roster. See Monitor in handler/monitor.go.
+func (s *Store) ListAttemptsByExam(ctx context.Context, examID string) ([]model.ExamAttempt, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+attemptCols+` FROM exam_attempts WHERE exam_id=$1 ORDER BY created_at`, examID)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +112,14 @@ func (s *Store) ListAttemptsByStudent(ctx context.Context, userID string) ([]mod
 // lazily on first entry (it used to be pre-created at voucher-issuance
 // time, back when a voucher was tied to one exam) and building the
 // per-attempt question_order the first time it starts.
-func (s *Store) EnterExam(ctx context.Context, examID, userID, code string) (*model.ExamAttempt, error) {
+//
+// studentClassroomID is the caller's best-effort resolution of the actual
+// student's own classroom (see httpclient.StudentClassroomID) — a
+// multi-classroom exam (migration 0005) has no single "the" classroom, so
+// falling back to the exam's primary exams.classroom_id would mislabel every
+// attempt from a non-primary classroom. Empty falls back to the exam's
+// primary classroom (unresolved best-effort, same as callers elsewhere).
+func (s *Store) EnterExam(ctx context.Context, examID, userID, code, studentClassroomID string) (*model.ExamAttempt, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -122,6 +134,9 @@ func (s *Store) EnterExam(ctx context.Context, examID, userID, code string) (*mo
 	}
 	if err != nil {
 		return nil, err
+	}
+	if studentClassroomID != "" {
+		classroomID = studentClassroomID
 	}
 
 	var tokenID string
@@ -476,7 +491,10 @@ func (s *Store) BukaBlokir(ctx context.Context, attemptID string) error {
 // Lazily creates the row here instead (same bootstrap EnterExam does, minus
 // token_id/question_order since the student never entered — both nullable),
 // then immediately transitions it straight to 'dilarang' in one statement.
-func (s *Store) LarangUjianPreEntry(ctx context.Context, examID, userID, byUserID, reason string) (string, error) {
+//
+// studentClassroomID: see EnterExam's doc comment — same multi-classroom
+// (migration 0005) fallback rule applies here.
+func (s *Store) LarangUjianPreEntry(ctx context.Context, examID, userID, byUserID, reason, studentClassroomID string) (string, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
@@ -491,6 +509,9 @@ func (s *Store) LarangUjianPreEntry(ctx context.Context, examID, userID, byUserI
 	}
 	if err != nil {
 		return "", err
+	}
+	if studentClassroomID != "" {
+		classroomID = studentClassroomID
 	}
 
 	_, err = tx.ExecContext(ctx, `

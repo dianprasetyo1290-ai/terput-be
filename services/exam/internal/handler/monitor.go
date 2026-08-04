@@ -6,6 +6,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"skci/exam/internal/common"
+	"skci/exam/internal/httpclient"
 	"skci/exam/internal/model"
 )
 
@@ -20,20 +21,21 @@ type rosterRow struct {
 	Status       string   `json:"status"`
 }
 
-// Monitor: live per-classroom roster for a published exam.
+// Monitor: live roster for a published exam, across EVERY classroom it
+// targets.
 //
-// Item 10 fix: an exam only ever has ONE classroom_id (exam_attempts.
-// classroom_id is always denormalized from the exam itself at EnterExam
-// time — see store/attempts.go), so a classroom filter that lets the caller
-// switch to an unrelated class was always going to show an empty roster
-// for anything but the exam's own class. classroomID is now pinned to
-// exam.ClassroomID regardless of any ?classroom_id= passed, and the roster
-// is the FULL class roster (fetched from academic-service), left-joined
-// with exam_attempts — a student who was issued a voucher but has never
-// opened the exam yet still shows up as "belum_mulai" instead of being
-// invisible (the old query only ever returned rows that already existed in
-// exam_attempts, which — since a voucher no longer pre-creates that row —
-// meant "never entered" students never appeared at all).
+// Item 10 fix (V3) originally pinned this to the exam's single classroom_id,
+// since back then an exam only ever had one. Migration 0005 made exams
+// many-to-many with classrooms (exam_classrooms) so a guru creating one exam
+// for both 1-A and 1-B no longer gets two duplicate exam rows — but that
+// means Monitor pinning to exam.ClassroomID (just the "primary" one) was
+// silently hiding every student in the exam's OTHER classrooms from the
+// roster/counters. classroomIDs is now the full target-audience set
+// (exam.ClassroomIDs, populated by GetExam from exam_classrooms); the roster
+// unions each classroom's full class list (fetched from academic-service),
+// left-joined with exam_attempts across the WHOLE exam (not filtered to one
+// classroom) — a student who was issued a voucher but has never opened the
+// exam yet still shows up as "belum_mulai" instead of being invisible.
 func (h *Handler) Monitor(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
 	if !requireRole(w, c, "admin", "superadmin", "guru") {
@@ -53,9 +55,12 @@ func (h *Handler) Monitor(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusForbidden, "you may only monitor your own exams")
 		return
 	}
-	classroomID := exam.ClassroomID
+	classroomIDs := exam.ClassroomIDs
+	if len(classroomIDs) == 0 {
+		classroomIDs = []string{exam.ClassroomID}
+	}
 
-	attempts, err := h.Store.ListAttemptsByClassroom(r.Context(), examID, classroomID)
+	attempts, err := h.Store.ListAttemptsByExam(r.Context(), examID)
 	if err != nil {
 		writeStoreErr(w, err)
 		return
@@ -72,10 +77,15 @@ func (h *Handler) Monitor(w http.ResponseWriter, r *http.Request) {
 		attemptByUser[a.UserID] = a
 	}
 
-	// Best-effort full roster; if academic-service is unreachable, fall back
-	// to only the students who already have an attempt (old behavior)
-	// rather than showing an empty roster.
-	roster := h.Internal.ClassroomStudents(classroomID)
+	// Best-effort full roster, unioned across every classroom this exam
+	// targets; if academic-service is unreachable for one, the others still
+	// come through rather than the whole roster going empty. addRow's `seen`
+	// guard also protects against a student double-counted if a classroom
+	// lookup ever returned them more than once.
+	var roster []httpclient.ClassroomStudentDTO
+	for _, cid := range classroomIDs {
+		roster = append(roster, h.Internal.ClassroomStudents(cid)...)
+	}
 	seen := make(map[string]bool, len(roster))
 	rows := make([]rosterRow, 0, len(roster)+len(attempts))
 	counts := &monitorCounters{}
@@ -134,9 +144,10 @@ func (h *Handler) Monitor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	common.WriteJSON(w, http.StatusOK, map[string]interface{}{
-		"classroom_id": classroomID,
-		"roster":       rows,
-		"counters":     counts,
+		"classroom_id":  exam.ClassroomID, // primary classroom, kept for backward compat
+		"classroom_ids": classroomIDs,
+		"roster":        rows,
+		"counters":      counts,
 	}, nil)
 }
 
@@ -324,7 +335,8 @@ func (h *Handler) LarangUjianByUser(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "alasan is required")
 		return
 	}
-	attemptID, err := h.Store.LarangUjianPreEntry(r.Context(), examID, userID, c.UserID, req.Alasan)
+	studentClassroomID := h.Internal.StudentClassroomID(userID, exam.SchoolID, exam.AcademicYearID)
+	attemptID, err := h.Store.LarangUjianPreEntry(r.Context(), examID, userID, c.UserID, req.Alasan, studentClassroomID)
 	if err != nil {
 		writeTransitionErr(w, err)
 		return
