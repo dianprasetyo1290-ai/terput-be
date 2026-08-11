@@ -858,9 +858,11 @@ func (s *Store) StudentAttendanceSummary(ctx context.Context, studentID, termID,
 	return sum, err
 }
 
-// DashboardStudentSummary aggregates student attendance counts by month for
-// a school/academic-year, for the admin dashboard chart.
-func (s *Store) DashboardStudentSummary(ctx context.Context, schoolID, academicYearID string) ([]model.MonthlyStatusCount, error) {
+// DashboardStudentSummary aggregates student attendance counts by term for a
+// school/academic-year, for the admin dashboard chart — or, when
+// classroomID is set (wali kelas's own dashboard), narrowed to just that one
+// classroom's students.
+func (s *Store) DashboardStudentSummary(ctx context.Context, schoolID, academicYearID, classroomID string) ([]model.MonthlyStatusCount, error) {
 	where := []string{"1=1"}
 	args := []interface{}{}
 	if schoolID != "" {
@@ -870,6 +872,10 @@ func (s *Store) DashboardStudentSummary(ctx context.Context, schoolID, academicY
 	if academicYearID != "" {
 		args = append(args, academicYearID)
 		where = append(where, fmt.Sprintf("sa.academic_year_id = $%d", len(args)))
+	}
+	if classroomID != "" {
+		args = append(args, classroomID)
+		where = append(where, fmt.Sprintf("sa.classroom_id = $%d", len(args)))
 	}
 	// Grouped by term (semester), not calendar month -- a school year's
 	// worth of monthly bars used to make this chart grow unboundedly tall.

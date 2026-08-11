@@ -116,10 +116,14 @@ func (c *Client) GetUser(ctx context.Context, id string) (*UserSummary, error) {
 }
 
 // ClassroomSummary mirrors the minimal fields attendance-service needs from
-// academic-service's classroom record.
+// academic-service's classroom record. HomeroomTeacherUserID is only used by
+// requireOwnClassroomIfWaliKelas (handler.go) to verify a wali-kelas caller
+// actually owns the classroom_id they're asking about — never trust the
+// query param alone.
 type ClassroomSummary struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID                    string  `json:"id"`
+	Name                  string  `json:"name"`
+	HomeroomTeacherUserID *string `json:"homeroom_teacher_user_id"`
 }
 
 func (c *Client) GetClassroom(ctx context.Context, id string) (*ClassroomSummary, error) {

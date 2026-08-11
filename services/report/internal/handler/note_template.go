@@ -61,10 +61,6 @@ type subjectNotesBody struct {
 // subject's own guru, not admin-only.
 func (h *Handler) PatchSubjectNotes(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if !isStaff(claims) {
-		common.WriteError(w, http.StatusForbidden, "admin/superadmin/guru only")
-		return
-	}
 	id := chi.URLParam(r, "id")
 	subjectID := chi.URLParam(r, "subject_id")
 
@@ -75,6 +71,13 @@ func (h *Handler) PatchSubjectNotes(w http.ResponseWriter, r *http.Request) {
 	}
 	if rc == nil {
 		common.WriteError(w, http.StatusNotFound, "report card not found")
+		return
+	}
+	// Wali kelas's Deskripsi Rapor grid writes Capaian STS/SAS notes through
+	// this same endpoint, scoped to their own classroom (see
+	// isWaliKelasOwner) — admin/superadmin/guru behavior is unchanged.
+	if !isStaff(claims) && !h.isWaliKelasOwner(r.Context(), claims, rc.ClassroomID) {
+		common.WriteError(w, http.StatusForbidden, "admin/superadmin/guru only, or the wali kelas of this classroom")
 		return
 	}
 	if claims.ActiveRole != "superadmin" && rc.SchoolID != claims.SchoolID {

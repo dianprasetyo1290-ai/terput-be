@@ -109,13 +109,19 @@ func (h *Handler) CreateSchedulePeriod(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusCreated, p, nil)
 }
 
-// ListSchedulePeriods: GET /classrooms/{id}/schedule-periods?day=
+// ListSchedulePeriods: GET /classrooms/{id}/schedule-periods?day= — same
+// wali-kelas ownership guard as ListClassroomSchedules, since the Jadwal
+// Kelas view loads both for the same classroom.
 func (h *Handler) ListSchedulePeriods(w http.ResponseWriter, r *http.Request) {
 	schoolID, ok := scopeSchoolID(w, r)
 	if !ok {
 		return
 	}
-	items, err := h.Store.ListSchedulePeriods(r.Context(), schoolID, chi.URLParam(r, "id"), parseDayParam(r))
+	classroomID := chi.URLParam(r, "id")
+	if !h.requireOwnClassroomIfWaliKelas(w, r, schoolID, classroomID) {
+		return
+	}
+	items, err := h.Store.ListSchedulePeriods(r.Context(), schoolID, classroomID, parseDayParam(r))
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -235,13 +241,19 @@ func (h *Handler) CreateSchedule(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusCreated, sc, nil)
 }
 
-// ListClassroomSchedules: GET /classrooms/{id}/schedules?day=
+// ListClassroomSchedules: GET /classrooms/{id}/schedules?day= — also backs
+// wali kelas's read-only "Jadwal Kelas" menu (guarded to their own classroom
+// below; every other role's behavior is unchanged).
 func (h *Handler) ListClassroomSchedules(w http.ResponseWriter, r *http.Request) {
 	schoolID, ok := scopeSchoolID(w, r)
 	if !ok {
 		return
 	}
-	items, err := h.Store.ListSchedulesByClassroom(r.Context(), schoolID, chi.URLParam(r, "id"), parseDayParam(r))
+	classroomID := chi.URLParam(r, "id")
+	if !h.requireOwnClassroomIfWaliKelas(w, r, schoolID, classroomID) {
+		return
+	}
+	items, err := h.Store.ListSchedulesByClassroom(r.Context(), schoolID, classroomID, parseDayParam(r))
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, err.Error())
 		return

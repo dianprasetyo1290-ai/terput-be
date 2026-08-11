@@ -20,11 +20,18 @@ import (
 // record).
 func (h *Handler) StudentAttendanceAdmin(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if !requireRole(w, claims, "admin", "superadmin") {
+	if !requireRole(w, claims, "admin", "superadmin", "walikelas") {
+		return
+	}
+	q := r.URL.Query()
+	// Wali kelas's read-only "Presensi Siswa" menu reuses this same admin
+	// endpoint, forced to their own classroom (see requireOwnClassroom) —
+	// admin/superadmin behavior (optional/unfiltered classroom_id) is
+	// unchanged.
+	if claims.ActiveRole == "walikelas" && !h.requireOwnClassroom(w, r, claims, q.Get("classroom_id")) {
 		return
 	}
 	page, perPage := pageParams(r)
-	q := r.URL.Query()
 	list, total, err := h.Store.ListStudentAttendanceForAdmin(r.Context(), store.StudentAttendanceFilter{
 		SchoolID:       scopeFromRequest(claims, r),
 		AcademicYearID: academicYearFromRequest(r),
@@ -48,10 +55,13 @@ func (h *Handler) StudentAttendanceAdmin(w http.ResponseWriter, r *http.Request)
 // duplicate student rows, re-aggregates when the month filter changes.
 func (h *Handler) StudentAttendanceSummaryAdmin(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if !requireRole(w, claims, "admin", "superadmin") {
+	if !requireRole(w, claims, "admin", "superadmin", "walikelas") {
 		return
 	}
 	q := r.URL.Query()
+	if claims.ActiveRole == "walikelas" && !h.requireOwnClassroom(w, r, claims, q.Get("classroom_id")) {
+		return
+	}
 	list, err := h.Store.StudentAttendanceMonthlySummary(r.Context(),
 		scopeFromRequest(claims, r), academicYearFromRequest(r), q.Get("classroom_id"), q.Get("month"))
 	if err != nil {

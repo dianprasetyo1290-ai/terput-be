@@ -90,6 +90,29 @@ func ptrOrNil(s string) *string {
 	return &s
 }
 
+// requireOwnClassroom is the wali-kelas classroom-ownership guard (Bug
+// Report SEKOCI GPM 5 Agustus 2026, ROLE WALI KELAS): a walikelas caller may
+// only ever see presensi/guru-sedang-mengajar data for the classroom they're
+// homeroom teacher of, verified live against academic-service (the source
+// of truth for classrooms.homeroom_teacher_user_id — attendance-service
+// never stores that assignment itself) rather than trusting the
+// client-supplied classroom_id. Only meaningful for active_role=="walikelas"
+// — callers must check that role first (this doesn't no-op for other
+// roles, unlike academic-service's variant, since every call site here
+// already branches on role before reaching this check).
+func (h *Handler) requireOwnClassroom(w http.ResponseWriter, r *http.Request, claims *common.Claims, classroomID string) bool {
+	if classroomID == "" {
+		common.WriteError(w, http.StatusBadRequest, "classroom_id is required")
+		return false
+	}
+	c, err := h.Client.GetClassroom(bg(r), classroomID)
+	if err != nil || c == nil || c.HomeroomTeacherUserID == nil || *c.HomeroomTeacherUserID != claims.UserID {
+		common.WriteError(w, http.StatusForbidden, "forbidden: you are not the wali kelas of this classroom")
+		return false
+	}
+	return true
+}
+
 // bg returns a short-lived background context for best-effort enrichment
 // calls to sibling services, independent of the inbound request's lifetime
 // concerns beyond what net/http already gives us via r.Context().

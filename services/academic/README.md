@@ -150,6 +150,22 @@ For each mapping, copies the source classroom's active roster into new
 year's data is never modified or deleted, so it stays intact and isolated
 from the new year (this is the client's core pain point being fixed).
 
+## Wali Kelas role (Bug Report SEKOCI GPM 5 Agustus 2026)
+
+`active_role == "walikelas"` can now call the same admin-facing endpoints a
+few of Jadwal Kelas/Matriks Pelajaran/Kenaikan Kelas already exposed —
+`GET /classrooms/{id}/schedules`, `GET /classrooms/{id}/schedule-periods`,
+`GET/POST /classrooms/{id}/subject-matrix*`, `POST /grade-promotion` — but
+every one of them is now guarded to their own homeroom classroom via
+`requireOwnClassroomIfWaliKelas` (handler.go), resolved live against
+`classrooms.homeroom_teacher_user_id` (still the only place this assignment
+is stored, see the existing Wali Kelas section below). Any other
+`active_role` is completely unaffected — the guard no-ops for them. A
+walikelas request naming a classroom they don't own gets `403`.
+`POST /grade-promotion` checks every distinct `from_classroom_id` in the
+payload, not just one, since a wali kelas processes their whole roster in
+one call.
+
 ## Assumptions
 
 - **Flattened classroom model.** The reference Laravel schema splits

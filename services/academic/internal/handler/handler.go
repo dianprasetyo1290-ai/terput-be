@@ -50,6 +50,32 @@ func scopeSchoolID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return claims.SchoolID, true
 }
 
+// requireOwnClassroomIfWaliKelas is the wali-kelas classroom-ownership guard
+// (Bug Report SEKOCI GPM 5 Agustus 2026, ROLE WALI KELAS: "kelas yang
+// menjadi tanggung jawab Wali Kelas tersebut" — never another class). Every
+// other active_role is unaffected (returns true immediately) so this can be
+// dropped into an existing admin-facing handler without changing admin's
+// behavior at all. Resolves ownership via classrooms.homeroom_teacher_user_id
+// (see store/classroom.go's WaliKelas type doc comment — that's the only
+// place this assignment is stored, no separate wali_kelas table) rather than
+// trusting a client-supplied classroom_id.
+func (h *Handler) requireOwnClassroomIfWaliKelas(w http.ResponseWriter, r *http.Request, schoolID, classroomID string) bool {
+	claims := common.FromCtx(r)
+	if claims == nil || claims.ActiveRole != "walikelas" {
+		return true
+	}
+	c, err := h.Store.GetClassroom(r.Context(), schoolID, classroomID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return false
+	}
+	if c == nil || c.HomeroomTeacherUserID == nil || *c.HomeroomTeacherUserID != claims.UserID {
+		common.WriteError(w, http.StatusForbidden, "forbidden: you are not the wali kelas of this classroom")
+		return false
+	}
+	return true
+}
+
 // scopeAcademicYearID applies the academic-year scoping rule from
 // CONVENTIONS.md: an explicit ?academic_year_id= always wins; otherwise we
 // try to resolve the school's current year via identity-service. If that

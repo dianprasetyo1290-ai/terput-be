@@ -122,6 +122,26 @@ func isStaff(c *common.Claims) bool {
 	return c != nil && (c.ActiveRole == "admin" || c.ActiveRole == "superadmin" || c.ActiveRole == "guru")
 }
 
+// isWaliKelasOwner is the wali-kelas classroom-ownership guard (Bug Report
+// SEKOCI GPM 5 Agustus 2026, ROLE WALI KELAS: "generate dan deskripsi rapor
+// untuk kelas yang menjadi tanggung jawab Wali Kelas tersebut"). Verified
+// live against academic-service's classrooms.homeroom_teacher_user_id (the
+// only place this assignment is stored) via the same GetClassroom call
+// GenerateReportCards already makes to resolve Wali Kelas's own name for the
+// header — never trust a client-supplied classroom_id. false for any
+// non-walikelas caller (or on lookup failure) — callers combine this with
+// isAdmin/isStaff via OR, so admin/guru/superadmin behavior is unchanged.
+func (h *Handler) isWaliKelasOwner(ctx context.Context, c *common.Claims, classroomID string) bool {
+	if c == nil || c.ActiveRole != "walikelas" || classroomID == "" {
+		return false
+	}
+	classroom, err := h.d.Academic.GetClassroom(ctx, classroomID)
+	if err != nil || classroom == nil || classroom.HomeroomTeacherUserID == nil {
+		return false
+	}
+	return *classroom.HomeroomTeacherUserID == c.UserID && classroom.SchoolID == c.SchoolID
+}
+
 // resolveSchoolID applies the multi-tenancy rule from CONVENTIONS.md:
 // scope to the caller's school_id, except superadmin may pass ?school_id=.
 func resolveSchoolID(r *http.Request, c *common.Claims) string {
@@ -138,14 +158,17 @@ func resolveSchoolID(r *http.Request, c *common.Claims) string {
 
 func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if !isAdmin(claims) {
-		common.WriteError(w, http.StatusForbidden, "only admin/superadmin can generate report cards")
-		return
-	}
 	classroomID := r.URL.Query().Get("classroom_id")
 	termID := r.URL.Query().Get("term_id")
 	if classroomID == "" || termID == "" {
 		common.WriteError(w, http.StatusBadRequest, "classroom_id and term_id query params are required")
+		return
+	}
+	// Wali kelas's "Generate & Deskripsi Rapor" menu reuses this exact
+	// endpoint, scoped to their own classroom (see isWaliKelasOwner) —
+	// admin/superadmin behavior is unchanged.
+	if !isAdmin(claims) && !h.isWaliKelasOwner(r.Context(), claims, classroomID) {
+		common.WriteError(w, http.StatusForbidden, "only admin/superadmin, or the wali kelas of this classroom, can generate report cards")
 		return
 	}
 	// Item 3: Rapot Bayangan is the same generate flow, just a different
@@ -564,6 +587,15 @@ func (h *Handler) GetReportCard(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusNotFound, "report card not found")
 		return
 	}
+	// authorizeReportCardAccess above treats any non-siswa/non-superadmin
+	// same-school role (admin/guru/walikelas alike) as authorized — walikelas
+	// needs the extra classroom-ownership restriction on top, so viewing/
+	// printing a report card (Generate & Deskripsi Rapor's "Lihat
+	// Detail"/print links) stays scoped to their own classroom.
+	if claims.ActiveRole == "walikelas" && !h.isWaliKelasOwner(r.Context(), claims, rc.ClassroomID) {
+		common.WriteError(w, http.StatusNotFound, "report card not found")
+		return
+	}
 
 	subjects, err := h.d.Store.ListSubjects(r.Context(), id)
 	if err != nil {
@@ -660,6 +692,11 @@ func (h *Handler) ListStudentReportCards(w http.ResponseWriter, r *http.Request)
 	out := make([]model.ReportCard, 0, len(cards))
 	for _, rc := range cards {
 		if claims.ActiveRole != "superadmin" && claims.ActiveRole != "siswa" && rc.SchoolID != claims.SchoolID {
+			continue
+		}
+		// Same classroom-ownership restriction as GetReportCard: walikelas
+		// only ever sees report cards belonging to their own classroom.
+		if claims.ActiveRole == "walikelas" && !h.isWaliKelasOwner(r.Context(), claims, rc.ClassroomID) {
 			continue
 		}
 		subjects, err := h.d.Store.ListSubjects(r.Context(), rc.ID)
