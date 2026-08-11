@@ -40,8 +40,10 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 
 		// guru daily flow
 		pr.Post("/sessions/checkin", h.CheckIn)
+		pr.Post("/sessions/substitute-guru", h.AssignSubstitute) // pergantian guru
 		pr.Get("/sessions/{id}", h.GetSession)
 		pr.Put("/sessions/{id}/agenda", h.UpdateAgenda)
+		pr.Put("/sessions/{id}/checkout", h.CheckOut) // jam keluar
 		pr.Get("/sessions/{id}/roster", h.Roster)
 		pr.Get("/sessions/{id}/students", h.ListSessionStudents)
 		pr.Post("/sessions/{id}/students/bulk", h.BulkMarkStudents)

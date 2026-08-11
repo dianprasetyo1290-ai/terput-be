@@ -34,6 +34,19 @@ type Scope struct {
 
 // ---- class_sessions ---------------------------------------------------
 
+// classSessionColumns is the shared SELECT/RETURNING column list for
+// class_sessions, kept as one constant so every query site (CheckIn,
+// AssignSubstitute, CheckOut, UpdateAgenda, GetClassSession,
+// FindSessionByScheduleAndDate, ListSessions) and both scan helpers below
+// stay in lockstep -- a column added here only needs its Scan destination
+// added once in fillClassSession, not hunted across five duplicated lists.
+const classSessionColumns = `
+	id, school_id, academic_year_id, term_id, schedule_id, classroom_id,
+	subject_id, guru_id, session_date, checked_in_at, checked_out_at, slot_start_time, slot_end_time,
+	pertemuan, pembahasan, materi_pertemuan, bentuk_kegiatan, agenda_filled_at,
+	catatan, tugas_diberikan, tugas_jenis, original_guru_id, substituted_at, substituted_by,
+	created_at, updated_at`
+
 type CheckInInput struct {
 	SchoolID       string
 	AcademicYearID string
@@ -61,12 +74,69 @@ func (s *Store) CheckIn(ctx context.Context, in CheckInInput) (*model.ClassSessi
 		ON CONFLICT (schedule_id, session_date) DO UPDATE SET
 			checked_in_at = COALESCE(class_sessions.checked_in_at, EXCLUDED.checked_in_at),
 			updated_at = now()
-		RETURNING id, school_id, academic_year_id, term_id, schedule_id, classroom_id,
-			subject_id, guru_id, session_date, checked_in_at, slot_start_time, slot_end_time,
-			pertemuan, pembahasan, materi_pertemuan, bentuk_kegiatan, agenda_filled_at,
-			created_at, updated_at
+		RETURNING `+classSessionColumns+`
 	`, in.SchoolID, in.AcademicYearID, in.TermID, in.ScheduleID, in.ClassroomID,
 		in.SubjectID, in.GuruID, in.SessionDate, in.SlotStartTime, in.SlotEndTime)
+	return scanClassSession(row)
+}
+
+// SubstituteInput carries the fields needed to record a "pergantian guru":
+// the guru currently assigned to a schedule slot/date hands off to another
+// guru who will cover it instead (client request: "guru bisa menunjuk guru
+// pengganti jika berhalangan hadir").
+type SubstituteInput struct {
+	SchoolID       string
+	AcademicYearID string
+	TermID         *string
+	ScheduleID     string
+	ClassroomID    string
+	SubjectID      *string
+	SessionDate    string
+	SlotStartTime  *string
+	SlotEndTime    *string
+	OriginalGuruID *string // who is being replaced, if known
+	SubstituteGuruID string // who will cover the slot -- becomes guru_id
+	SubstitutedBy  string  // who performed the reassignment (the outgoing guru, or an admin)
+}
+
+// AssignSubstitute upserts the class_sessions row for (schedule_id,
+// session_date) with guru_id set to the substitute. On first substitution of
+// an existing (already checked-in) row, original_guru_id captures whoever
+// was guru_id beforehand; on insert (no session existed yet, e.g. the
+// original guru never checked in at all) it's set directly from the caller.
+// checked_in_at is left untouched either way -- the substitute still does
+// their own check-in via the normal CheckIn endpoint (see handler.CheckIn's
+// pre-authorization check against an existing session's guru_id).
+func (s *Store) AssignSubstitute(ctx context.Context, in SubstituteInput) (*model.ClassSession, error) {
+	row := s.DB.QueryRowContext(ctx, `
+		INSERT INTO class_sessions (
+			school_id, academic_year_id, term_id, schedule_id, classroom_id,
+			subject_id, guru_id, session_date, slot_start_time, slot_end_time,
+			original_guru_id, substituted_at, substituted_by
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now(), $12)
+		ON CONFLICT (schedule_id, session_date) DO UPDATE SET
+			original_guru_id = COALESCE(class_sessions.original_guru_id, class_sessions.guru_id),
+			guru_id = EXCLUDED.guru_id,
+			substituted_at = now(),
+			substituted_by = EXCLUDED.substituted_by,
+			updated_at = now()
+		RETURNING `+classSessionColumns+`
+	`, in.SchoolID, in.AcademicYearID, in.TermID, in.ScheduleID, in.ClassroomID,
+		in.SubjectID, in.SubstituteGuruID, in.SessionDate, in.SlotStartTime, in.SlotEndTime,
+		in.OriginalGuruID, in.SubstitutedBy)
+	return scanClassSession(row)
+}
+
+// CheckOut records jam keluar (clock-out) for a session -- the counterpart
+// to CheckIn's checked_in_at (jam masuk). Idempotent: re-hitting it just
+// updates the timestamp to the latest call, same "last write wins" spirit as
+// the rest of this daily flow.
+func (s *Store) CheckOut(ctx context.Context, sessionID string) (*model.ClassSession, error) {
+	row := s.DB.QueryRowContext(ctx, `
+		UPDATE class_sessions SET checked_out_at = now(), updated_at = now()
+		WHERE id = $1
+		RETURNING `+classSessionColumns+`
+	`, sessionID)
 	return scanClassSession(row)
 }
 
@@ -75,6 +145,13 @@ type AgendaInput struct {
 	Pembahasan      *string
 	MateriPertemuan *string
 	BentukKegiatan  []string
+	// Catatan/TugasDiberikan/TugasJenis extend the same "Simpan & Lanjutkan
+	// ke Presensi" agenda step, per client request: session-level notes
+	// (e.g. "ada tugas yang harus diselesaikan hari itu juga") plus a
+	// tugas-given checkbox with individu/kelompok type.
+	Catatan        *string
+	TugasDiberikan bool
+	TugasJenis     *string
 }
 
 func (s *Store) UpdateAgenda(ctx context.Context, sessionID string, in AgendaInput) (*model.ClassSession, error) {
@@ -85,22 +162,18 @@ func (s *Store) UpdateAgenda(ctx context.Context, sessionID string, in AgendaInp
 	row := s.DB.QueryRowContext(ctx, `
 		UPDATE class_sessions SET
 			pertemuan = $2, pembahasan = $3, materi_pertemuan = $4,
-			bentuk_kegiatan = $5::jsonb, agenda_filled_at = now(), updated_at = now()
+			bentuk_kegiatan = $5::jsonb, agenda_filled_at = now(),
+			catatan = $6, tugas_diberikan = $7, tugas_jenis = $8, updated_at = now()
 		WHERE id = $1
-		RETURNING id, school_id, academic_year_id, term_id, schedule_id, classroom_id,
-			subject_id, guru_id, session_date, checked_in_at, slot_start_time, slot_end_time,
-			pertemuan, pembahasan, materi_pertemuan, bentuk_kegiatan, agenda_filled_at,
-			created_at, updated_at
-	`, sessionID, in.Pertemuan, in.Pembahasan, in.MateriPertemuan, string(bk))
+		RETURNING `+classSessionColumns+`
+	`, sessionID, in.Pertemuan, in.Pembahasan, in.MateriPertemuan, string(bk),
+		in.Catatan, in.TugasDiberikan, in.TugasJenis)
 	return scanClassSession(row)
 }
 
 func (s *Store) GetClassSession(ctx context.Context, id string) (*model.ClassSession, error) {
 	row := s.DB.QueryRowContext(ctx, `
-		SELECT id, school_id, academic_year_id, term_id, schedule_id, classroom_id,
-			subject_id, guru_id, session_date, checked_in_at, slot_start_time, slot_end_time,
-			pertemuan, pembahasan, materi_pertemuan, bentuk_kegiatan, agenda_filled_at,
-			created_at, updated_at
+		SELECT `+classSessionColumns+`
 		FROM class_sessions WHERE id = $1
 	`, id)
 	return scanClassSession(row)
@@ -114,10 +187,7 @@ func (s *Store) GetClassSession(ctx context.Context, id string) (*model.ClassSes
 // "Guru Sedang Mengajar", not a fault).
 func (s *Store) FindSessionByScheduleAndDate(ctx context.Context, scheduleID, sessionDate string) (*model.ClassSession, error) {
 	row := s.DB.QueryRowContext(ctx, `
-		SELECT id, school_id, academic_year_id, term_id, schedule_id, classroom_id,
-			subject_id, guru_id, session_date, checked_in_at, slot_start_time, slot_end_time,
-			pertemuan, pembahasan, materi_pertemuan, bentuk_kegiatan, agenda_filled_at,
-			created_at, updated_at
+		SELECT `+classSessionColumns+`
 		FROM class_sessions WHERE schedule_id = $1 AND session_date = $2
 	`, scheduleID, sessionDate)
 	cs, err := scanClassSession(row)
@@ -187,10 +257,7 @@ func (s *Store) ListSessions(ctx context.Context, f ListSessionsFilter) ([]model
 
 	args = append(args, f.PerPage, offset)
 	query := fmt.Sprintf(`
-		SELECT id, school_id, academic_year_id, term_id, schedule_id, classroom_id,
-			subject_id, guru_id, session_date, checked_in_at, slot_start_time, slot_end_time,
-			pertemuan, pembahasan, materi_pertemuan, bentuk_kegiatan, agenda_filled_at,
-			created_at, updated_at
+		SELECT `+classSessionColumns+`
 		FROM class_sessions WHERE %s
 		ORDER BY session_date DESC, checked_in_at DESC NULLS LAST
 		LIMIT $%d OFFSET $%d
@@ -213,77 +280,107 @@ func (s *Store) ListSessions(ctx context.Context, f ListSessionsFilter) ([]model
 	return out, total, rows.Err()
 }
 
+// classSessionScanTargets is a plain struct mirroring classSessionColumns'
+// nullable columns, shared by both scanClassSession (sql.Row) and
+// scanClassSessionRow (sql.Rows) so the two Scan() call sites and
+// fillClassSession stay a single column list to maintain instead of two.
+type classSessionScanTargets struct {
+	termID, subjectID, pertemuan, pembahasan, materi sql.NullString
+	checkedIn, checkedOut, agendaFilled               sql.NullTime
+	slotStart, slotEnd                                sql.NullString
+	catatan, tugasJenis                               sql.NullString
+	originalGuruID, substitutedBy                     sql.NullString
+	substitutedAt                                     sql.NullTime
+	bk                                                []byte
+}
+
+func (t *classSessionScanTargets) dest(cs *model.ClassSession) []interface{} {
+	return []interface{}{
+		&cs.ID, &cs.SchoolID, &cs.AcademicYearID, &t.termID, &cs.ScheduleID, &cs.ClassroomID,
+		&t.subjectID, &cs.GuruID, &cs.SessionDate, &t.checkedIn, &t.checkedOut, &t.slotStart, &t.slotEnd,
+		&t.pertemuan, &t.pembahasan, &t.materi, &t.bk, &t.agendaFilled,
+		&t.catatan, &cs.TugasDiberikan, &t.tugasJenis, &t.originalGuruID, &t.substitutedAt, &t.substitutedBy,
+		&cs.CreatedAt, &cs.UpdatedAt,
+	}
+}
+
 func scanClassSession(row *sql.Row) (*model.ClassSession, error) {
 	cs := &model.ClassSession{}
-	var termID, subjectID, pertemuan, pembahasan, materi sql.NullString
-	var checkedIn, agendaFilled sql.NullTime
-	var slotStart, slotEnd sql.NullString
-	var bk []byte
-	err := row.Scan(&cs.ID, &cs.SchoolID, &cs.AcademicYearID, &termID, &cs.ScheduleID, &cs.ClassroomID,
-		&subjectID, &cs.GuruID, &cs.SessionDate, &checkedIn, &slotStart, &slotEnd,
-		&pertemuan, &pembahasan, &materi, &bk, &agendaFilled,
-		&cs.CreatedAt, &cs.UpdatedAt)
+	t := classSessionScanTargets{}
+	err := row.Scan(t.dest(cs)...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	fillClassSession(cs, termID, subjectID, pertemuan, pembahasan, materi, checkedIn, agendaFilled, slotStart, slotEnd, bk)
+	fillClassSession(cs, t)
 	return cs, nil
 }
 
 func scanClassSessionRow(rows *sql.Rows) (*model.ClassSession, error) {
 	cs := &model.ClassSession{}
-	var termID, subjectID, pertemuan, pembahasan, materi sql.NullString
-	var checkedIn, agendaFilled sql.NullTime
-	var slotStart, slotEnd sql.NullString
-	var bk []byte
-	err := rows.Scan(&cs.ID, &cs.SchoolID, &cs.AcademicYearID, &termID, &cs.ScheduleID, &cs.ClassroomID,
-		&subjectID, &cs.GuruID, &cs.SessionDate, &checkedIn, &slotStart, &slotEnd,
-		&pertemuan, &pembahasan, &materi, &bk, &agendaFilled,
-		&cs.CreatedAt, &cs.UpdatedAt)
-	if err != nil {
+	t := classSessionScanTargets{}
+	if err := rows.Scan(t.dest(cs)...); err != nil {
 		return nil, err
 	}
-	fillClassSession(cs, termID, subjectID, pertemuan, pembahasan, materi, checkedIn, agendaFilled, slotStart, slotEnd, bk)
+	fillClassSession(cs, t)
 	return cs, nil
 }
 
-func fillClassSession(cs *model.ClassSession, termID, subjectID, pertemuan, pembahasan, materi sql.NullString,
-	checkedIn, agendaFilled sql.NullTime, slotStart, slotEnd sql.NullString, bk []byte) {
-	if termID.Valid {
-		cs.TermID = &termID.String
+func fillClassSession(cs *model.ClassSession, t classSessionScanTargets) {
+	if t.termID.Valid {
+		cs.TermID = &t.termID.String
 	}
-	if subjectID.Valid {
-		cs.SubjectID = &subjectID.String
+	if t.subjectID.Valid {
+		cs.SubjectID = &t.subjectID.String
 	}
-	if pertemuan.Valid {
-		cs.Pertemuan = &pertemuan.String
+	if t.pertemuan.Valid {
+		cs.Pertemuan = &t.pertemuan.String
 	}
-	if pembahasan.Valid {
-		cs.Pembahasan = &pembahasan.String
+	if t.pembahasan.Valid {
+		cs.Pembahasan = &t.pembahasan.String
 	}
-	if materi.Valid {
-		cs.MateriPertemuan = &materi.String
+	if t.materi.Valid {
+		cs.MateriPertemuan = &t.materi.String
 	}
-	if checkedIn.Valid {
-		t := checkedIn.Time
-		cs.CheckedInAt = &t
+	if t.checkedIn.Valid {
+		v := t.checkedIn.Time
+		cs.CheckedInAt = &v
 	}
-	if agendaFilled.Valid {
-		t := agendaFilled.Time
-		cs.AgendaFilledAt = &t
+	if t.checkedOut.Valid {
+		v := t.checkedOut.Time
+		cs.CheckedOutAt = &v
 	}
-	if slotStart.Valid {
-		cs.SlotStartTime = &slotStart.String
+	if t.agendaFilled.Valid {
+		v := t.agendaFilled.Time
+		cs.AgendaFilledAt = &v
 	}
-	if slotEnd.Valid {
-		cs.SlotEndTime = &slotEnd.String
+	if t.slotStart.Valid {
+		cs.SlotStartTime = &t.slotStart.String
+	}
+	if t.slotEnd.Valid {
+		cs.SlotEndTime = &t.slotEnd.String
+	}
+	if t.catatan.Valid {
+		cs.Catatan = &t.catatan.String
+	}
+	if t.tugasJenis.Valid {
+		cs.TugasJenis = &t.tugasJenis.String
+	}
+	if t.originalGuruID.Valid {
+		cs.OriginalGuruID = &t.originalGuruID.String
+	}
+	if t.substitutedBy.Valid {
+		cs.SubstitutedBy = &t.substitutedBy.String
+	}
+	if t.substitutedAt.Valid {
+		v := t.substitutedAt.Time
+		cs.SubstitutedAt = &v
 	}
 	cs.BentukKegiatan = []string{}
-	if len(bk) > 0 {
-		_ = json.Unmarshal(bk, &cs.BentukKegiatan)
+	if len(t.bk) > 0 {
+		_ = json.Unmarshal(t.bk, &cs.BentukKegiatan)
 	}
 }
 

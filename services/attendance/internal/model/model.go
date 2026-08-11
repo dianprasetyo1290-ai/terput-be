@@ -34,6 +34,20 @@ var ValidBentukKegiatan = map[string]bool{
 	"sumatif_akhir_jenjang":   true,
 }
 
+// TugasJenis enumerates the "tugas" checkbox added on request of Sekolah
+// GPM: whether homework/task was given for a session, and which type.
+type TugasJenis string
+
+const (
+	TugasIndividu TugasJenis = "individu"
+	TugasKelompok TugasJenis = "kelompok"
+)
+
+var ValidTugasJenis = map[string]bool{
+	string(TugasIndividu): true,
+	string(TugasKelompok): true,
+}
+
 // ClassSession is one guru check-in + daily agenda for a (schedule_id, date).
 type ClassSession struct {
 	ID             string  `json:"id"`
@@ -46,7 +60,8 @@ type ClassSession struct {
 	GuruID         string  `json:"guru_id"`
 	SessionDate    string  `json:"session_date"` // YYYY-MM-DD
 
-	CheckedInAt   *time.Time `json:"checked_in_at,omitempty"`
+	CheckedInAt   *time.Time `json:"checked_in_at,omitempty"`  // jam masuk
+	CheckedOutAt  *time.Time `json:"checked_out_at,omitempty"` // jam keluar
 	SlotStartTime *string    `json:"slot_start_time,omitempty"` // HH:MM:SS
 	SlotEndTime   *string    `json:"slot_end_time,omitempty"`
 
@@ -55,6 +70,20 @@ type ClassSession struct {
 	MateriPertemuan *string    `json:"materi_pertemuan,omitempty"`
 	BentukKegiatan  []string   `json:"bentuk_kegiatan"`
 	AgendaFilledAt  *time.Time `json:"agenda_filled_at,omitempty"`
+
+	// Catatan is a session-level note (client example: "ada tugas yang harus
+	// diselesaikan hari itu juga") -- distinct from StudentAttendance.Catatan,
+	// which is per-student.
+	Catatan        *string `json:"catatan,omitempty"`
+	TugasDiberikan bool    `json:"tugas_diberikan"`
+	TugasJenis     *string `json:"tugas_jenis,omitempty"` // "individu" | "kelompok"
+
+	// Pergantian guru (substitute teacher): GuruID is always the guru
+	// currently covering this session; OriginalGuruID/SubstitutedAt/
+	// SubstitutedBy record the handoff when one happened.
+	OriginalGuruID *string    `json:"original_guru_id,omitempty"`
+	SubstitutedAt  *time.Time `json:"substituted_at,omitempty"`
+	SubstitutedBy  *string    `json:"substituted_by,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

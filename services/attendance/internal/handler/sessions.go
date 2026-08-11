@@ -71,8 +71,17 @@ func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
 			termID = &sched.TermID
 		}
 		if sched.GuruID != "" && sched.GuruID != claims.UserID {
-			common.WriteError(w, http.StatusForbidden, "schedule slot is not assigned to this guru")
-			return
+			// Not the guru academic-service has on record for this slot --
+			// but a "pergantian guru" (substitute) may already have been
+			// recorded via AssignSubstitute, naming this caller as the
+			// stand-in for this exact (schedule_id, session_date). In that
+			// case class_sessions.guru_id already equals claims.UserID, so
+			// this caller is pre-authorized to check in as the substitute.
+			existing, _ := h.Store.FindSessionByScheduleAndDate(bg(r), req.ScheduleID, req.SessionDate)
+			if existing == nil || existing.GuruID != claims.UserID {
+				common.WriteError(w, http.StatusForbidden, "schedule slot is not assigned to this guru")
+				return
+			}
 		}
 	}
 	if classroomID == "" {
@@ -132,6 +141,129 @@ func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSONMsg(w, http.StatusOK, cs, nil, "Presensi berhasil dicatat")
 }
 
+// ---- pergantian guru (substitute teacher) -----------------------------
+
+type substituteRequest struct {
+	ScheduleID       string `json:"schedule_id"`
+	ClassroomID      string `json:"classroom_id"` // fallback if academic-service lookup fails, same as CheckIn
+	SubjectID        string `json:"subject_id"`
+	TermID           string `json:"term_id"`
+	SessionDate      string `json:"session_date"` // YYYY-MM-DD, defaults to today
+	StartTime        string `json:"slot_start_time"`
+	EndTime          string `json:"slot_end_time"`
+	SubstituteGuruID string `json:"substitute_guru_id"`
+}
+
+// AssignSubstitute implements "pergantian guru": a guru who can't attend
+// their own teaching slot names another guru to cover it instead. Mirrors
+// CheckIn's academic-service resolution/fallback and ownership rules (only
+// the guru actually assigned to the slot, or an admin, may reassign it) but
+// writes guru_id = the substitute rather than the caller, so class_sessions
+// (and every admin/dashboard view built on it) immediately reflects who is
+// really covering the session. The substitute still performs their own
+// check-in afterwards via the normal endpoint -- see the pre-authorization
+// check added to CheckIn above.
+func (h *Handler) AssignSubstitute(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if !requireRole(w, claims, "guru", "admin", "superadmin") {
+		return
+	}
+	var req substituteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.WriteError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.ScheduleID == "" {
+		common.WriteError(w, http.StatusBadRequest, "schedule_id is required")
+		return
+	}
+	if req.SubstituteGuruID == "" {
+		common.WriteError(w, http.StatusBadRequest, "substitute_guru_id is required")
+		return
+	}
+	if req.SubstituteGuruID == claims.UserID {
+		common.WriteError(w, http.StatusBadRequest, "cannot assign yourself as your own substitute")
+		return
+	}
+	if req.SessionDate == "" {
+		req.SessionDate = time.Now().Format("2006-01-02")
+	}
+
+	classroomID := req.ClassroomID
+	startTime := ptrOrNil(req.StartTime)
+	endTime := ptrOrNil(req.EndTime)
+	subjectID := ptrOrNil(req.SubjectID)
+	termID := ptrOrNil(req.TermID)
+
+	originalGuruID := claims.UserID // who is being replaced, from the caller's own JWT
+	sched, schedErr := h.Client.GetSchedule(bg(r), req.ScheduleID, claims.SchoolID)
+	if schedErr == nil && sched != nil {
+		if sched.ClassroomID != "" {
+			classroomID = sched.ClassroomID
+		}
+		if sched.StartTime != "" {
+			startTime = &sched.StartTime
+		}
+		if sched.EndTime != "" {
+			endTime = &sched.EndTime
+		}
+		if sched.SubjectID != "" {
+			subjectID = &sched.SubjectID
+		}
+		if sched.TermID != "" {
+			termID = &sched.TermID
+		}
+		if sched.GuruID != "" {
+			originalGuruID = sched.GuruID
+		}
+	}
+	// Only the guru currently on the hook for this slot may hand it off --
+	// either per academic-service's schedule record, or (if that's
+	// unreachable/inconclusive) per an existing class_session's guru_id.
+	// Admins may reassign any slot.
+	if claims.ActiveRole == "guru" && originalGuruID != claims.UserID {
+		existing, _ := h.Store.FindSessionByScheduleAndDate(bg(r), req.ScheduleID, req.SessionDate)
+		if existing == nil || existing.GuruID != claims.UserID {
+			common.WriteError(w, http.StatusForbidden, "only the guru assigned to this slot (or an admin) may assign a substitute")
+			return
+		}
+		originalGuruID = claims.UserID
+	}
+	if classroomID == "" {
+		common.WriteError(w, http.StatusBadRequest, "classroom_id is required (could not resolve from academic-service, must be supplied)")
+		return
+	}
+
+	academicYearID := r.URL.Query().Get("academic_year_id")
+	if academicYearID == "" {
+		academicYearID = r.Header.Get("X-Academic-Year-Id")
+	}
+	if academicYearID == "" {
+		common.WriteError(w, http.StatusBadRequest, "academic_year_id is required (query param or X-Academic-Year-Id header)")
+		return
+	}
+
+	cs, err := h.Store.AssignSubstitute(r.Context(), store.SubstituteInput{
+		SchoolID:         claims.SchoolID,
+		AcademicYearID:   academicYearID,
+		TermID:           termID,
+		ScheduleID:       req.ScheduleID,
+		ClassroomID:      classroomID,
+		SubjectID:        subjectID,
+		SessionDate:      req.SessionDate,
+		SlotStartTime:    startTime,
+		SlotEndTime:      endTime,
+		OriginalGuruID:   ptrOrNil(originalGuruID),
+		SubstituteGuruID: req.SubstituteGuruID,
+		SubstitutedBy:    claims.UserID,
+	})
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to assign substitute: "+err.Error())
+		return
+	}
+	common.WriteJSONMsg(w, http.StatusOK, cs, nil, "Pergantian guru berhasil dicatat")
+}
+
 // ---- session detail / ownership guard --------------------------------
 
 func (h *Handler) loadSessionOrErr(w http.ResponseWriter, r *http.Request) *model.ClassSession {
@@ -173,6 +305,30 @@ func (h *Handler) GetSession(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusOK, cs, nil)
 }
 
+// CheckOut records jam keluar (clock-out) for a pertemuan -- the
+// counterpart to CheckIn's jam masuk (checked_in_at). Client request: each
+// pertemuan should record both a start and end time, not just one
+// timestamp.
+func (h *Handler) CheckOut(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if !requireRole(w, claims, "guru") {
+		return
+	}
+	cs := h.loadSessionOrErr(w, r)
+	if cs == nil {
+		return
+	}
+	if !guruOwnsSession(w, claims, cs) {
+		return
+	}
+	updated, err := h.Store.CheckOut(r.Context(), cs.ID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to check out: "+err.Error())
+		return
+	}
+	common.WriteJSONMsg(w, http.StatusOK, updated, nil, "Jam keluar berhasil dicatat")
+}
+
 // ---- 2. Agenda Pembelajaran Harian ------------------------------------
 
 type agendaRequest struct {
@@ -180,6 +336,12 @@ type agendaRequest struct {
 	Pembahasan      string   `json:"pembahasan"`
 	MateriPertemuan string   `json:"materi_pertemuan"`
 	BentukKegiatan  []string `json:"bentuk_kegiatan"`
+	// Catatan: session-level notes (client example: "ada tugas yang harus
+	// diselesaikan hari itu juga"). TugasDiberikan/TugasJenis: the "tugas"
+	// checkbox -- whether homework was given, and Individu vs Kelompok.
+	Catatan        string `json:"catatan"`
+	TugasDiberikan bool   `json:"tugas_diberikan"`
+	TugasJenis     string `json:"tugas_jenis"`
 }
 
 func (h *Handler) UpdateAgenda(w http.ResponseWriter, r *http.Request) {
@@ -205,11 +367,25 @@ func (h *Handler) UpdateAgenda(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// tugas_jenis is only meaningful when tugas_diberikan is checked; a
+	// stale/mismatched value from the client is dropped rather than
+	// rejected, since "no task given" makes the type moot either way.
+	tugasJenis := ""
+	if req.TugasDiberikan {
+		if req.TugasJenis != "" && !model.ValidTugasJenis[req.TugasJenis] {
+			common.WriteError(w, http.StatusBadRequest, "invalid tugas_jenis, must be individu or kelompok")
+			return
+		}
+		tugasJenis = req.TugasJenis
+	}
 	updated, err := h.Store.UpdateAgenda(r.Context(), cs.ID, store.AgendaInput{
 		Pertemuan:       ptrOrNil(req.Pertemuan),
 		Pembahasan:      ptrOrNil(req.Pembahasan),
 		MateriPertemuan: ptrOrNil(req.MateriPertemuan),
 		BentukKegiatan:  req.BentukKegiatan,
+		Catatan:         ptrOrNil(req.Catatan),
+		TugasDiberikan:  req.TugasDiberikan,
+		TugasJenis:      ptrOrNil(tugasJenis),
 	})
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to save agenda: "+err.Error())
