@@ -31,14 +31,15 @@ func (s *LessonPlanStore) Create(ctx context.Context, lp *model.LessonPlan) erro
 	return row.Scan(&lp.ID, &lp.CreatedAt, &lp.UpdatedAt)
 }
 
-// SetDimensiLulusan overwrites the 8-dimensi-lulusan JSONB for a guru's own
-// RPM entry (used by the Excel-import handler). Returns false if no row
-// matched (wrong id or not the caller's own RPM).
-func (s *LessonPlanStore) SetDimensiLulusan(ctx context.Context, id, guruUserID string, dimensi map[string]interface{}) (bool, error) {
+// ImportSections overwrites section_a/b/c and dimensi_lulusan for a guru's
+// own RPM entry in one shot (used by the combined A/B/C/D Excel-import
+// handler, rpm_template.go). Returns false if no row matched (wrong id or
+// not the caller's own RPM).
+func (s *LessonPlanStore) ImportSections(ctx context.Context, id, guruUserID string, sectionA, sectionB, sectionC, dimensi map[string]interface{}) (bool, error) {
 	tag, err := s.db.Exec(ctx, `
-		UPDATE lesson_plans SET dimensi_lulusan=$1, updated_at=now()
-		WHERE id=$2 AND guru_user_id=$3 AND deleted_at IS NULL`,
-		marshalMap(dimensi), id, guruUserID)
+		UPDATE lesson_plans SET section_a=$1, section_b=$2, section_c=$3, dimensi_lulusan=$4, updated_at=now()
+		WHERE id=$5 AND guru_user_id=$6 AND deleted_at IS NULL`,
+		marshalMap(sectionA), marshalMap(sectionB), marshalMap(sectionC), marshalMap(dimensi), id, guruUserID)
 	if err != nil {
 		return false, err
 	}

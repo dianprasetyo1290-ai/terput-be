@@ -1,0 +1,13 @@
+-- Bug Report SEKOCI (5 Agustus 2026): the 000003 "8 Dimensi Lulusan" field
+-- codes/labels were guessed by an earlier pass without the real template and
+-- are wrong (see internal/model/model.go DimensiLulusanFields, now
+-- corrected). This migration only fixes the DATA, not the column -- it's
+-- still the same freeform `lesson_plans.dimensi_lulusan` JSONB.
+--
+-- Choice: WIPE rather than positionally remap old keys -> new keys. A 1:1
+-- positional remap (old slot 0 -> new slot 0, etc.) would silently attach a
+-- guru's free-text answer for e.g. "Penalaran Kritis" to the unrelated new
+-- label "Bergotong Royong" -- semantically wrong data is worse than no data.
+-- This is dev-only data seeded under the acknowledged-wrong schema, not
+-- production content worth preserving at the cost of correctness.
+UPDATE lesson_plans SET dimensi_lulusan = '{}'::jsonb WHERE dimensi_lulusan <> '{}'::jsonb;

@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS prosem_items;
+DROP TABLE IF EXISTS prosem;

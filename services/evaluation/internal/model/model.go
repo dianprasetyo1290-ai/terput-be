@@ -27,23 +27,121 @@ type LessonPlan struct {
 // dimensions) the client's RPM template asks a guru to fill per lesson --
 // Kurikulum Merdeka's 2024 successor to the older 6-dimension "Profil
 // Pelajar Pancasila", per Kepmendikdasmen. Code is the JSONB key; Label is
-// the Excel template's column header (and the display label).
+// the Excel template's row label (and the display label).
 type DimensiLulusanField struct {
 	Code  string
 	Label string
 }
 
-// DimensiLulusanFields is the fixed set of 8 dimensions, in template-column
-// order. Not school-configurable -- the client specified these by name.
+// DimensiLulusanFields is the fixed set of 8 dimensions, in template order.
+// Not school-configurable -- the client specified these by name.
+//
+// Corrected 2026-08-11 (Bug Report SEKOCI, 5 Agustus 2026): an earlier pass
+// guessed these names without the real template and got them wrong. See
+// migration 000004 for the data-side fix.
 var DimensiLulusanFields = []DimensiLulusanField{
-	{"keimanan_ketakwaan", "Keimanan dan Ketakwaan terhadap Tuhan YME"},
-	{"kewargaan", "Kewargaan"},
-	{"penalaran_kritis", "Penalaran Kritis"},
-	{"kreativitas", "Kreativitas"},
-	{"kolaborasi", "Kolaborasi"},
-	{"kemandirian", "Kemandirian"},
-	{"kesehatan", "Kesehatan"},
-	{"komunikasi", "Komunikasi"},
+	{"beriman_bertakwa_berakhlak_mulia", "Beriman, Bertakwa, dan Berakhlak Mulia"},
+	{"berkebinekaan_global", "Berkebinekaan Global"},
+	{"bergotong_royong", "Bergotong Royong"},
+	{"mandiri", "Mandiri"},
+	{"bernalar_kritis", "Bernalar Kritis"},
+	{"kreatif", "Kreatif"},
+	{"literasi_digital", "Literasi & Digital"},
+	{"kepemimpinan", "Kepemimpinan"},
+}
+
+// RpmField is a single labeled field within RPM section A, B, or C (the
+// frontend's own field breakdown of the freeform section_a/b/c JSONB --
+// see model.LessonPlan doc and README Assumption #9). Reused here so the
+// combined A/B/C/D Excel template (rpm_template.go) and its import stay in
+// lockstep with the guru-facing form (RpmMineFormView.vue) without
+// duplicating the field list a third time.
+type RpmField struct {
+	Code  string
+	Label string
+}
+
+// SectionAFields -- A. Identitas & Karakteristik.
+var SectionAFields = []RpmField{
+	{"alokasi_waktu", "Alokasi Waktu"},
+	{"fase", "Fase"},
+	{"karakteristik_peserta_didik", "Karakteristik Peserta Didik"},
+	{"kelas", "Kelas"},
+	{"mata_pelajaran", "Mata Pelajaran"},
+}
+
+// SectionBFields -- B. Analisis Kesiapan & Desain.
+var SectionBFields = []RpmField{
+	{"asesmen_diagnostik", "Asesmen Diagnostik"},
+	{"capaian_pembelajaran", "Capaian Pembelajaran"},
+	{"pemahaman_bermakna", "Pemahaman Bermakna"},
+	{"pertanyaan_pemantik", "Pertanyaan Pemantik"},
+	{"tujuan_pembelajaran", "Tujuan Pembelajaran"},
+}
+
+// SectionCFields -- C. Langkah Pembelajaran.
+var SectionCFields = []RpmField{
+	{"asesmen_formatif", "Asesmen Formatif"},
+	{"kegiatan_awal", "Kegiatan Awal"},
+	{"kegiatan_inti", "Kegiatan Inti"},
+	{"kegiatan_penutup", "Kegiatan Penutup"},
+	{"refleksi", "Refleksi"},
+}
+
+// ---------------- Program Tahunan (Prota) ----------------
+// NEW FEATURE, Bug Report SEKOCI 5 Agustus 2026. Excel-import-driven parent
+// + line-items, mirrors Program Semester below. One Prota = one (guru,
+// mata pelajaran, kelas, tahun ajaran) curriculum plan; ProtaItem = one row
+// of Template_Prota_LMS_Ready.xlsx sheet TEMPLATE_PROTA.
+
+type Prota struct {
+	ID             string      `json:"id"`
+	SchoolID       string      `json:"school_id"`
+	AcademicYearID string      `json:"academic_year_id"`
+	GuruUserID     string      `json:"guru_user_id"`
+	MataPelajaran  string      `json:"mata_pelajaran"`
+	Kelas          string      `json:"kelas"`
+	Items          []ProtaItem `json:"items,omitempty"`
+	CreatedAt      time.Time   `json:"created_at"`
+	UpdatedAt      time.Time   `json:"updated_at"`
+}
+
+type ProtaItem struct {
+	ID                      string `json:"id"`
+	No                      int    `json:"no"`
+	Semester                string `json:"semester"`
+	ElemenKodeBab           string `json:"elemen_kode_bab"`
+	KompetensiDasarTP       string `json:"kompetensi_dasar_tp"`
+	AlokasiWaktuJP          int    `json:"alokasi_waktu_jp"`
+	KeteranganTargetAsesmen string `json:"keterangan_target_asesmen"`
+}
+
+// ---------------- Program Semester (Prosem) ----------------
+// Same pattern as Prota. ProsemItem = one row of
+// Template_Prosem_LMS_Ready.xlsx sheet TEMPLATE_PROSEM.
+
+type Prosem struct {
+	ID             string       `json:"id"`
+	SchoolID       string       `json:"school_id"`
+	AcademicYearID string       `json:"academic_year_id"`
+	GuruUserID     string       `json:"guru_user_id"`
+	MataPelajaran  string       `json:"mata_pelajaran"`
+	Kelas          string       `json:"kelas"`
+	Items          []ProsemItem `json:"items,omitempty"`
+	CreatedAt      time.Time    `json:"created_at"`
+	UpdatedAt      time.Time    `json:"updated_at"`
+}
+
+type ProsemItem struct {
+	ID                   string `json:"id"`
+	No                   int    `json:"no"`
+	MateriPokokAktivitas string `json:"materi_pokok_aktivitas"`
+	AlokasiJP            int    `json:"alokasi_jp"`
+	BulanTarget          string `json:"bulan_target"`
+	MingguKe             int    `json:"minggu_ke"`
+	EstimasiTanggal      string `json:"estimasi_tanggal"` // YYYY-MM-DD, "" if unset
+	TipeAktivitasLMS     string `json:"tipe_aktivitas_lms"`
+	StatusInputGuru      string `json:"status_input_guru"`
 }
 
 // ---------------- Penilaian Guru ----------------

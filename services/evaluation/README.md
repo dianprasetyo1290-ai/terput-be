@@ -1,13 +1,21 @@
 # evaluation-service
 
-Owns two "teacher-quality" features for the Sekoci Go+Vue rewrite:
+Owns four "teacher-quality / curriculum-planning" features for the Sekoci
+Go+Vue rewrite:
 
-1. **RPM (Rencana Pembelajaran Mendalam)** — lesson plans, guru-authored,
-   admin read-only. Includes "8 Dimensi Lulusan" (graduate-profile
-   dimensions), filled via an Excel-template import (not form fields) — see
-   "RPM: 8 Dimensi Lulusan" below. Printed RPM (client-side `window.print()`,
-   `RpmPrintTemplate.vue`) carries a Kepala Sekolah signature line.
-2. **Penilaian Guru** — teacher performance evaluation: admin-run periods, 6
+1. **Modul RPM (Rencana Pembelajaran Mendalam)** — lesson plans, guru-
+   authored, admin read-only. 4 sections A/B/C/D (Identitas & Karakteristik /
+   Analisis Kesiapan & Desain / Langkah Pembelajaran / 8 Dimensi Lulusan),
+   all importable in one Excel file — see "Modul RPM: full A/B/C/D template"
+   below. Printed RPM (client-side `window.print()`, `RpmPrintTemplate.vue`)
+   carries a Kepala Sekolah signature line.
+2. **Program Tahunan (Prota)** — NEW, curriculum plan per (guru, mata
+   pelajaran, kelas, tahun ajaran), created by importing a multi-row Excel
+   template (parent + line-items, not a single-record import like RPM's
+   dimensi). See "Prota / Prosem" below.
+3. **Program Semester (Prosem)** — NEW, same pattern as Prota, weekly-level
+   plan instead of yearly.
+4. **Penilaian Guru** — teacher performance evaluation: admin-run periods, 6
    evaluator categories (Kepala Sekolah, Waka Kurikulum, Waka Kesiswaan,
    Guru-self, Guru-peer, Siswa), weighted final score, Promotif/Tidak
    Promotif labeling, printable per-guru report. Hierarchy rule: a guru may
@@ -55,33 +63,99 @@ period is finished regardless of the publish flag. Evaluators can only
 submit (`POST /periods/{id}/evaluations`) while status is exactly
 `Sedang Berlangsung`.
 
-## RPM: 8 Dimensi Lulusan
+## Modul RPM: full A/B/C/D template (corrected 2026-08-11)
 
-Client request: a lesson plan gains 8 "Dimensi Lulusan" (graduate-profile
-dimensions — Kurikulum Merdeka's 2024 successor to the older 6-dimension
-"Profil Pelajar Pancasila"), filled via an **Excel-template import**, not
-one-by-one form fields. Fixed set (`model.DimensiLulusanFields`): Keimanan
-dan Ketakwaan terhadap Tuhan YME, Kewargaan, Penalaran Kritis, Kreativitas,
-Kolaborasi, Kemandirian, Kesehatan, Komunikasi.
+Bug Report SEKOCI (5 Agustus 2026): an earlier pass built RPM's "8 Dimensi
+Lulusan" without the real template and guessed wrong field codes/labels, and
+RPM's Excel import only ever covered that one section. Both are fixed:
 
-Stored as `lesson_plans.dimensi_lulusan` (JSONB, migration 000003), same
-freeform pattern as `section_a/b/c`. Uses `github.com/xuri/excelize/v2` —
-already a dependency elsewhere in this codebase (services/identity,
-services/exam) for the same "Import Template Sekoci" style bulk-Excel
-convention (see `services/identity/internal/handler/import.go`), reused here
-rather than adding a new library:
+- **8 Dimensi Lulusan, corrected** (`model.DimensiLulusanFields`): Beriman
+  Bertakwa dan Berakhlak Mulia, Berkebinekaan Global, Bergotong Royong,
+  Mandiri, Bernalar Kritis, Kreatif, Literasi & Digital, Kepemimpinan.
+  Migration 000004 **wipes** any `dimensi_lulusan` data written under the
+  old wrong keys rather than positionally remapping it — a 1:1 slot remap
+  would've attached a guru's real answer to a semantically unrelated new
+  label (e.g. old "Penalaran Kritis" text landing under new "Bergotong
+  Royong"), which is worse than losing dev-only placeholder data.
+- **One Excel file now covers all 4 RPM sections** (A. Identitas &
+  Karakteristik, B. Analisis Kesiapan & Desain, C. Langkah Pembelajaran, D.
+  8 Dimensi Lulusan), not just D. Two-column sheet (`Field` | `Isi`), one
+  row per field with section-title rows for readability, matching the
+  client's "Judul RPM" example table. Field lists: `model.SectionAFields`,
+  `SectionBFields`, `SectionCFields`, `DimensiLulusanFields`.
 
-- `GET /me/lesson-plans/dimensi-lulusan-template` — downloads a blank
-  `.xlsx` (1 sheet, 8 dimension-name headers + one example row).
-- `POST /me/lesson-plans/{id}/dimensi-lulusan-import` — guru uploads a
-  filled copy (multipart field `file`); row 2's 8 columns (matched by header
-  text) overwrite that RPM's `dimensi_lulusan`. Owner-only (guru's own RPM),
-  re-import overwrites.
+Uses `github.com/xuri/excelize/v2` — already a dependency elsewhere in this
+codebase (services/identity, services/exam) for the same "Import Template
+Sekoci" style bulk-Excel convention, reused here rather than adding a new
+library. See `internal/handler/rpm_template.go`:
+
+- `GET /me/lesson-plans/rpm-template` — downloads a blank `.xlsx` (1 sheet
+  `RPM Template`, 23 field rows across A/B/C/D + section-title rows).
+- `POST /me/lesson-plans/{id}/rpm-import` — guru uploads a filled copy
+  (multipart field `file`); each row is matched by its `Field` label text
+  against the known field list and written into `section_a/b/c` or
+  `dimensi_lulusan` accordingly (`store.LessonPlanStore.ImportSections`
+  overwrites all 4 in one UPDATE). Unmatched rows (section-title rows, a
+  stray blank line) are skipped, not errors. Owner-only, re-import
+  overwrites.
 
 Frontend: `RpmMineFormView.vue` (guru's own RPM edit screen) has the
 download/upload UI, gated on the RPM already being saved (needs an id to
-import into). `RpmPrintTemplate.vue` and `RpmGuruDetailView.vue` (admin
-read-only) render the 8 dimensions as a "D." section alongside A/B/C.
+import into) — a successful import also refreshes the on-screen A/B/C form
+fields, not just the D preview. `RpmPrintTemplate.vue` and
+`RpmGuruDetailView.vue` (admin read-only) render the 8 dimensions as a "D."
+section alongside A/B/C, unchanged from before (only the underlying field
+codes/labels changed, via `DIMENSI_LULUSAN_LABELS`).
+
+## Prota / Prosem (NEW, 2026-08-11)
+
+Program Tahunan and Program Semester — curriculum plans, guru-authored,
+admin read-only, own tables (`prota`/`prota_items`, `prosem`/`prosem_items`,
+migrations 000005/000006). Unlike RPM, creation IS the Excel import: a
+parent record (`mata_pelajaran` + `kelas` + `academic_year_id`, sent as
+multipart form fields alongside the file) plus one line-item row per
+spreadsheet row, written in a single DB transaction
+(`store.ProtaStore.Import` / `ProsemStore.Import`). There's no manual
+create/edit form — re-doing a plan means importing again (create) and
+deleting the old one.
+
+- **Prota** template sheet `TEMPLATE_PROTA`: `No | Semester | Elemen / Kode
+  Bab | Kompetensi Dasar / Tujuan Pembelajaran (TP) | Alokasi Waktu (JP) |
+  Keterangan / Target Asesmen`, plus an example row and a trailing `TOTAL
+  ALOKASI WAKTU (TAHUNAN)` row. Import skips any row whose `No` column
+  isn't a parseable integer (the TOTAL row, blank rows) — see
+  `internal/handler/prota.go`.
+- **Prosem** template sheet `TEMPLATE_PROSEM`: `No | Materi Pokok /
+  Aktivitas | Alokasi (JP) | Bulan Target | Minggu Ke- | Estimasi Tanggal
+  (YYYY-MM-DD) | Tipe Aktivitas LMS | Status Input (Guru)`, same TOTAL-row
+  skip rule. `estimasi_tanggal` is a nullable SQL `DATE`
+  (`store.nullDate`/format `2006-01-02`); an unparseable or blank date cell
+  is stored as `NULL` / rendered as `""`.
+
+Both print via a dedicated `*PrintTemplate.vue` (`ProtaPrintTemplate.vue`,
+`ProsemPrintTemplate.vue`) with the same Kepala Sekolah signature block as
+RPM's print — same dynamic per-school lookup (`listGuruByJabatan('Kepala
+Sekolah')`), nothing school-identifying hardcoded (multi-tenant SaaS rule).
+
+Endpoints (both features, same shape):
+- `GET /me/{prota,prosem}/template` — download blank `.xlsx`.
+- `POST /me/{prota,prosem}/import` — multipart `file` + `mata_pelajaran` +
+  `kelas` + optional `academic_year_id` (falls back to academic-service's
+  current-year lookup like RPM's create) → creates one new record.
+- `GET /me/{prota,prosem}` — guru's own list (no items, list-view only).
+- `GET /me/{prota,prosem}/{id}` — full detail incl. items, for printing.
+- `DELETE /me/{prota,prosem}/{id}` — owner-only.
+- `GET /{prota,prosem}/guru/{guru_id}` — admin read-only, full detail incl.
+  items (small N per guru in practice).
+
+Frontend: `web/src/views/evaluation/prota/` and `.../prosem/`
+(`*MineListView.vue` guru: template download + import form + list + print;
+`*GuruListView.vue`/`*GuruDetailView.vue` admin read-only, same
+list-of-guru → detail pattern as RPM's admin views). Routes/roles follow
+RPM's split: admin (`role: ['admin','superadmin']`) gets the read-only
+viewer, guru (`role: ['guru']`) gets the import+list screen — same audience
+RPM already serves, per the client's Bug Report doc not calling out a
+different access split for these two.
 
 ## Evaluator-category weighting
 
@@ -161,11 +235,16 @@ as extra detail — not required by spec but free given the source data.
 
 All routes except `/healthz` require `Authorization: Bearer <JWT>`.
 
-**RPM**
+**Modul RPM**
 - `POST /me/lesson-plans` / `GET /me/lesson-plans` / `GET,PUT,DELETE /me/lesson-plans/{id}` — guru's own CRUD.
-- `GET /me/lesson-plans/dimensi-lulusan-template` — download the blank 8-Dimensi-Lulusan Excel template.
-- `POST /me/lesson-plans/{id}/dimensi-lulusan-import` — upload a filled template, overwrites that RPM's 8 dimensions.
+- `GET /me/lesson-plans/rpm-template` — download the blank full A/B/C/D Excel template.
+- `POST /me/lesson-plans/{id}/rpm-import` — upload a filled template, overwrites that RPM's section_a/b/c and dimensi_lulusan in one shot.
 - `GET /lesson-plans?guru_id=` and `GET /lesson-plans/guru/{guru_id}` — admin read-only list/detail.
+
+**Prota / Prosem**
+- `GET /me/prota/template`, `POST /me/prota/import`, `GET /me/prota`, `GET /me/prota/{id}`, `DELETE /me/prota/{id}` — guru's own.
+- `GET /prota?guru_id=`, `GET /prota/guru/{guru_id}` — admin read-only.
+- Same 6 routes under `/me/prosem` and `/prosem` for Program Semester.
 
 **Penilaian Guru**
 - `GET /forms` — the 6 evaluator-category forms + items (bootstraps defaults for the caller's school if missing).
@@ -261,6 +340,23 @@ curl "http://localhost:8085/periods/<period-id>/results?guru_id=<guru1-uuid>" -H
   14. `GET /healthz` unauthenticated → `200`; any other route without a token → `401`.
 - `docker compose down` after testing.
 
+## What was actually tested (2026-08-11, RPM fix + Prota/Prosem, local Docker)
+
+- `gofmt -l .` clean, `go build ./...` / `go vet ./...` / `go test ./...` all clean (migrations 000004-000006 added, `internal/handler` package tests pass).
+- `docker compose up -d --build` → migrations applied automatically on boot (`schema_migrations.version = 6`), `GET /healthz` → `200`.
+- Minted HS256 JWTs for a guru + admin persona and ran full round-trips:
+  1. `POST /me/lesson-plans` → created.
+  2. `GET /me/lesson-plans/rpm-template` → downloaded, inspected with `openpyxl`: sheet `RPM Template`, `Field`/`Isi` header, section-title rows `A./B./C./D.`, all 5+5+5+8=23 field rows present, D section shows the corrected 8 dimension labels (Beriman Bertakwa dan Berakhlak Mulia ... Kepemimpinan) — confirms the earlier wrong names are gone.
+  3. Filled every `Isi` cell, `POST /me/lesson-plans/{id}/rpm-import` → response's `section_a/b/c` and `dimensi_lulusan` all populated with the exact values written, keyed by the corrected field codes — full A/B/C/D round-trip confirmed in one file.
+  4. `GET /me/prota/template` → sheet `TEMPLATE_PROTA`, header/example/TOTAL rows byte-for-byte match the client's `Template_Prota_LMS_Ready.xlsx` structure given in the spec.
+  5. Filled a 3-row Prota + TOTAL row, `POST /me/prota/import` (+ `mata_pelajaran`/`kelas`/`academic_year_id` form fields) → created parent with 3 items, correct field mapping, TOTAL row correctly skipped (non-numeric `No`).
+  6. `GET /me/prota` (list) → 1 record; `GET /me/prota/{id}` → 3 items (detail-for-print); `GET /prota/guru/{guru_id}` as admin → same record with items (admin read-only detail).
+  7. `DELETE /me/prota/{id}` → soft-deleted, confirmed gone from `GET /me/prota`.
+  8. Same full cycle (5)-(7) for Prosem, including `estimasi_tanggal` (`"2026-07-20"`) round-tripping through the nullable SQL `DATE` column unchanged.
+  9. Role checks: guru-only endpoint (`rpm-template`) as admin → `403`; admin-only endpoint (`/prota`) as guru → `403`; no token → `401`.
+  10. `docker compose down` after testing.
+- `npx vue-tsc -b` in `web/` → exit code 0, no errors (RPM view changes + new Prota/Prosem views/services/routes all type-check).
+
 ## Assumptions
 
 Ambiguities in the spec were resolved as follows (simplest reasonable call
@@ -286,3 +382,5 @@ couldn't block on clarification):
 10. **`academic_year_id` on a guru's own lesson-plan create** falls back to academic-service's "current year" lookup (`is_current: true`) if not supplied in the request body; if academic-service is unreachable and none was supplied, the request is rejected with 400 rather than silently writing a null/garbage year — same principle applied to the report's `school_name` (defaults to a placeholder string, or accepts `?school_name=` until identity exposes a school-detail route).
 11. **Item weight is per-form-relative and re-normalized at scoring time** (see "Scoring math" above), not summed directly into the final 0–4 score — this cleanly absorbs a small rounding artifact in the source spreadsheet where Form A's 11 items sum to 19% instead of the displayed 20% (the form-level weight, which is what actually rolls up into `final_score`, is unaffected and the six form weights sum to exactly 100%).
 12. **Multi-tenancy / academic-year scoping**: implemented exactly per CONVENTIONS.md — every table carries `school_id` + `academic_year_id`; every handler scopes to the caller's `claims.SchoolID` unless `active_role == superadmin` and `?school_id=` is given; period listing accepts `?academic_year_id=` to view other years.
+13. **Prota/Prosem creation is import-only** — the spec describes "Download Template, Import, list, Cetak PDF," never a manual per-row entry form, so there is no `POST`/`PUT` for building one field-by-field; importing again just creates another record (delete the stale one). **Prota/Prosem access follows RPM's existing role split** (admin read-only viewer, guru import+list) since the Bug Report doc describes both features immediately after RPM without calling out a different audience, and RPM already lives under the identical admin/guru split for the identical audience (school staff managing their own curriculum docs).
+14. **Dimensi Lulusan data-fix is a wipe, not a positional remap** (migration 000004) — see "Modul RPM: full A/B/C/D template" above for the reasoning (a positional remap risked attaching real guru text to a semantically unrelated new label, worse than losing acknowledged-wrong dev data).

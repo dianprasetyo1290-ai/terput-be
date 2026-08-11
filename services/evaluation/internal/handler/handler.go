@@ -14,11 +14,13 @@ type Handler struct {
 	Periods     *store.PeriodStore
 	Forms       *store.FormStore
 	Tasks       *store.TaskStore
+	Prota       *store.ProtaStore
+	Prosem      *store.ProsemStore
 	Clients     *client.Clients
 }
 
-func New(lp *store.LessonPlanStore, per *store.PeriodStore, forms *store.FormStore, tasks *store.TaskStore, c *client.Clients) *Handler {
-	return &Handler{LessonPlans: lp, Periods: per, Forms: forms, Tasks: tasks, Clients: c}
+func New(lp *store.LessonPlanStore, per *store.PeriodStore, forms *store.FormStore, tasks *store.TaskStore, prota *store.ProtaStore, prosem *store.ProsemStore, c *client.Clients) *Handler {
+	return &Handler{LessonPlans: lp, Periods: per, Forms: forms, Tasks: tasks, Prota: prota, Prosem: prosem, Clients: c}
 }
 
 // effectiveSchoolID applies the multi-tenancy rule from CONVENTIONS.md:

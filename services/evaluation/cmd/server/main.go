@@ -44,9 +44,11 @@ func main() {
 	periodStore := store.NewPeriodStore(pool)
 	formStore := store.NewFormStore(pool)
 	taskStore := store.NewTaskStore(pool)
+	protaStore := store.NewProtaStore(pool)
+	prosemStore := store.NewProsemStore(pool)
 	clients := client.New(cfg.IdentityBaseURL, cfg.AcademicBaseURL, cfg.InternalKey)
 
-	h := handler.New(lessonPlanStore, periodStore, formStore, taskStore, clients)
+	h := handler.New(lessonPlanStore, periodStore, formStore, taskStore, protaStore, prosemStore, clients)
 	router := handler.NewRouter(h, cfg.JWTSecret, cfg.CORSOrigins)
 
 	srv := &http.Server{

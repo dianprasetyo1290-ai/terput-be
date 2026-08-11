@@ -34,15 +34,41 @@ func NewRouter(h *Handler, jwtSecret string, corsOrigins []string) http.Handler 
 		pr.Route("/me/lesson-plans", func(sr chi.Router) {
 			sr.Post("/", h.CreateMyLessonPlan)
 			sr.Get("/", h.ListMyLessonPlans)
-			sr.Get("/dimensi-lulusan-template", h.DownloadDimensiLulusanTemplate)
+			sr.Get("/rpm-template", h.DownloadRpmTemplate)
 			sr.Get("/{id}", h.GetMyLessonPlan)
 			sr.Put("/{id}", h.UpdateMyLessonPlan)
 			sr.Delete("/{id}", h.DeleteMyLessonPlan)
-			sr.Post("/{id}/dimensi-lulusan-import", h.ImportDimensiLulusan)
+			sr.Post("/{id}/rpm-import", h.ImportRpmTemplate)
 		})
 		pr.Route("/lesson-plans", func(sr chi.Router) {
 			sr.Get("/", h.AdminListLessonPlans)
 			sr.Get("/guru/{guru_id}", h.AdminGetLessonPlansByGuru)
+		})
+
+		// NEW: Program Tahunan (Prota) -- see internal/handler/prota.go
+		pr.Route("/me/prota", func(sr chi.Router) {
+			sr.Get("/template", h.DownloadProtaTemplate)
+			sr.Post("/import", h.ImportProta)
+			sr.Get("/", h.ListMyProta)
+			sr.Get("/{id}", h.GetMyProta)
+			sr.Delete("/{id}", h.DeleteMyProta)
+		})
+		pr.Route("/prota", func(sr chi.Router) {
+			sr.Get("/", h.AdminListProta)
+			sr.Get("/guru/{guru_id}", h.AdminGetProtaByGuru)
+		})
+
+		// NEW: Program Semester (Prosem) -- see internal/handler/prosem.go
+		pr.Route("/me/prosem", func(sr chi.Router) {
+			sr.Get("/template", h.DownloadProsemTemplate)
+			sr.Post("/import", h.ImportProsem)
+			sr.Get("/", h.ListMyProsem)
+			sr.Get("/{id}", h.GetMyProsem)
+			sr.Delete("/{id}", h.DeleteMyProsem)
+		})
+		pr.Route("/prosem", func(sr chi.Router) {
+			sr.Get("/", h.AdminListProsem)
+			sr.Get("/guru/{guru_id}", h.AdminGetProsemByGuru)
 		})
 
 		// Feature 2: Penilaian Guru

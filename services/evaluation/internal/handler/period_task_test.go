@@ -69,7 +69,7 @@ func TestMyTasks_SelfPeerAndLeadership(t *testing.T) {
 	const nPeers = 2
 	peers := []string{newID(), newID()}
 
-	h := New(nil, store.NewPeriodStore(pool), store.NewFormStore(pool), store.NewTaskStore(pool), &client.Clients{})
+	h := New(nil, store.NewPeriodStore(pool), store.NewFormStore(pool), store.NewTaskStore(pool), nil, nil, &client.Clients{})
 
 	p := &model.Period{
 		SchoolID: schoolID, AcademicYearID: academicYearID, Title: "test period",
@@ -82,7 +82,7 @@ func TestMyTasks_SelfPeerAndLeadership(t *testing.T) {
 		t.Fatalf("create period: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM teacher_evaluation_periods WHERE id=$1", p.ID) // cascades tasks/answers
+		_, _ = pool.Exec(ctx, "DELETE FROM teacher_evaluation_periods WHERE id=$1", p.ID)          // cascades tasks/answers
 		_, _ = pool.Exec(ctx, "DELETE FROM teacher_evaluation_forms WHERE school_id=$1", schoolID) // cascades items
 	})
 
@@ -185,7 +185,7 @@ func TestUpwardEvalTasks_NeverGenerated(t *testing.T) {
 	wakaKurikulum := newID()
 	wakaKesiswaan := newID()
 
-	h := New(nil, store.NewPeriodStore(pool), store.NewFormStore(pool), store.NewTaskStore(pool), &client.Clients{})
+	h := New(nil, store.NewPeriodStore(pool), store.NewFormStore(pool), store.NewTaskStore(pool), nil, nil, &client.Clients{})
 
 	p := &model.Period{
 		SchoolID: schoolID, AcademicYearID: academicYearID, Title: "test period upward eval",
@@ -198,7 +198,7 @@ func TestUpwardEvalTasks_NeverGenerated(t *testing.T) {
 		t.Fatalf("create period: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM teacher_evaluation_periods WHERE id=$1", p.ID) // cascades tasks/answers
+		_, _ = pool.Exec(ctx, "DELETE FROM teacher_evaluation_periods WHERE id=$1", p.ID)          // cascades tasks/answers
 		_, _ = pool.Exec(ctx, "DELETE FROM teacher_evaluation_forms WHERE school_id=$1", schoolID) // cascades items
 	})
 
@@ -322,7 +322,7 @@ func TestPeerEval_FullOverlap_ReciprocalMesh(t *testing.T) {
 	kunto := newID()
 	all := []string{aji, kunto}
 
-	h := New(nil, store.NewPeriodStore(pool), store.NewFormStore(pool), store.NewTaskStore(pool), &client.Clients{})
+	h := New(nil, store.NewPeriodStore(pool), store.NewFormStore(pool), store.NewTaskStore(pool), nil, nil, &client.Clients{})
 
 	p := &model.Period{
 		SchoolID: schoolID, AcademicYearID: academicYearID, Title: "test period full overlap peer",

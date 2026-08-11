@@ -17,9 +17,9 @@ type answerInput struct {
 }
 
 type submitEvaluationRequest struct {
-	EvaluatorType   string        `json:"evaluator_type"` // self|peer|siswa|kepala_sekolah|waka_kurikulum|waka_kesiswaan|guru_to_kepsek|guru_to_waka_kurikulum|guru_to_waka_kesiswaan
+	EvaluatorType   string        `json:"evaluator_type"`    // self|peer|siswa|kepala_sekolah|waka_kurikulum|waka_kesiswaan|guru_to_kepsek|guru_to_waka_kurikulum|guru_to_waka_kesiswaan
 	TargetTeacherID string        `json:"target_teacher_id"` // for guru_to_* upward types, this is the LEADER being rated
-	ClassroomID     string        `json:"classroom_id"` // required only when evaluator_type=siswa
+	ClassroomID     string        `json:"classroom_id"`      // required only when evaluator_type=siswa
 	Answers         []answerInput `json:"answers"`
 }
 
