@@ -41,16 +41,24 @@ func NewRouter(d *Deps, jwtSecret string, corsOrigins []string) http.Handler {
 		pr.Get("/classrooms/{id}/leger", h.GetLeger)
 		pr.Get("/classrooms/{id}/subjects/{subject_id}/description", h.GetSubjectDescriptionGrid)
 
-		// Penilaian Formatif
+		// Penilaian Formatif (item 5: dropdown-per-tipe-penilaian, see
+		// handler/formative.go)
 		pr.Get("/me/teaching-assignments", h.MyTeachingAssignments)
-		pr.Get("/formative/headers", h.ListFormativeHeaders)
-		pr.Put("/formative/headers", h.UpsertFormativeHeader)
 		pr.Get("/formative", h.ListFormativeGrades)
 		pr.Put("/formative", h.UpsertFormativeGrades)
 
 		// Deskripsi Rapor templates
 		pr.Get("/note-templates", h.GetNoteTemplate)
 		pr.Put("/note-templates", h.SetNoteTemplate)
+
+		// Item 4: dynamic report settings (assessment types + weight
+		// formulas) admin configures, everything else reads.
+		pr.Get("/settings/assessment-types", h.ListAssessmentTypes)
+		pr.Post("/settings/assessment-types", h.CreateAssessmentType)
+		pr.Put("/settings/assessment-types/{id}", h.UpdateAssessmentType)
+		pr.Delete("/settings/assessment-types/{id}", h.DeleteAssessmentType)
+		pr.Get("/settings/weights", h.GetWeightSettings)
+		pr.Put("/settings/weights", h.SetWeightSettings)
 	})
 
 	return r

@@ -14,11 +14,11 @@ import (
 // (student, classroom, term) or creates a fresh draft one. The returned
 // bool is true when a new row was inserted (used by generate to decide
 // whether to log a "created" vs "refreshed" count).
-func (s *Store) GetOrCreateReportCard(ctx context.Context, schoolID, academicYearID, termID, classroomID, studentID string) (*model.ReportCard, bool, error) {
+func (s *Store) GetOrCreateReportCard(ctx context.Context, schoolID, academicYearID, termID, classroomID, studentID, reportType, periodLabel string) (*model.ReportCard, bool, error) {
 	row := s.DB.QueryRowContext(ctx, `
-		INSERT INTO report_cards (school_id, academic_year_id, term_id, classroom_id, student_id)
-		VALUES ($1,$2,$3,$4,$5)
-		ON CONFLICT (student_id, classroom_id, term_id)
+		INSERT INTO report_cards (school_id, academic_year_id, term_id, classroom_id, student_id, report_type, period_label)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		ON CONFLICT (student_id, classroom_id, term_id, report_type, period_label)
 		DO UPDATE SET updated_at = now()
 		RETURNING id, school_id, academic_year_id, term_id, classroom_id, student_id, status,
 			finalized_at, finalized_by, unlocked_at, unlocked_by, class_teacher_note,
@@ -26,8 +26,9 @@ func (s *Store) GetOrCreateReportCard(ctx context.Context, schoolID, academicYea
 			attendance_synced_at, attendance_sync_error,
 			student_name, student_nisn, classroom_name, term_name,
 			homeroom_teacher_name, principal_name, header_synced_at,
+			report_type, period_label,
 			created_at, updated_at, (xmax = 0) AS inserted`,
-		schoolID, academicYearID, termID, classroomID, studentID)
+		schoolID, academicYearID, termID, classroomID, studentID, reportType, periodLabel)
 	rc, inserted, err := scanReportCard(row)
 	if err != nil {
 		return nil, false, err
@@ -51,6 +52,7 @@ func scanReportCard(row *sql.Row) (*model.ReportCard, bool, error) {
 		&attendanceSyncedAt, &attendanceSyncErr,
 		&studentName, &studentNISN, &classroomName, &termName,
 		&homeroomTeacherName, &principalName, &headerSyncedAt,
+		&rc.ReportType, &rc.PeriodLabel,
 		&rc.CreatedAt, &rc.UpdatedAt, &inserted,
 	)
 	if err == sql.ErrNoRows {
@@ -131,6 +133,7 @@ const reportCardSelectCols = `id, school_id, academic_year_id, term_id, classroo
 	attendance_synced_at, attendance_sync_error,
 	student_name, student_nisn, classroom_name, term_name,
 	homeroom_teacher_name, principal_name, header_synced_at,
+	report_type, period_label,
 	created_at, updated_at, false AS inserted`
 
 func (s *Store) GetReportCard(ctx context.Context, id string) (*model.ReportCard, error) {
@@ -155,8 +158,20 @@ func (s *Store) ListReportCardsByStudent(ctx context.Context, studentID string, 
 	return scanReportCardRows(rows)
 }
 
-func (s *Store) ListReportCardsByClassroomTerm(ctx context.Context, classroomID, termID string) ([]model.ReportCard, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+reportCardSelectCols+` FROM report_cards WHERE classroom_id = $1 AND term_id = $2 ORDER BY student_name NULLS LAST, created_at`, classroomID, termID)
+// ListReportCardsByClassroomTerm lists report cards for a classroom/term,
+// scoped to one report_type ("semester" or "bayangan" -- item 1/3: Leger
+// is semester-only, Generate Rapor's list switches per the admin's chosen
+// report type). periodLabel further scopes a bayangan listing to one
+// quarterly period; ignored (any) for "semester".
+func (s *Store) ListReportCardsByClassroomTerm(ctx context.Context, classroomID, termID, reportType, periodLabel string) ([]model.ReportCard, error) {
+	query := `SELECT ` + reportCardSelectCols + ` FROM report_cards WHERE classroom_id = $1 AND term_id = $2 AND report_type = $3`
+	args := []interface{}{classroomID, termID, reportType}
+	if reportType == "bayangan" && periodLabel != "" {
+		query += ` AND period_label = $4`
+		args = append(args, periodLabel)
+	}
+	query += ` ORDER BY student_name NULLS LAST, created_at`
+	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -182,6 +197,7 @@ func scanReportCardRows(rows *sql.Rows) ([]model.ReportCard, error) {
 			&attendanceSyncedAt, &attendanceSyncErr,
 			&studentName, &studentNISN, &classroomName, &termName,
 			&homeroomTeacherName, &principalName, &headerSyncedAt,
+			&rc.ReportType, &rc.PeriodLabel,
 			&rc.CreatedAt, &rc.UpdatedAt, &inserted,
 		); err != nil {
 			return nil, err
@@ -275,10 +291,10 @@ func (s *Store) UpdateAttendance(ctx context.Context, id string, hadir, sakit, i
 // UpsertSubjectComputed writes/refreshes the computed_score for one
 // subject row on a report card. It never touches override_score, notes, or
 // overridden_* columns — an admin's manual adjustment survives a regenerate.
-func (s *Store) UpsertSubjectComputed(ctx context.Context, reportCardID, schoolID, subjectID string, subjectName, subjectCode *string, computedScore, formatifScore, stsScore, sasScore *float64, sourceCount int, syncedAt *time.Time, syncErr *string) error {
+func (s *Store) UpsertSubjectComputed(ctx context.Context, reportCardID, schoolID, subjectID string, subjectName, subjectCode *string, computedScore, formatifScore, stsScore, sasScore, praktikScore *float64, sourceCount int, syncedAt *time.Time, syncErr *string) error {
 	_, err := s.DB.ExecContext(ctx, `
-		INSERT INTO report_card_subjects (report_card_id, school_id, subject_id, subject_name, subject_code, computed_score, formatif_score, sts_score, sas_score, source_exam_count, last_synced_at, sync_error)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		INSERT INTO report_card_subjects (report_card_id, school_id, subject_id, subject_name, subject_code, computed_score, formatif_score, sts_score, sas_score, praktik_score, source_exam_count, last_synced_at, sync_error)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		ON CONFLICT (report_card_id, subject_id) DO UPDATE SET
 			subject_name = EXCLUDED.subject_name,
 			subject_code = EXCLUDED.subject_code,
@@ -286,11 +302,12 @@ func (s *Store) UpsertSubjectComputed(ctx context.Context, reportCardID, schoolI
 			formatif_score = EXCLUDED.formatif_score,
 			sts_score = EXCLUDED.sts_score,
 			sas_score = EXCLUDED.sas_score,
+			praktik_score = EXCLUDED.praktik_score,
 			source_exam_count = EXCLUDED.source_exam_count,
 			last_synced_at = EXCLUDED.last_synced_at,
 			sync_error = EXCLUDED.sync_error,
 			updated_at = now()`,
-		reportCardID, schoolID, subjectID, subjectName, subjectCode, computedScore, formatifScore, stsScore, sasScore, sourceCount, syncedAt, syncErr)
+		reportCardID, schoolID, subjectID, subjectName, subjectCode, computedScore, formatifScore, stsScore, sasScore, praktikScore, sourceCount, syncedAt, syncErr)
 	return err
 }
 
@@ -312,7 +329,7 @@ func (s *Store) DeleteSubjectsNotIn(ctx context.Context, reportCardID string, al
 func (s *Store) ListSubjects(ctx context.Context, reportCardID string) ([]model.ReportCardSubject, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, report_card_id, school_id, subject_id, subject_name, subject_code, computed_score,
-			formatif_score, sts_score, sas_score,
+			formatif_score, sts_score, sas_score, praktik_score,
 			override_score, source_exam_count, grade_label, notes, mid_note, final_note, overridden_by, overridden_at,
 			last_synced_at, sync_error, created_at, updated_at
 		FROM report_card_subjects WHERE report_card_id = $1 ORDER BY subject_name NULLS LAST, created_at`, reportCardID)
@@ -325,12 +342,12 @@ func (s *Store) ListSubjects(ctx context.Context, reportCardID string) ([]model.
 	for rows.Next() {
 		var sub model.ReportCardSubject
 		var subjectName, subjectCode, gradeLabel, notes, midNote, finalNote, overriddenBy, syncError sql.NullString
-		var computedScore, formatifScore, stsScore, sasScore, overrideScore sql.NullFloat64
+		var computedScore, formatifScore, stsScore, sasScore, praktikScore, overrideScore sql.NullFloat64
 		var overriddenAt, lastSyncedAt sql.NullTime
 
 		if err := rows.Scan(
 			&sub.ID, &sub.ReportCardID, &sub.SchoolID, &sub.SubjectID, &subjectName, &subjectCode, &computedScore,
-			&formatifScore, &stsScore, &sasScore,
+			&formatifScore, &stsScore, &sasScore, &praktikScore,
 			&overrideScore, &sub.SourceExamCount, &gradeLabel, &notes, &midNote, &finalNote, &overriddenBy, &overriddenAt,
 			&lastSyncedAt, &syncError, &sub.CreatedAt, &sub.UpdatedAt,
 		); err != nil {
@@ -343,6 +360,10 @@ func (s *Store) ListSubjects(ctx context.Context, reportCardID string) ([]model.
 		if sasScore.Valid {
 			v := sasScore.Float64
 			sub.SasScore = &v
+		}
+		if praktikScore.Valid {
+			v := praktikScore.Float64
+			sub.PraktikScore = &v
 		}
 		if midNote.Valid {
 			sub.MidNote = &midNote.String

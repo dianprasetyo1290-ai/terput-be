@@ -25,9 +25,17 @@ func (h *Handler) GetLeger(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "term_id query param is required")
 		return
 	}
+	// Item 1: Leger only ever shows the regular semester report (current +
+	// prior semester final grades) -- never Rapot Bayangan, which has its
+	// own weight formula/column set and isn't what Leger's "final grades"
+	// view is meant to reconcile.
+	reportType := r.URL.Query().Get("report_type")
+	if reportType == "" {
+		reportType = "semester"
+	}
 
 	ctx := r.Context()
-	cards, err := h.d.Store.ListReportCardsByClassroomTerm(ctx, classroomID, termID)
+	cards, err := h.d.Store.ListReportCardsByClassroomTerm(ctx, classroomID, termID, reportType, r.URL.Query().Get("period_label"))
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to fetch leger")
 		return

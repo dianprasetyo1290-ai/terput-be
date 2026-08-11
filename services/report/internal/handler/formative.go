@@ -22,16 +22,27 @@ func (h *Handler) MyTeachingAssignments(w http.ResponseWriter, r *http.Request) 
 }
 
 type formativeRowOut struct {
-	StudentID   string    `json:"student_id"`
-	StudentName string    `json:"student_name"`
-	Scores      []float64 `json:"scores"`
+	StudentID   string   `json:"student_id"`
+	StudentName string   `json:"student_name"`
+	Score       *float64 `json:"score"`
+	// AutoFilled: true when Score came from exam-service (item 5's
+	// STS/SAS auto-populate) rather than a previously saved
+	// formative_grades row -- the frontend uses this to show a "dari
+	// hasil ujian" hint. Once the guru hits Simpan, a real row is
+	// written and this flips to false on the next load (the saved value
+	// is now guru-owned, per the deliberate "editable/can be raised"
+	// business rule).
+	AutoFilled bool `json:"auto_filled"`
 }
 
-// ListFormativeGrades: GET /formative?term_id=&classroom_subject_id=&classroom_id=
-// classroom_id is required too (report-service has no classroom_subject ->
-// classroom lookup of its own — the frontend already has it from
-// MyTeachingAssignments, so it's passed through rather than adding another
-// upstream round-trip).
+// ListFormativeGrades: GET /formative?term_id=&classroom_subject_id=&classroom_id=&assessment_type_id=&subject_id=&academic_year_id=
+// Item 5 UX rework: the guru picks ONE tipe penilaian (assessment_type_id)
+// from a dropdown and gets one score column for the whole roster, instead
+// of the old free-form add/remove-column spreadsheet grid.
+// classroom_id/subject_id/academic_year_id are passed through by the
+// frontend (already has them from MyTeachingAssignments/the term picker)
+// rather than adding extra upstream round-trips, matching this handler's
+// existing convention.
 func (h *Handler) ListFormativeGrades(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if !isStaff(claims) {
@@ -41,8 +52,9 @@ func (h *Handler) ListFormativeGrades(w http.ResponseWriter, r *http.Request) {
 	termID := r.URL.Query().Get("term_id")
 	scsID := r.URL.Query().Get("classroom_subject_id")
 	classroomID := r.URL.Query().Get("classroom_id")
-	if termID == "" || scsID == "" || classroomID == "" {
-		common.WriteError(w, http.StatusBadRequest, "term_id, classroom_subject_id and classroom_id are required")
+	assessmentTypeID := r.URL.Query().Get("assessment_type_id")
+	if termID == "" || scsID == "" || classroomID == "" || assessmentTypeID == "" {
+		common.WriteError(w, http.StatusBadRequest, "term_id, classroom_subject_id, classroom_id and assessment_type_id are required")
 		return
 	}
 
@@ -51,10 +63,23 @@ func (h *Handler) ListFormativeGrades(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusInternalServerError, "failed to fetch classroom roster: "+err.Error())
 		return
 	}
-	grades, err := h.d.Store.ListFormativeGrades(r.Context(), termID, scsID)
+	scores, err := h.d.Store.ListFormativeScoresForType(r.Context(), termID, scsID, assessmentTypeID)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to fetch formative grades")
 		return
+	}
+
+	// Item 5: if this tipe penilaian is exam-linked (STS/SAS), auto-fill a
+	// suggestion for any student with no saved score yet from exam-service
+	// -- still fully editable (client's explicit "raise a low score so
+	// the student can pass" rule), and only a suggestion: saving writes a
+	// real formative_grades row that wins from then on.
+	var examBucket string
+	var academicYearID, subjectID string
+	if at, aerr := h.d.Store.GetAssessmentType(r.Context(), assessmentTypeID); aerr == nil && at != nil && at.ExamLinked {
+		examBucket = at.Bucket // "sts" | "sas"
+		academicYearID = r.URL.Query().Get("academic_year_id")
+		subjectID = r.URL.Query().Get("subject_id")
 	}
 
 	out := make([]formativeRowOut, 0, len(roster))
@@ -63,32 +88,31 @@ func (h *Handler) ListFormativeGrades(w http.ResponseWriter, r *http.Request) {
 		if u, uerr := h.d.Identity.GetUser(r.Context(), stu.StudentUserID); uerr == nil && u != nil {
 			name = u.Name
 		}
-		// grades[...] is a nil slice for a student with no formative_grades
-		// rows yet (the common case for a class no guru has scored yet) --
-		// encoding/json marshals a nil []float64 as JSON null, not [], which
-		// crashed the frontend's r.scores.length/push in loadGrid() and
-		// surfaced as "Gagal memuat data penilaian formatif." even though
-		// this request itself returned 200. Always emit [] so the frontend
-		// always gets an array.
-		scores := grades[stu.StudentUserID]
-		if scores == nil {
-			scores = []float64{}
+		row := formativeRowOut{StudentID: stu.StudentUserID, StudentName: name}
+		if v, ok := scores[stu.StudentUserID]; ok {
+			row.Score = &v
+		} else if examBucket != "" && academicYearID != "" && subjectID != "" {
+			if v := h.resolveExamBucketScore(r.Context(), classroomID, termID, academicYearID, subjectID, stu.StudentUserID, examBucket); v != nil {
+				row.Score = v
+				row.AutoFilled = true
+			}
 		}
-		out = append(out, formativeRowOut{StudentID: stu.StudentUserID, StudentName: name, Scores: scores})
+		out = append(out, row)
 	}
 	common.WriteJSON(w, http.StatusOK, out, nil)
 }
 
 type upsertFormativeBody struct {
-	TermID             string    `json:"term_id"`
-	ClassroomSubjectID string    `json:"classroom_subject_id"`
-	StudentID          string    `json:"student_id"`
-	Scores             []float64 `json:"scores"`
+	TermID             string  `json:"term_id"`
+	ClassroomSubjectID string  `json:"classroom_subject_id"`
+	StudentID          string  `json:"student_id"`
+	AssessmentTypeID   string  `json:"assessment_type_id"`
+	Score              float64 `json:"score"`
 }
 
-// UpsertFormativeGrades: PUT /formative — replace-all semantics per
-// student, matching the old app's grid-row save (see
-// TeacherFormativeService::upsertAssignments).
+// UpsertFormativeGrades: PUT /formative — save one student's score for one
+// assessment type (item 5's per-cell save, replacing the old whole-row
+// replace-all).
 func (h *Handler) UpsertFormativeGrades(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil || claims.ActiveRole != "guru" {
@@ -100,72 +124,12 @@ func (h *Handler) UpsertFormativeGrades(w http.ResponseWriter, r *http.Request) 
 		common.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if body.TermID == "" || body.ClassroomSubjectID == "" || body.StudentID == "" {
-		common.WriteError(w, http.StatusBadRequest, "term_id, classroom_subject_id and student_id are required")
+	if body.TermID == "" || body.ClassroomSubjectID == "" || body.StudentID == "" || body.AssessmentTypeID == "" {
+		common.WriteError(w, http.StatusBadRequest, "term_id, classroom_subject_id, student_id and assessment_type_id are required")
 		return
 	}
-	if err := h.d.Store.UpsertFormativeGrades(r.Context(), claims.SchoolID, body.TermID, body.ClassroomSubjectID, body.StudentID, body.Scores, claims.UserID); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to save formative grades")
-		return
-	}
-	common.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"}, nil)
-}
-
-type FormativeHeaderOut struct {
-	OrderIndex int    `json:"order_index"`
-	HeaderName string `json:"header_name"`
-}
-
-// ListFormativeHeaders: GET /formative/headers?term_id=&classroom_subject_id=
-func (h *Handler) ListFormativeHeaders(w http.ResponseWriter, r *http.Request) {
-	claims := common.FromCtx(r)
-	if !isStaff(claims) {
-		common.WriteError(w, http.StatusForbidden, "admin/superadmin/guru only")
-		return
-	}
-	termID := r.URL.Query().Get("term_id")
-	scsID := r.URL.Query().Get("classroom_subject_id")
-	if termID == "" || scsID == "" {
-		common.WriteError(w, http.StatusBadRequest, "term_id and classroom_subject_id are required")
-		return
-	}
-	headers, err := h.d.Store.ListFormativeHeaders(r.Context(), termID, scsID)
-	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to fetch headers")
-		return
-	}
-	out := make([]FormativeHeaderOut, len(headers))
-	for i, hdr := range headers {
-		out[i] = FormativeHeaderOut{OrderIndex: hdr.OrderIndex, HeaderName: hdr.HeaderName}
-	}
-	common.WriteJSON(w, http.StatusOK, out, nil)
-}
-
-type upsertFormativeHeaderBody struct {
-	TermID             string `json:"term_id"`
-	ClassroomSubjectID string `json:"classroom_subject_id"`
-	OrderIndex         int    `json:"order_index"`
-	HeaderName         string `json:"header_name"`
-}
-
-// UpsertFormativeHeader: PUT /formative/headers
-func (h *Handler) UpsertFormativeHeader(w http.ResponseWriter, r *http.Request) {
-	claims := common.FromCtx(r)
-	if claims == nil || claims.ActiveRole != "guru" {
-		common.WriteError(w, http.StatusForbidden, "only guru can enter formative headers")
-		return
-	}
-	var body upsertFormativeHeaderBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		common.WriteError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-	if body.TermID == "" || body.ClassroomSubjectID == "" || body.HeaderName == "" {
-		common.WriteError(w, http.StatusBadRequest, "term_id, classroom_subject_id and header_name are required")
-		return
-	}
-	if err := h.d.Store.UpsertFormativeHeader(r.Context(), body.TermID, body.ClassroomSubjectID, body.OrderIndex, body.HeaderName); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to save formative header")
+	if err := h.d.Store.UpsertFormativeScore(r.Context(), claims.SchoolID, body.TermID, body.ClassroomSubjectID, body.StudentID, body.AssessmentTypeID, body.Score, claims.UserID); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to save formative grade")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"}, nil)
