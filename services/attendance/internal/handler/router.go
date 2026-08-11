@@ -40,7 +40,6 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 
 		// guru daily flow
 		pr.Post("/sessions/checkin", h.CheckIn)
-		pr.Post("/sessions/substitute-guru", h.AssignSubstitute) // pergantian guru
 		pr.Get("/sessions/{id}", h.GetSession)
 		pr.Put("/sessions/{id}/agenda", h.UpdateAgenda)
 		pr.Put("/sessions/{id}/checkout", h.CheckOut) // jam keluar
@@ -48,6 +47,13 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 		pr.Get("/sessions/{id}/students", h.ListSessionStudents)
 		pr.Post("/sessions/{id}/students/bulk", h.BulkMarkStudents)
 		pr.Put("/sessions/{id}/students/{student_id}", h.MarkOneStudent)
+
+		// pergantian guru (substitute teacher) request/response
+		pr.Post("/substitute-requests", h.CreateSubstituteRequest)
+		pr.Get("/substitute-requests/incoming", h.ListIncomingSubstituteRequests)
+		pr.Get("/substitute-requests/outgoing", h.ListOutgoingSubstituteRequests)
+		pr.Post("/substitute-requests/{id}/accept", h.AcceptSubstituteRequestHandler)
+		pr.Post("/substitute-requests/{id}/reject", h.RejectSubstituteRequestHandler)
 
 		// admin
 		pr.Get("/sessions", h.ListSessions)

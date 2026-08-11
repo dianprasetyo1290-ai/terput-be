@@ -72,11 +72,12 @@ func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
 		}
 		if sched.GuruID != "" && sched.GuruID != claims.UserID {
 			// Not the guru academic-service has on record for this slot --
-			// but a "pergantian guru" (substitute) may already have been
-			// recorded via AssignSubstitute, naming this caller as the
-			// stand-in for this exact (schedule_id, session_date). In that
-			// case class_sessions.guru_id already equals claims.UserID, so
-			// this caller is pre-authorized to check in as the substitute.
+			// but a "pergantian guru" (substitute) request may already have
+			// been accepted (see store.AcceptSubstituteRequest), naming this
+			// caller as the stand-in for this exact (schedule_id,
+			// session_date). In that case class_sessions.guru_id already
+			// equals claims.UserID, so this caller is pre-authorized to
+			// check in as the substitute.
 			existing, _ := h.Store.FindSessionByScheduleAndDate(bg(r), req.ScheduleID, req.SessionDate)
 			if existing == nil || existing.GuruID != claims.UserID {
 				common.WriteError(w, http.StatusForbidden, "schedule slot is not assigned to this guru")
@@ -141,34 +142,39 @@ func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSONMsg(w, http.StatusOK, cs, nil, "Presensi berhasil dicatat")
 }
 
-// ---- pergantian guru (substitute teacher) -----------------------------
+// ---- pergantian guru (substitute teacher) request/response ------------
+//
+// Bug Report SEKOCI (GPM 5 Agustus 2026): a guru who can't attend no longer
+// reassigns a slot directly -- they send a request (Alasan + Guru
+// Pengganti, "Kirim Permintaan") to a named colleague. Nothing on
+// class_sessions moves until that colleague accepts (see
+// store.AcceptSubstituteRequest); a reject just resolves the request so
+// the requester can pick someone else -- the slot stays theirs either way
+// until an accept actually happens.
 
-type substituteRequest struct {
-	ScheduleID       string `json:"schedule_id"`
-	ClassroomID      string `json:"classroom_id"` // fallback if academic-service lookup fails, same as CheckIn
-	SubjectID        string `json:"subject_id"`
-	TermID           string `json:"term_id"`
-	SessionDate      string `json:"session_date"` // YYYY-MM-DD, defaults to today
-	StartTime        string `json:"slot_start_time"`
-	EndTime          string `json:"slot_end_time"`
-	SubstituteGuruID string `json:"substitute_guru_id"`
+type createSubstituteRequestBody struct {
+	ScheduleID  string `json:"schedule_id"`
+	ClassroomID string `json:"classroom_id"` // fallback if academic-service lookup fails, same as CheckIn
+	SubjectID   string `json:"subject_id"`
+	TermID      string `json:"term_id"`
+	SessionDate string `json:"session_date"` // YYYY-MM-DD, defaults to today
+	StartTime   string `json:"slot_start_time"`
+	EndTime     string `json:"slot_end_time"`
+	RequestedTo string `json:"requested_to"` // Guru B
+	Reason      string `json:"reason"`       // sakit | izin | cuti
 }
 
-// AssignSubstitute implements "pergantian guru": a guru who can't attend
-// their own teaching slot names another guru to cover it instead. Mirrors
-// CheckIn's academic-service resolution/fallback and ownership rules (only
-// the guru actually assigned to the slot, or an admin, may reassign it) but
-// writes guru_id = the substitute rather than the caller, so class_sessions
-// (and every admin/dashboard view built on it) immediately reflects who is
-// really covering the session. The substitute still performs their own
-// check-in afterwards via the normal endpoint -- see the pre-authorization
-// check added to CheckIn above.
-func (h *Handler) AssignSubstitute(w http.ResponseWriter, r *http.Request) {
+// CreateSubstituteRequest implements "Kirim Permintaan": Guru A asks Guru B
+// to cover a slot. Mirrors the old direct-assign endpoint's academic-service
+// resolution/fallback and ownership rule (only the guru actually assigned to
+// the slot may request a substitute for it) but only inserts a pending
+// substitute_requests row -- class_sessions.guru_id is untouched here.
+func (h *Handler) CreateSubstituteRequest(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if !requireRole(w, claims, "guru", "admin", "superadmin") {
+	if !requireRole(w, claims, "guru") {
 		return
 	}
-	var req substituteRequest
+	var req createSubstituteRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		common.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -177,12 +183,16 @@ func (h *Handler) AssignSubstitute(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "schedule_id is required")
 		return
 	}
-	if req.SubstituteGuruID == "" {
-		common.WriteError(w, http.StatusBadRequest, "substitute_guru_id is required")
+	if req.RequestedTo == "" {
+		common.WriteError(w, http.StatusBadRequest, "requested_to is required")
 		return
 	}
-	if req.SubstituteGuruID == claims.UserID {
-		common.WriteError(w, http.StatusBadRequest, "cannot assign yourself as your own substitute")
+	if req.RequestedTo == claims.UserID {
+		common.WriteError(w, http.StatusBadRequest, "cannot request yourself as your own substitute")
+		return
+	}
+	if !model.ValidSubstituteReason[req.Reason] {
+		common.WriteError(w, http.StatusBadRequest, "invalid reason, must be one of sakit|izin|cuti")
 		return
 	}
 	if req.SessionDate == "" {
@@ -217,17 +227,17 @@ func (h *Handler) AssignSubstitute(w http.ResponseWriter, r *http.Request) {
 			originalGuruID = sched.GuruID
 		}
 	}
-	// Only the guru currently on the hook for this slot may hand it off --
-	// either per academic-service's schedule record, or (if that's
-	// unreachable/inconclusive) per an existing class_session's guru_id.
-	// Admins may reassign any slot.
-	if claims.ActiveRole == "guru" && originalGuruID != claims.UserID {
+	// Only the guru currently on the hook for this slot may request a
+	// substitute for it -- either per academic-service's schedule record,
+	// or (if that's unreachable/inconclusive) per an existing
+	// class_session's guru_id (e.g. they were already substituted in once
+	// today and now need to hand it off again).
+	if originalGuruID != claims.UserID {
 		existing, _ := h.Store.FindSessionByScheduleAndDate(bg(r), req.ScheduleID, req.SessionDate)
 		if existing == nil || existing.GuruID != claims.UserID {
-			common.WriteError(w, http.StatusForbidden, "only the guru assigned to this slot (or an admin) may assign a substitute")
+			common.WriteError(w, http.StatusForbidden, "only the guru assigned to this slot may request a substitute")
 			return
 		}
-		originalGuruID = claims.UserID
 	}
 	if classroomID == "" {
 		common.WriteError(w, http.StatusBadRequest, "classroom_id is required (could not resolve from academic-service, must be supplied)")
@@ -243,25 +253,131 @@ func (h *Handler) AssignSubstitute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cs, err := h.Store.AssignSubstitute(r.Context(), store.SubstituteInput{
-		SchoolID:         claims.SchoolID,
-		AcademicYearID:   academicYearID,
-		TermID:           termID,
-		ScheduleID:       req.ScheduleID,
-		ClassroomID:      classroomID,
-		SubjectID:        subjectID,
-		SessionDate:      req.SessionDate,
-		SlotStartTime:    startTime,
-		SlotEndTime:      endTime,
-		OriginalGuruID:   ptrOrNil(originalGuruID),
-		SubstituteGuruID: req.SubstituteGuruID,
-		SubstitutedBy:    claims.UserID,
+	sr, err := h.Store.CreateSubstituteRequest(r.Context(), store.CreateSubstituteRequestInput{
+		SchoolID:       claims.SchoolID,
+		AcademicYearID: academicYearID,
+		TermID:         termID,
+		ScheduleID:     req.ScheduleID,
+		ClassroomID:    classroomID,
+		SubjectID:      subjectID,
+		SessionDate:    req.SessionDate,
+		SlotStartTime:  startTime,
+		SlotEndTime:    endTime,
+		RequestedBy:    claims.UserID,
+		RequestedTo:    req.RequestedTo,
+		Reason:         req.Reason,
 	})
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to assign substitute: "+err.Error())
+		common.WriteError(w, http.StatusInternalServerError, "failed to create substitute request: "+err.Error())
 		return
 	}
-	common.WriteJSONMsg(w, http.StatusOK, cs, nil, "Pergantian guru berhasil dicatat")
+	common.WriteJSONMsg(w, http.StatusCreated, sr, nil, "Permintaan pergantian guru berhasil dikirim")
+}
+
+// ListIncomingSubstituteRequests: Guru B's pending list, shown on their own
+// "Jadwal Saya" page. This list IS the "notification" the bug report asks
+// for -- no generic in-app notification/push mechanism exists elsewhere in
+// this codebase to reuse (identity-service's announcements are school-wide
+// broadcasts, not a fit for a 1:1 pending action), so a queryable pending
+// row is the pragmatic minimum that satisfies "sistem mengirim notifikasi
+// ke akun Guru B".
+func (h *Handler) ListIncomingSubstituteRequests(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if !requireRole(w, claims, "guru") {
+		return
+	}
+	list, err := h.Store.ListIncomingSubstituteRequests(r.Context(), claims.UserID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, list, nil)
+}
+
+// ListOutgoingSubstituteRequests: Guru A's own requests (any status) --
+// lets them see a rejection ("Guru A mendapat notifikasi penolakan") and
+// confirm the slot is still theirs to hand off to someone else.
+func (h *Handler) ListOutgoingSubstituteRequests(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if !requireRole(w, claims, "guru") {
+		return
+	}
+	list, err := h.Store.ListOutgoingSubstituteRequests(r.Context(), claims.UserID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, list, nil)
+}
+
+// substituteResponseBundle bundles the resolved request and the
+// class_session it just reassigned, so the frontend can update both the
+// pending list and "Jadwal Saya" from one accept response.
+type substituteResponseBundle struct {
+	Request *model.SubstituteRequest `json:"request"`
+	Session *model.ClassSession      `json:"session"`
+}
+
+// loadOwnIncomingRequestOrErr enforces "only the addressed Guru B, and only
+// while still pending, may accept/reject" -- shared by both handlers below.
+func (h *Handler) loadOwnIncomingRequestOrErr(w http.ResponseWriter, r *http.Request, claims *common.Claims) *model.SubstituteRequest {
+	id := chi.URLParam(r, "id")
+	sr, err := h.Store.GetSubstituteRequest(r.Context(), id)
+	if err == store.ErrNotFound {
+		common.WriteError(w, http.StatusNotFound, "substitute request not found")
+		return nil
+	}
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return nil
+	}
+	if sr.RequestedTo != claims.UserID {
+		common.WriteError(w, http.StatusForbidden, "this request was not sent to you")
+		return nil
+	}
+	if sr.Status != string(model.SubstituteStatusPending) {
+		common.WriteError(w, http.StatusConflict, "this request has already been responded to")
+		return nil
+	}
+	return sr
+}
+
+// AcceptSubstituteRequestHandler: Guru B clicks "Terima" -- the teaching
+// slot transfers immediately and now shows up on Guru B's own "Jadwal
+// Saya" (class_sessions.guru_id reassigned inside the store call).
+func (h *Handler) AcceptSubstituteRequestHandler(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if !requireRole(w, claims, "guru") {
+		return
+	}
+	if h.loadOwnIncomingRequestOrErr(w, r, claims) == nil {
+		return
+	}
+	sr, cs, err := h.Store.AcceptSubstituteRequest(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to accept substitute request: "+err.Error())
+		return
+	}
+	common.WriteJSONMsg(w, http.StatusOK, substituteResponseBundle{Request: sr, Session: cs}, nil, "Permintaan diterima, jadwal berhasil dipindahkan")
+}
+
+// RejectSubstituteRequestHandler: Guru B clicks "Tolak Permintaan" -- Guru
+// A gets a rejection notification (visible via ListOutgoingSubstituteRequests)
+// and the slot stays stuck with them until they request someone else.
+func (h *Handler) RejectSubstituteRequestHandler(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if !requireRole(w, claims, "guru") {
+		return
+	}
+	if h.loadOwnIncomingRequestOrErr(w, r, claims) == nil {
+		return
+	}
+	sr, err := h.Store.RejectSubstituteRequest(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to reject substitute request: "+err.Error())
+		return
+	}
+	common.WriteJSONMsg(w, http.StatusOK, sr, nil, "Permintaan pergantian guru ditolak")
 }
 
 // ---- session detail / ownership guard --------------------------------
