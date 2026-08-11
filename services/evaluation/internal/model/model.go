@@ -13,9 +13,37 @@ type LessonPlan struct {
 	SectionA       map[string]interface{} `json:"section_a"` // A. Identitas & Karakteristik
 	SectionB       map[string]interface{} `json:"section_b"` // B. Analisis Kesiapan & Desain
 	SectionC       map[string]interface{} `json:"section_c"` // C. Langkah Pembelajaran
+	// DimensiLulusan holds the 8 graduate-profile dimensions (see
+	// DimensiLulusanFields), keyed by dimension code -> guru-authored text.
+	// Populated exclusively via the Excel-template import
+	// (POST /me/lesson-plans/{id}/dimensi-lulusan-import), not a form field.
+	DimensiLulusan map[string]interface{} `json:"dimensi_lulusan"`
 	Status         string                 `json:"status"`
 	CreatedAt      time.Time              `json:"created_at"`
 	UpdatedAt      time.Time              `json:"updated_at"`
+}
+
+// DimensiLulusanField is one of the 8 "Dimensi Lulusan" (graduate-profile
+// dimensions) the client's RPM template asks a guru to fill per lesson --
+// Kurikulum Merdeka's 2024 successor to the older 6-dimension "Profil
+// Pelajar Pancasila", per Kepmendikdasmen. Code is the JSONB key; Label is
+// the Excel template's column header (and the display label).
+type DimensiLulusanField struct {
+	Code  string
+	Label string
+}
+
+// DimensiLulusanFields is the fixed set of 8 dimensions, in template-column
+// order. Not school-configurable -- the client specified these by name.
+var DimensiLulusanFields = []DimensiLulusanField{
+	{"keimanan_ketakwaan", "Keimanan dan Ketakwaan terhadap Tuhan YME"},
+	{"kewargaan", "Kewargaan"},
+	{"penalaran_kritis", "Penalaran Kritis"},
+	{"kreativitas", "Kreativitas"},
+	{"kolaborasi", "Kolaborasi"},
+	{"kemandirian", "Kemandirian"},
+	{"kesehatan", "Kesehatan"},
+	{"komunikasi", "Komunikasi"},
 }
 
 // ---------------- Penilaian Guru ----------------

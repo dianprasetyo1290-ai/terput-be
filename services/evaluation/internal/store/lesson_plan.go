@@ -31,6 +31,20 @@ func (s *LessonPlanStore) Create(ctx context.Context, lp *model.LessonPlan) erro
 	return row.Scan(&lp.ID, &lp.CreatedAt, &lp.UpdatedAt)
 }
 
+// SetDimensiLulusan overwrites the 8-dimensi-lulusan JSONB for a guru's own
+// RPM entry (used by the Excel-import handler). Returns false if no row
+// matched (wrong id or not the caller's own RPM).
+func (s *LessonPlanStore) SetDimensiLulusan(ctx context.Context, id, guruUserID string, dimensi map[string]interface{}) (bool, error) {
+	tag, err := s.db.Exec(ctx, `
+		UPDATE lesson_plans SET dimensi_lulusan=$1, updated_at=now()
+		WHERE id=$2 AND guru_user_id=$3 AND deleted_at IS NULL`,
+		marshalMap(dimensi), id, guruUserID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 func (s *LessonPlanStore) Update(ctx context.Context, id, guruUserID string, lp *model.LessonPlan) (bool, error) {
 	tag, err := s.db.Exec(ctx, `
 		UPDATE lesson_plans SET title=$1, section_a=$2, section_b=$3, section_c=$4, status=$5, updated_at=now()
@@ -46,17 +60,18 @@ func scanLessonPlan(row interface {
 	Scan(dest ...interface{}) error
 }) (*model.LessonPlan, error) {
 	var lp model.LessonPlan
-	var a, b, c []byte
-	if err := row.Scan(&lp.ID, &lp.SchoolID, &lp.AcademicYearID, &lp.GuruUserID, &lp.Title, &a, &b, &c, &lp.Status, &lp.CreatedAt, &lp.UpdatedAt); err != nil {
+	var a, b, c, d []byte
+	if err := row.Scan(&lp.ID, &lp.SchoolID, &lp.AcademicYearID, &lp.GuruUserID, &lp.Title, &a, &b, &c, &d, &lp.Status, &lp.CreatedAt, &lp.UpdatedAt); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal(a, &lp.SectionA)
 	_ = json.Unmarshal(b, &lp.SectionB)
 	_ = json.Unmarshal(c, &lp.SectionC)
+	_ = json.Unmarshal(d, &lp.DimensiLulusan)
 	return &lp, nil
 }
 
-const lessonPlanCols = `id, school_id, academic_year_id, guru_user_id, title, section_a, section_b, section_c, status, created_at, updated_at`
+const lessonPlanCols = `id, school_id, academic_year_id, guru_user_id, title, section_a, section_b, section_c, dimensi_lulusan, status, created_at, updated_at`
 
 func (s *LessonPlanStore) GetByID(ctx context.Context, id, schoolID string) (*model.LessonPlan, error) {
 	row := s.db.QueryRow(ctx, `SELECT `+lessonPlanCols+` FROM lesson_plans WHERE id=$1 AND school_id=$2 AND deleted_at IS NULL`, id, schoolID)

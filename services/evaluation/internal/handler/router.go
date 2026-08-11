@@ -34,9 +34,11 @@ func NewRouter(h *Handler, jwtSecret string, corsOrigins []string) http.Handler 
 		pr.Route("/me/lesson-plans", func(sr chi.Router) {
 			sr.Post("/", h.CreateMyLessonPlan)
 			sr.Get("/", h.ListMyLessonPlans)
+			sr.Get("/dimensi-lulusan-template", h.DownloadDimensiLulusanTemplate)
 			sr.Get("/{id}", h.GetMyLessonPlan)
 			sr.Put("/{id}", h.UpdateMyLessonPlan)
 			sr.Delete("/{id}", h.DeleteMyLessonPlan)
+			sr.Post("/{id}/dimensi-lulusan-import", h.ImportDimensiLulusan)
 		})
 		pr.Route("/lesson-plans", func(sr chi.Router) {
 			sr.Get("/", h.AdminListLessonPlans)

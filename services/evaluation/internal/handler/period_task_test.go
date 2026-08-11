@@ -141,24 +141,23 @@ func TestMyTasks_SelfPeerAndLeadership(t *testing.T) {
 	}
 }
 
-// TestUpwardEvalTasks_GeneratedPerGuruAndAdditive is the runnable check for
-// the new upward-feedback track (guru rates kepala sekolah / waka kurikulum
-// / waka kesiswaan -- the opposite direction of the existing
-// kepsek/waka-rates-guru categories, NOT blended into the weighted teacher
-// score, see model.EvalTypeGuruToKepsek doc comment).
+// TestUpwardEvalTasks_NeverGenerated is the runnable check for the client's
+// hierarchy rule (2026-08): a guru may never rate an atasan (kepala
+// sekolah/waka kurikulum/waka kesiswaan), full stop -- so regenerateTasks
+// must NOT create guru_to_kepsek/guru_to_waka_kurikulum/guru_to_waka_kesiswaan
+// tasks at all anymore (they used to be generated per-guru; see git history /
+// README "Upward-feedback track" for the now-retired feature). Otherwise a
+// guru would see a permanently-stuck "Belum Dinilai" row in their to-do list
+// for a task authorizeEvaluation now unconditionally rejects (see
+// TestAuthorizeEvaluation_GuruCannotRateAtasan in evaluation_test.go).
 //
 // Scenario: 2 guru in TargetTeacherIDs, distinct leader IDs (kepsek != waka
 // kurikulum != waka kesiswaan != either guru), plus the same self/peer setup
 // as TestMyTasks_SelfPeerAndLeadership. Expected per guru: self=1,
 // peer=nPeers (only for the guru actually assigned as peer evaluator),
 // leadership-rates-you=0 (neither guru holds a leadership role here), and
-// upward=3 (one guru_to_kepsek/guru_to_waka_kurikulum/guru_to_waka_kesiswaan
-// task each, targeting the real current role-holder). This proves both:
-//  1. task generation for the 3 upward types happens per guru, targeting the
-//     actual current kepsek/waka-kurikulum/waka-kesiswaan holder, and
-//  2. it's additive -- the pre-existing self+peer+leadership-rates-you count
-//     for each guru is unchanged by adding the upward track.
-func TestUpwardEvalTasks_GeneratedPerGuruAndAdditive(t *testing.T) {
+// upward=0 for all 3 guru_to_* types (never generated).
+func TestUpwardEvalTasks_NeverGenerated(t *testing.T) {
 	dbURL := os.Getenv("EVALUATION_TEST_DATABASE_URL")
 	if dbURL == "" {
 		dbURL = "postgres://sekoci:change-me@localhost:5480/skci_evaluation?sslmode=disable"
@@ -214,12 +213,8 @@ func TestUpwardEvalTasks_GeneratedPerGuruAndAdditive(t *testing.T) {
 		}
 
 		counts := map[string]int{}
-		upwardTargets := map[string]string{} // evaluator_type -> target_teacher_user_id
 		for _, tk := range tasks {
 			counts[tk.EvaluatorType]++
-			if model.IsUpwardEvalType(tk.EvaluatorType) {
-				upwardTargets[tk.EvaluatorType] = tk.TargetTeacherUserID
-			}
 		}
 
 		// Additive check: pre-existing self+peer+leadership-rates-you counts
@@ -241,23 +236,15 @@ func TestUpwardEvalTasks_GeneratedPerGuruAndAdditive(t *testing.T) {
 				guruID, counts[model.EvalTypeKepalaSekolah], counts[model.EvalTypeWakaKurikulum], counts[model.EvalTypeWakaKesiswaan])
 		}
 
-		// New behavior: exactly 3 upward tasks, each targeting the real
-		// current role-holder.
-		if counts[model.EvalTypeGuruToKepsek] != 1 || counts[model.EvalTypeGuruToWakaKurikulum] != 1 || counts[model.EvalTypeGuruToWakaKesiswaan] != 1 {
-			t.Fatalf("guru %s: upward tasks = guru_to_kepsek:%d guru_to_waka_kurikulum:%d guru_to_waka_kesiswaan:%d, want 1 each",
+		// New behavior: zero upward tasks -- guru_to_kepsek/guru_to_waka_kurikulum/
+		// guru_to_waka_kesiswaan are never generated anymore (client hierarchy
+		// rule: a guru may never rate an atasan).
+		if counts[model.EvalTypeGuruToKepsek] != 0 || counts[model.EvalTypeGuruToWakaKurikulum] != 0 || counts[model.EvalTypeGuruToWakaKesiswaan] != 0 {
+			t.Fatalf("guru %s: upward tasks = guru_to_kepsek:%d guru_to_waka_kurikulum:%d guru_to_waka_kesiswaan:%d, want 0 each (never generated)",
 				guruID, counts[model.EvalTypeGuruToKepsek], counts[model.EvalTypeGuruToWakaKurikulum], counts[model.EvalTypeGuruToWakaKesiswaan])
 		}
-		if upwardTargets[model.EvalTypeGuruToKepsek] != kepsek {
-			t.Errorf("guru %s: guru_to_kepsek task targets %s, want current kepsek %s", guruID, upwardTargets[model.EvalTypeGuruToKepsek], kepsek)
-		}
-		if upwardTargets[model.EvalTypeGuruToWakaKurikulum] != wakaKurikulum {
-			t.Errorf("guru %s: guru_to_waka_kurikulum task targets %s, want current waka kurikulum %s", guruID, upwardTargets[model.EvalTypeGuruToWakaKurikulum], wakaKurikulum)
-		}
-		if upwardTargets[model.EvalTypeGuruToWakaKesiswaan] != wakaKesiswaan {
-			t.Errorf("guru %s: guru_to_waka_kesiswaan task targets %s, want current waka kesiswaan %s", guruID, upwardTargets[model.EvalTypeGuruToWakaKesiswaan], wakaKesiswaan)
-		}
 
-		wantTotal := 1 + wantPeer + 3
+		wantTotal := 1 + wantPeer
 		if len(tasks) != wantTotal {
 			t.Errorf("guru %s: total tasks = %d, want %d", guruID, len(tasks), wantTotal)
 		}
