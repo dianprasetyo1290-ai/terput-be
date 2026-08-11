@@ -45,6 +45,31 @@ type ReportCard struct {
 
 	// Populated only on detail fetch (GET /report-cards/{id}).
 	Subjects []ReportCardSubject `json:"subjects,omitempty"`
+
+	// School: the printable letterhead/signature-block school identity
+	// (name/address/city/province/logo), resolved live from identity-service
+	// at single-card read time -- NOT cached on this row like the other
+	// header-snapshot fields above. School info changes rarely and
+	// GetReportCard is a one-report-card-at-a-time read (not a per-row loop
+	// like Leger/generate), so a live call here doesn't multiply upstream
+	// load the way caching this pattern was originally meant to avoid. Nil
+	// on list endpoints (ListStudentReportCards, generate's response list)
+	// -- those stay N-call-free on purpose.
+	School *SchoolInfo `json:"school,omitempty"`
+}
+
+// SchoolInfo is the subset of identity-service's School record the printed
+// rapor's letterhead/signature date line needs (see CRITICAL multi-tenancy
+// note in the task brief this was built against: every school must see its
+// own identity here, never another school's). Akreditasi is intentionally
+// not included -- identity-service's schools table has no such field yet,
+// and adding one is upload/data-entry plumbing out of scope for this pass.
+type SchoolInfo struct {
+	Name     string  `json:"name"`
+	Address  *string `json:"address"`
+	City     *string `json:"city"`
+	Province *string `json:"province"`
+	Logo     *string `json:"logo"`
 }
 
 type AttendanceSummary struct {
@@ -87,8 +112,17 @@ type ReportCardSubject struct {
 	// report_grade_bands mechanism as GradeLabel, applied to StsScore/
 	// SasScore individually instead of only the blended final score.
 	// Computed at read time (see handler.loadReportCard), not stored.
-	StsLabel     *string    `json:"sts_label,omitempty"`
-	SasLabel     *string    `json:"sas_label,omitempty"`
+	StsLabel *string `json:"sts_label,omitempty"`
+	SasLabel *string `json:"sas_label,omitempty"`
+	// SubjectGroup: the print template's "A. Mata Pelajaran Umum / B.
+	// Kejuruan / Pilihan / C. Muatan Lokal" grouping (see PDF template
+	// notes). Resolved live from academic-service's subjects.subject_group
+	// at single-card read time, same non-cached rationale as
+	// ReportCard.School -- not a DB column here. Nil if academic-service
+	// couldn't be reached or the school hasn't set a group for this
+	// subject; the print view falls back to a flat ungrouped list in that
+	// case rather than assuming every school groups its subjects this way.
+	SubjectGroup *string    `json:"subject_group,omitempty"`
 	Notes        *string    `json:"notes,omitempty"`
 	MidNote      *string    `json:"mid_note,omitempty"`   // Deskripsi Rapor: Capaian STS
 	FinalNote    *string    `json:"final_note,omitempty"` // Deskripsi Rapor: Capaian SAS
@@ -235,4 +269,33 @@ type SubjectRef struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Code string `json:"code,omitempty"`
+}
+
+// ReportTemplate is one uploaded reference .xlsx's metadata (Import
+// Template, Generate Rapor admin screen) -- FileData (the actual bytes) is
+// deliberately not part of this struct; it's only read/written directly by
+// the store layer for the download endpoint, so a template list response
+// never accidentally inlines a multi-MB blob into JSON.
+type ReportTemplate struct {
+	ID          string    `json:"id"`
+	SchoolID    string    `json:"school_id"`
+	Type        string    `json:"template_type"` // tengah_semester | akhir_semester | akhir_semester_hal2
+	FileName    string    `json:"file_name"`
+	ContentType string    `json:"content_type"`
+	FileSize    int       `json:"file_size"`
+	UploadedBy  *string   `json:"uploaded_by,omitempty"`
+	UploadedAt  time.Time `json:"uploaded_at"`
+}
+
+// ReportTemplateTypes is the fixed 3-option list the Import Template popup
+// offers, matching the 3 reference .xlsx files the task was built against.
+var ReportTemplateTypes = []string{"tengah_semester", "akhir_semester", "akhir_semester_hal2"}
+
+func ValidReportTemplateType(t string) bool {
+	for _, v := range ReportTemplateTypes {
+		if v == t {
+			return true
+		}
+	}
+	return false
 }

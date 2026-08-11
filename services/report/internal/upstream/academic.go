@@ -67,6 +67,12 @@ type Subject struct {
 	SubjectID string `json:"subject_id"` // subjects.id (real subject, matches exam-service's Exam.SubjectID)
 	Name      string `json:"subject_name"`
 	Code      string `json:"code"`
+	// Group: academic-service's subjects.subject_group ("A. Mata Pelajaran
+	// Umum" / "B. Kejuruan" / etc.) -- the print template's subject
+	// grouping. Nil for schools that haven't set it, or don't use this
+	// concept at all (print view falls back to a flat list, see model.go's
+	// ReportCardSubject.SubjectGroup doc comment).
+	Group *string `json:"subject_group,omitempty"`
 }
 
 // GetClassroom fetches GET /classrooms/{id}.

@@ -75,3 +75,33 @@ func PrincipalName(positions []OrgPosition) string {
 	}
 	return ""
 }
+
+// School mirrors the subset of identity-service's School record (see
+// services/identity/internal/model/model.go's School struct) the printed
+// rapor's letterhead/signature-date line needs. Every field here is what
+// makes the print output per-school instead of hardcoded to whichever
+// school's reference template this feature was built against -- see the
+// task's multi-tenancy requirement.
+type School struct {
+	ID       string  `json:"id"`
+	Name     string  `json:"name"`
+	Address  *string `json:"address"`
+	City     *string `json:"city"`
+	Province *string `json:"province"`
+	Logo     *string `json:"logo"`
+}
+
+// GetSchool fetches GET /schools/{id}, already reachable via X-Internal-Key
+// per identity-service's ir.Get("/schools/{id}", ...) route (see
+// cmd/server/main.go there). Returns (nil, nil) on a genuine 404-shaped
+// empty response; a non-nil error wraps ErrUnavailable on network failure.
+func (ic *IdentityClient) GetSchool(ctx context.Context, schoolID string) (*School, error) {
+	var s School
+	if err := ic.c.getJSON(ctx, "GetSchool", fmt.Sprintf("/schools/%s", schoolID), &s); err != nil {
+		return nil, err
+	}
+	if s.ID == "" {
+		return nil, nil
+	}
+	return &s, nil
+}

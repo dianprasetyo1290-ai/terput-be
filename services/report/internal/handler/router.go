@@ -59,6 +59,14 @@ func NewRouter(d *Deps, jwtSecret string, corsOrigins []string) http.Handler {
 		pr.Delete("/settings/assessment-types/{id}", h.DeleteAssessmentType)
 		pr.Get("/settings/weights", h.GetWeightSettings)
 		pr.Put("/settings/weights", h.SetWeightSettings)
+
+		// Import Template (Generate Rapor "Import Template" popup) --
+		// upload/list/download reference .xlsx files, per school per
+		// rapor-type. See handler/report_template.go's ponytail note:
+		// storage/record-keeping only, not wired into PDF generation.
+		pr.Get("/settings/report-templates", h.ListReportTemplates)
+		pr.Post("/settings/report-templates", h.UploadReportTemplate)
+		pr.Get("/settings/report-templates/{type}/download", h.DownloadReportTemplate)
 	})
 
 	return r
