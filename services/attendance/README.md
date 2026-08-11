@@ -17,9 +17,14 @@ calls (`X-Internal-Key` header) when those services are reachable.
 - **`class_sessions`** — one row per `(schedule_id, session_date)`. Created
   when a guru self-checks-in for a schedule slot ("presensi guru"). Also
   carries the Agenda Pembelajaran Harian fields (`pertemuan`, `pembahasan`,
-  `materi_pertemuan`, `bentuk_kegiatan`) filled in right after check-in. This
-  single table doubles as the "Presensi Guru" admin record, since a guru's
-  attendance *is* their check-in on a session.
+  `materi_pertemuan`, `bentuk_kegiatan`) filled in right after check-in, plus
+  (client request, Sekolah GPM) a session-level `catatan`, a `tugas_diberikan`
+  +`tugas_jenis` ("individu"/"kelompok") checkbox, `checked_out_at` (jam
+  keluar, alongside `checked_in_at` as jam masuk), and "pergantian guru"
+  substitute-teacher tracking (`original_guru_id`, `substituted_at`,
+  `substituted_by` — `guru_id` itself always holds whoever is *currently*
+  covering the session). This single table doubles as the "Presensi Guru"
+  admin record, since a guru's attendance *is* their check-in on a session.
 - **`student_attendances`** — one row per `(class_session_id, student_id)`,
   status `hadir|sakit|izin|tanpa_keterangan` (default `hadir`), optional
   `catatan`. This is what the admin "Presensi Siswa" view and the
@@ -86,10 +91,14 @@ curl -X POST "http://localhost:8083/sessions/checkin?academic_year_id=$YEAR" \
 # -> { "data": { "id": "<session_id>", ... }, "message": "Presensi berhasil dicatat", ... }
 SESSION_ID="<paste session id from response>"
 
-# 2. fill Agenda Pembelajaran Harian for that session
+# 2. fill Agenda Pembelajaran Harian for that session -- catatan and the
+#    tugas checkbox (tugas_diberikan/tugas_jenis) are part of the same step
 curl -X PUT "http://localhost:8083/sessions/$SESSION_ID/agenda" \
   -H "Authorization: Bearer $GURU_TOKEN" -H "Content-Type: application/json" \
-  -d '{"pertemuan":"12","pembahasan":"Trigonometri","materi_pertemuan":"Sin Cos Tan","bentuk_kegiatan":["teori","praktikum"]}'
+  -d '{"pertemuan":"12","pembahasan":"Trigonometri","materi_pertemuan":"Sin Cos Tan","bentuk_kegiatan":["teori","praktikum"],"catatan":"ada tugas yang harus diselesaikan hari itu juga","tugas_diberikan":true,"tugas_jenis":"kelompok"}'
+
+# 2b. jam keluar (clock-out) for this pertemuan, once the guru is done
+curl -X PUT "http://localhost:8083/sessions/$SESSION_ID/checkout" -H "Authorization: Bearer $GURU_TOKEN"
 
 # 3a. "Pilih semua" — mark every roster student hadir in one call
 curl -X POST "http://localhost:8083/sessions/$SESSION_ID/students/bulk" \
@@ -104,6 +113,19 @@ curl -X PUT "http://localhost:8083/sessions/$SESSION_ID/students/$STUDENT" \
 # roster proxy (best-effort, calls academic-service; falls back to whatever
 # is already recorded if academic-service is unreachable)
 curl "http://localhost:8083/sessions/$SESSION_ID/roster" -H "Authorization: Bearer $GURU_TOKEN"
+
+# pergantian guru — the guru assigned to a slot (or an admin) hands it off
+# to another guru who will cover it instead. Same schedule_id/session_date/
+# academic_year_id resolution as checkin above; guru_id on the resulting
+# session becomes the substitute's, original_guru_id keeps the audit trail.
+# The substitute then does their OWN checkin (step 1) for the same
+# schedule_id/date -- normally rejected as "not their slot", but allowed
+# here because this call already named them as covering it.
+SUBSTITUTE_GURU=44444444-4444-4444-4444-444444444444
+curl -X POST "http://localhost:8083/sessions/substitute-guru?academic_year_id=$YEAR" \
+  -H "Authorization: Bearer $GURU_TOKEN" -H "Content-Type: application/json" \
+  -d "{\"schedule_id\":\"$SCHEDULE\",\"classroom_id\":\"$CLASSROOM\",\"substitute_guru_id\":\"$SUBSTITUTE_GURU\"}"
+# -> { "data": { ..., "guru_id": "<substitute>", "original_guru_id": "<caller>", "substituted_at": "..." }, "message": "Pergantian guru berhasil dicatat", ... }
 ```
 
 ## curl examples (admin)
@@ -149,9 +171,11 @@ of the internal key — see Assumptions below.
 | Method | Path | Role | Notes |
 |---|---|---|---|
 | GET | `/healthz` | none | |
-| POST | `/sessions/checkin` | guru | step 1: self presensi for a schedule slot/date |
+| POST | `/sessions/checkin` | guru | step 1: self presensi for a schedule slot/date (jam masuk) |
+| POST | `/sessions/substitute-guru` | guru (assigned to the slot) / admin | pergantian guru: reassign who's covering a schedule slot/date |
 | GET | `/sessions/{id}` | guru (own) / admin | |
-| PUT | `/sessions/{id}/agenda` | guru (own) | step 2: Agenda Pembelajaran Harian |
+| PUT | `/sessions/{id}/agenda` | guru (own) | step 2: Agenda Pembelajaran Harian, incl. `catatan`/`tugas_diberikan`/`tugas_jenis` |
+| PUT | `/sessions/{id}/checkout` | guru (own) | jam keluar (clock-out) for this pertemuan |
 | GET | `/sessions/{id}/roster` | guru (own) | proxies academic-service roster + current statuses |
 | GET | `/sessions/{id}/students` | guru (own) / admin | |
 | POST | `/sessions/{id}/students/bulk` | guru (own) | "Pilih semua" |
@@ -287,6 +311,34 @@ per the task instructions (no other agent to ask, working in parallel):
   are always `0` in that response, kept in the same `MonthlyStatusCount`
   shape as the student chart purely so both dashboard chart endpoints are
   drop-in interchangeable on the frontend.
+- **Pergantian guru reassigns `guru_id` itself** (2026-08-11, Sekolah GPM
+  request), rather than adding a separate `substitute_guru_id` column that
+  every admin/dashboard query would then need to know to also check.
+  `original_guru_id`/`substituted_at`/`substituted_by` are the audit trail;
+  `guru_id` is always "whoever is actually covering this session right now",
+  so every existing consumer of `class_sessions.guru_id` (admin's Presensi
+  Guru, the dashboard's Guru Aktif Mengajar, `/me/sessions/today`) picks up
+  the substitute automatically with zero changes. The tradeoff:
+  `AssignSubstitute` reuses `CheckIn`'s exact academic-service
+  resolve-with-fallback pattern, so it *also* fails open (trusts the caller
+  is the slot's assigned guru) when academic-service is unreachable — same
+  documented limitation `CheckIn` already has, not a new one.
+- **The substitute still does their own check-in.** `AssignSubstitute` only
+  records who's covering the slot (creating a `class_sessions` row with no
+  `checked_in_at` if none existed yet); `CheckIn`'s existing
+  "schedule slot is not assigned to this guru" 403 gained one extra
+  condition — it's skipped when a `class_sessions` row already names the
+  caller as `guru_id` for that `(schedule_id, session_date)`, i.e. a
+  substitution was already recorded for them.
+- **`catatan`/`tugas_diberikan`/`tugas_jenis` live on the agenda step**
+  (`PUT /sessions/{id}/agenda`), not a separate endpoint — the client's
+  examples for both ("ada tugas yang harus diselesaikan hari itu juga", and
+  the tugas checkbox) are session-level facts recorded at the same point in
+  the guru's flow as `pertemuan`/`pembahasan`/`bentuk_kegiatan` already are,
+  so extending that one PUT avoids a parallel form/request just for two more
+  fields. `tugas_jenis` is only persisted when `tugas_diberikan` is true
+  (silently cleared otherwise) since an orphaned type with no task given
+  isn't meaningful.
 - Go module uses `go 1.25` (not the exact local toolchain `1.26.4`) so the
   Docker build can use the published `golang:1.25-alpine` image without
   triggering an in-container toolchain auto-download.
