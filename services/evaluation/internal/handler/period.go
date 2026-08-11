@@ -241,13 +241,19 @@ func (h *Handler) AvailablePeerEvaluators(w http.ResponseWriter, r *http.Request
 }
 
 // regenerateTasks (re)creates pending tasks for the eagerly-known evaluator
-// categories (kepala_sekolah, waka_kurikulum, waka_kesiswaan, self, peer,
-// plus the upward-feedback guru_to_kepsek/guru_to_waka_kurikulum/
-// guru_to_waka_kesiswaan trio). Siswa tasks are created lazily on first
-// submission -- see evaluation.go --
+// categories (kepala_sekolah, waka_kurikulum, waka_kesiswaan, self, peer).
+// Siswa tasks are created lazily on first submission -- see evaluation.go --
 // because the student roster per classroom is owned by academic-service and
 // this call must stay idempotent/cheap on every period save. See README
 // Assumptions for the full rationale.
+//
+// The upward-feedback guru_to_kepsek/guru_to_waka_kurikulum/
+// guru_to_waka_kesiswaan trio (guru rates a leader) is deliberately NOT
+// generated here: the client's hierarchy rule forbids a guru from ever
+// rating an atasan, and authorizeEvaluation in evaluation.go now rejects
+// those evaluator_types unconditionally, so eagerly creating tasks a guru
+// can never submit would just leave permanently-stuck "Belum Dinilai" rows
+// in their to-do list (see MyTasks/IsiPenilaianGuruView.vue).
 func (h *Handler) regenerateTasks(ctx context.Context, p *model.Period) error {
 	if err := h.Forms.BootstrapDefaults(ctx, p.SchoolID); err != nil {
 		return err
@@ -294,23 +300,6 @@ func (h *Handler) regenerateTasks(ctx context.Context, p *model.Period) error {
 		}
 		if err := upsert(model.EvalTypeSelf, guruID, guruID); err != nil {
 			return err
-		}
-		// Upward-feedback track: same leader-lookup as above, direction
-		// swapped -- target is the leader, evaluator is the guru.
-		if p.HeadmasterUserID != nil {
-			if err := upsert(model.EvalTypeGuruToKepsek, *p.HeadmasterUserID, guruID); err != nil {
-				return err
-			}
-		}
-		if p.CurriculumVPUserID != nil {
-			if err := upsert(model.EvalTypeGuruToWakaKurikulum, *p.CurriculumVPUserID, guruID); err != nil {
-				return err
-			}
-		}
-		if p.StudentAffairsVPUserID != nil {
-			if err := upsert(model.EvalTypeGuruToWakaKesiswaan, *p.StudentAffairsVPUserID, guruID); err != nil {
-				return err
-			}
 		}
 	}
 	for _, evaluatorID := range p.PeerEvaluatorIDs {

@@ -2,11 +2,16 @@
 
 Owns two "teacher-quality" features for the Sekoci Go+Vue rewrite:
 
-1. **RPM (Rencana Pembelajaran Mendalam)** — lesson plans, guru-authored, admin read-only.
+1. **RPM (Rencana Pembelajaran Mendalam)** — lesson plans, guru-authored,
+   admin read-only. Includes "8 Dimensi Lulusan" (graduate-profile
+   dimensions), filled via an Excel-template import (not form fields) — see
+   "RPM: 8 Dimensi Lulusan" below. Printed RPM (client-side `window.print()`,
+   `RpmPrintTemplate.vue`) carries a Kepala Sekolah signature line.
 2. **Penilaian Guru** — teacher performance evaluation: admin-run periods, 6
    evaluator categories (Kepala Sekolah, Waka Kurikulum, Waka Kesiswaan,
    Guru-self, Guru-peer, Siswa), weighted final score, Promotif/Tidak
-   Promotif labeling, printable per-guru report.
+   Promotif labeling, printable per-guru report. Hierarchy rule: a guru may
+   never rate an atasan — see "Upward-feedback track — RETIRED" below.
 
 Port `8085`, database `skci_evaluation`. Follows `docs/CONVENTIONS.md`
 (response envelope, JWT claims/middleware, multi-tenancy via `school_id`,
@@ -50,6 +55,34 @@ period is finished regardless of the publish flag. Evaluators can only
 submit (`POST /periods/{id}/evaluations`) while status is exactly
 `Sedang Berlangsung`.
 
+## RPM: 8 Dimensi Lulusan
+
+Client request: a lesson plan gains 8 "Dimensi Lulusan" (graduate-profile
+dimensions — Kurikulum Merdeka's 2024 successor to the older 6-dimension
+"Profil Pelajar Pancasila"), filled via an **Excel-template import**, not
+one-by-one form fields. Fixed set (`model.DimensiLulusanFields`): Keimanan
+dan Ketakwaan terhadap Tuhan YME, Kewargaan, Penalaran Kritis, Kreativitas,
+Kolaborasi, Kemandirian, Kesehatan, Komunikasi.
+
+Stored as `lesson_plans.dimensi_lulusan` (JSONB, migration 000003), same
+freeform pattern as `section_a/b/c`. Uses `github.com/xuri/excelize/v2` —
+already a dependency elsewhere in this codebase (services/identity,
+services/exam) for the same "Import Template Sekoci" style bulk-Excel
+convention (see `services/identity/internal/handler/import.go`), reused here
+rather than adding a new library:
+
+- `GET /me/lesson-plans/dimensi-lulusan-template` — downloads a blank
+  `.xlsx` (1 sheet, 8 dimension-name headers + one example row).
+- `POST /me/lesson-plans/{id}/dimensi-lulusan-import` — guru uploads a
+  filled copy (multipart field `file`); row 2's 8 columns (matched by header
+  text) overwrite that RPM's `dimensi_lulusan`. Owner-only (guru's own RPM),
+  re-import overwrites.
+
+Frontend: `RpmMineFormView.vue` (guru's own RPM edit screen) has the
+download/upload UI, gated on the RPM already being saved (needs an id to
+import into). `RpmPrintTemplate.vue` and `RpmGuruDetailView.vue` (admin
+read-only) render the 8 dimensions as a "D." section alongside A/B/C.
+
 ## Evaluator-category weighting
 
 Sourced from the client-provided reference spreadsheet `RAPOT KINERJA GURU
@@ -70,31 +103,47 @@ via `internal/store/default_forms.go` / `FormStore.BootstrapDefaults` — this
 runs automatically (idempotent) the first time `GET /forms` or any period
 create/update is called for a school.
 
-### Upward-feedback track (guru rates a leader)
+### Upward-feedback track (guru rates a leader) — RETIRED 2026-08
 
-A separate, unblended track: guru rate the Kepala Sekolah / Waka Kurikulum /
-Waka Kesiswaan (the opposite direction of the 6 categories above). Three
-more forms (`G`/`H`/`I`, `evaluator_type` `guru_to_kepsek` /
-`guru_to_waka_kurikulum` / `guru_to_waka_kesiswaan`), Weight `0` since they
-are explicitly **not** part of the 100% teacher score — there's no room in
-that split and it's the reverse rating direction (teacher rating their
-supervisor, not the supervisor's report card). Generic leader-evaluation
-criteria (clarity of direction/communication, support for teacher
-development, responsiveness, fairness, administrative effectiveness,
-leadership integrity), same 6-item/1–4 rubric shape as the other forms —
-see `store.upwardItems`.
+A separate, unblended track existed for a while: guru rate the Kepala
+Sekolah / Waka Kurikulum / Waka Kesiswaan (the opposite direction of the 6
+categories above), via 3 forms (`G`/`H`/`I`, `evaluator_type`
+`guru_to_kepsek` / `guru_to_waka_kurikulum` / `guru_to_waka_kesiswaan`,
+Weight `0`, see `store.upwardItems`).
 
-Reuses all the same infrastructure: `regenerateTasks` (period.go) creates one
-task per in-scope guru per assigned leader role, target/evaluator swapped
-relative to the `kepala_sekolah`/`waka_*` types (target = the leader,
-evaluator = the guru). Submission goes through the same
-`POST /periods/{id}/evaluations`. `computeResults`/`GET /results` and
-`GET /guru/{id}/report` explicitly skip these 3 forms (see
-`model.IsUpwardEvalType`) so they never leak into a guru's weighted score.
-Their own simple report lives at `GET /periods/{id}/leadership-results` — one
-row per assigned leader role with `submitted_count`/`expected_count` (=
-number of in-scope guru) and a plain average `avg_score`, no per-item
-weighting story needed since there's only one "category" per leader.
+**This is now blocked by policy.** The client's hierarchy rule (2026-08,
+translated): a guru may never rate an atasan — not waka kurikulum, not waka
+kesiswaan, not kepala sekolah, full stop, no "leadership feedback"
+carve-out. `authorizeEvaluation` (evaluation.go) rejects all 3 `guru_to_*`
+types unconditionally, and `regenerateTasks` (period.go) no longer generates
+tasks for them at all (so a guru never sees a permanently-stuck "Belum
+Dinilai" row for a task they can never legally submit). See
+`TestAuthorizeEvaluation_GuruCannotRateAtasan` and
+`TestUpwardEvalTasks_NeverGenerated` in `internal/handler`.
+
+The rest of the hierarchy rule was already correctly implemented and needed
+no changes: Kepala Sekolah rates waka/guru and Waka rates guru via the
+existing `kepala_sekolah`/`waka_kurikulum`/`waka_kesiswaan` evaluator
+categories (kepsek/waka is the rater, a target guru is the ratee — those
+never let a guru target a leader), Guru rates only peer guru via the `peer`
+type, and Siswa rates guru via `siswa`. The **dual-role exception** — "a
+kepsek/waka who also teaches as guru can still be rated, but only in their
+guru capacity" — resolves for free once `guru_to_*` is blocked: the ONLY
+pathway left that could ever rate someone "as kepala sekolah/waka" was
+`guru_to_*`, so with that gone, a kepsek/waka-who-teaches is rateable
+exactly like any other guru by being added to `target_teacher_ids` (kepsek's
+own `kepala_sekolah`-category submissions target them) or
+`peer_evaluatee_ids` (fellow guru peer-rate them) — no schema/model change
+needed, `model.Period`'s existing plain `[]string` target lists already
+don't care whose jabatan a user id belongs to.
+
+The forms (`G`/`H`/`I`), `model.EvalTypeGuruToKepsek` family,
+`GET /periods/{id}/leadership-results`, and `computeLeadershipResults` are
+left in place (dead but harmless — they'll just always report 0 tasks/0
+submissions now) rather than ripped out, in case this policy is revisited.
+The admin "Upward Feedback" results table was removed from
+`HasilPeriodeView.vue` since displaying an always-empty section would be
+misleading.
 
 **Scoring math**: a task (one evaluator's submission for one guru under one
 form) gets `raw_score` = weighted average of that evaluator's item scores,
@@ -114,6 +163,8 @@ All routes except `/healthz` require `Authorization: Bearer <JWT>`.
 
 **RPM**
 - `POST /me/lesson-plans` / `GET /me/lesson-plans` / `GET,PUT,DELETE /me/lesson-plans/{id}` — guru's own CRUD.
+- `GET /me/lesson-plans/dimensi-lulusan-template` — download the blank 8-Dimensi-Lulusan Excel template.
+- `POST /me/lesson-plans/{id}/dimensi-lulusan-import` — upload a filled template, overwrites that RPM's 8 dimensions.
 - `GET /lesson-plans?guru_id=` and `GET /lesson-plans/guru/{guru_id}` — admin read-only list/detail.
 
 **Penilaian Guru**
@@ -122,7 +173,7 @@ All routes except `/healthz` require `Authorization: Bearer <JWT>`.
 - `GET /periods/{id}/confirm-delete` — returns `{message: "apakah anda yakin ingin menghapus <title>"}` for the frontend's confirm dialog; the actual delete is a separate `DELETE`.
 - `POST /periods/{id}/publish` / `POST /periods/{id}/unpublish` — toggles the `published` flag.
 - `GET /periods/{id}/available-peer-evaluators` — guru list for field K(b) (full school guru pool; overlap with K(a) is allowed, see Assumptions #2).
-- `POST /periods/{id}/evaluations` — submit one evaluator's scores; body `{evaluator_type, target_teacher_id, classroom_id?, answers:[{item_id,score}]}`. Server validates the caller is actually authorized for that `evaluator_type` → `target_teacher_id` pairing under the period's config.
+- `POST /periods/{id}/evaluations` — submit one evaluator's scores; body `{evaluator_type, target_teacher_id, classroom_id?, answers:[{item_id,score}]}`. Server validates the caller is actually authorized for that `evaluator_type` → `target_teacher_id` pairing under the period's config, including the "guru never rates an atasan" hierarchy rule (see "Upward-feedback track — RETIRED" above).
 - `GET /periods/{id}/my-tasks` — caller's own assignment list (bonus convenience endpoint, not in spec but useful for a "to-do" UI).
 - `GET /periods/{id}/results?guru_id=` — per-category progress + weighted final score.
 - `GET /periods/{id}/guru/{guru_id}/report` — printable report payload.

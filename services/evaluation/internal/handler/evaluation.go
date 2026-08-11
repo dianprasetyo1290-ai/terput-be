@@ -28,6 +28,20 @@ type submitEvaluationRequest struct {
 // This is the server-side enforcement point ("scoped to the caller's
 // identity + role-category" from the spec).
 func authorizeEvaluation(claims *common.Claims, p *model.Period, req submitEvaluationRequest) error {
+	// Client hierarchy rule (2026-08): a guru may never rate an atasan --
+	// not waka kurikulum, not waka kesiswaan, not kepala sekolah -- full
+	// stop, no "leadership feedback" carve-out. The guru_to_kepsek/
+	// guru_to_waka_kurikulum/guru_to_waka_kesiswaan upward-feedback types
+	// are exactly that (guru rating a leader in their leadership capacity),
+	// so they're blocked here regardless of period config. This also
+	// resolves the "rated as guru, never as kepala sekolah/waka" exception
+	// for free: with this blocked, the ONLY way a kepsek/waka gets rated at
+	// all is by being a target guru (target_teacher_ids/peer_evaluatee_ids)
+	// -- i.e. always in their guru capacity, never their jabatan capacity,
+	// since there is no other rating pathway left that targets the jabatan.
+	if model.IsUpwardEvalType(req.EvaluatorType) {
+		return fmt.Errorf("guru tidak dapat menilai atasan (kepala sekolah/waka kurikulum/waka kesiswaan)")
+	}
 	// For peer and the upward-feedback (guru_to_*) types, target_teacher_id
 	// isn't a member of the "J" target-guru list (it's the peer evaluatee or
 	// the leader being rated respectively) -- those cases validate their own
@@ -74,36 +88,10 @@ func authorizeEvaluation(claims *common.Claims, p *model.Period, req submitEvalu
 		if p.StudentAffairsVPUserID == nil || *p.StudentAffairsVPUserID != claims.UserID {
 			return fmt.Errorf("caller is not the Waka Kesiswaan assigned to this period")
 		}
-	case model.EvalTypeGuruToKepsek:
-		if !hasRole(claims, "guru") {
-			return fmt.Errorf("only guru can submit this evaluation type")
-		}
-		if !containsStr(p.TargetTeacherIDs, claims.UserID) {
-			return fmt.Errorf("caller is not in this period's target guru list")
-		}
-		if p.HeadmasterUserID == nil || *p.HeadmasterUserID != req.TargetTeacherID {
-			return fmt.Errorf("target_teacher_id must be the Kepala Sekolah assigned to this period")
-		}
-	case model.EvalTypeGuruToWakaKurikulum:
-		if !hasRole(claims, "guru") {
-			return fmt.Errorf("only guru can submit this evaluation type")
-		}
-		if !containsStr(p.TargetTeacherIDs, claims.UserID) {
-			return fmt.Errorf("caller is not in this period's target guru list")
-		}
-		if p.CurriculumVPUserID == nil || *p.CurriculumVPUserID != req.TargetTeacherID {
-			return fmt.Errorf("target_teacher_id must be the Waka Kurikulum assigned to this period")
-		}
-	case model.EvalTypeGuruToWakaKesiswaan:
-		if !hasRole(claims, "guru") {
-			return fmt.Errorf("only guru can submit this evaluation type")
-		}
-		if !containsStr(p.TargetTeacherIDs, claims.UserID) {
-			return fmt.Errorf("caller is not in this period's target guru list")
-		}
-		if p.StudentAffairsVPUserID == nil || *p.StudentAffairsVPUserID != req.TargetTeacherID {
-			return fmt.Errorf("target_teacher_id must be the Waka Kesiswaan assigned to this period")
-		}
+	// model.EvalTypeGuruToKepsek/GuruToWakaKurikulum/GuruToWakaKesiswaan
+	// (upward-feedback: guru rating a leader) are rejected unconditionally
+	// above -- see the IsUpwardEvalType check at the top of this function --
+	// so they're intentionally absent from this switch.
 	case model.EvalTypeSiswa:
 		if !hasRole(claims, "siswa") {
 			return fmt.Errorf("only siswa can submit this evaluation type")
