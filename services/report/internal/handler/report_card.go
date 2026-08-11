@@ -572,8 +572,53 @@ func (h *Handler) GetReportCard(w http.ResponseWriter, r *http.Request) {
 	}
 	bands, _ := h.d.Store.GetGradeBands(r.Context(), rc.SchoolID)
 	applyGradeLabels(subjects, bands)
+	h.enrichSubjectGroups(r.Context(), rc.ClassroomID, rc.TermID, subjects)
 	rc.Subjects = subjects
+	rc.School = h.fetchSchoolInfo(r.Context(), rc.SchoolID)
 	common.WriteJSON(w, http.StatusOK, rc, nil)
+}
+
+// fetchSchoolInfo resolves the printable letterhead/signature-block school
+// identity live from identity-service. Deliberately not cached anywhere
+// (see model.ReportCard.School's doc comment) -- called only from the
+// single-report-card GetReportCard read, never from a per-row loop, so one
+// extra upstream call per read is cheap and keeps every school seeing its
+// own name/address/logo, never another school's (multi-tenancy
+// requirement). Returns nil (not an error) on any failure -- the print view
+// falls back to blank letterhead fields rather than crashing.
+func (h *Handler) fetchSchoolInfo(ctx context.Context, schoolID string) *model.SchoolInfo {
+	school, err := h.d.Identity.GetSchool(ctx, schoolID)
+	if err != nil || school == nil {
+		return nil
+	}
+	return &model.SchoolInfo{
+		Name:     school.Name,
+		Address:  school.Address,
+		City:     school.City,
+		Province: school.Province,
+		Logo:     school.Logo,
+	}
+}
+
+// enrichSubjectGroups resolves each subject row's print-template grouping
+// (see model.ReportCardSubject.SubjectGroup) live from academic-service's
+// classroom subject list, keyed by subject_id. Same non-cached, single-read
+// rationale as fetchSchoolInfo. A failed lookup just leaves every
+// SubjectGroup nil -- the print view's flat-list fallback handles that.
+func (h *Handler) enrichSubjectGroups(ctx context.Context, classroomID, termID string, subjects []model.ReportCardSubject) {
+	classroomSubjects, err := h.d.Academic.ListClassroomSubjects(ctx, classroomID, termID)
+	if err != nil {
+		return
+	}
+	groupBySubjectID := make(map[string]*string, len(classroomSubjects))
+	for _, cs := range classroomSubjects {
+		groupBySubjectID[cs.SubjectID] = cs.Group
+	}
+	for i := range subjects {
+		if g, ok := groupBySubjectID[subjects[i].SubjectID]; ok {
+			subjects[i].SubjectGroup = g
+		}
+	}
 }
 
 // authorizeReportCardAccess enforces: siswa can only see their own report

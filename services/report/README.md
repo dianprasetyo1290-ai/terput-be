@@ -9,10 +9,167 @@ academic, attendance, exam, evaluation) follows.
 This is an **aggregator**, not a source of truth for student/classroom/exam
 data — it owns only report-configuration/override state (`report_cards`,
 `report_card_subjects`, `report_grade_bands`, `report_assessment_types`,
-`report_weight_settings`, `formative_grades`) and pulls everything else
-(student names, classroom/term info, attendance summaries, exam scores)
-from sibling services over internal HTTP. See "Expected upstream
-contracts" below for exactly what it expects those services to expose.
+`report_weight_settings`, `formative_grades`, `report_templates`) and pulls
+everything else (student names, classroom/term info, attendance summaries,
+exam scores) from sibling services over internal HTTP. See "Expected
+upstream contracts" below for exactly what it expects those services to
+expose.
+
+## Print/PDF, Leger semester+kelas cascade, Import Template (migration 0008)
+
+This section documents the 2026-08-11 print-template session on top of
+migration 0007's dynamic-report-structure work. Three things were built,
+against 3 reference .xlsx files (`Format Rapor Tengah Semester (3
+Bulan).xlsx`, `Format Rapor Akhir semester (6 bulan).xlsx`, its Halaman 2)
+that define the real government-school report card's visual layout.
+
+### 1. Leger: cascading "Pilih Semester" + "Pilih Kelas"
+
+`web/src/components/report/SemesterKelasPicker.vue` (new) replaces
+`ClassroomTermPicker` on `LegerView.vue` only (Generate Rapor keeps its own
+existing classroom+term picker unchanged). No backend/migration change was
+needed for this — it's built entirely on fields that already existed:
+
+- "tingkat" (grade level 1/2/3) = academic-service's `Classroom.grade_level`
+  (free text, e.g. `"X"/"XI"/"XII"` or `"10"/"11"/"12"`). The distinct
+  `grade_level` values seen across every classroom the school has (across
+  **every** academic year, not just the current one — a grade-1/2/3 cohort
+  typically spans 3 different years as students are promoted), sorted
+  ascending, become tingkat 1/2/3 in order. This happens to sort correctly
+  for both labeling conventions above since both are prefix-ordered
+  strings.
+- "which half of the semester pair" = academic-service's `Term.order`
+  (`1` = Ganjil, `2` = Genap) within the selected classroom's own
+  `academic_year_id`. Semester 1/3/5 (odd) → order 1, 2/4/6 (even) → order
+  2. `TermOption` (`report.types.ts`) gained an `order?: number` field —
+  it was already in the real API JSON response, just never typed before.
+- Picking Semester N computes `tingkatIndex = ceil(N/2)`, filters classrooms
+  to that tingkat's `grade_level`, and once a kelas is picked, resolves
+  `term_id` by fetching that classroom's terms and matching `order`.
+
+`GET /classrooms/{id}/leger` itself is unchanged (still `?term_id=` +
+`?report_type=`) — the cascade only changes how the frontend arrives at a
+`classroom_id`/`term_id` pair before calling it.
+
+### 2. Print/PDF rebuild (F4, letterhead, dynamic per-school content)
+
+"PDF" in this codebase has always meant the browser's native
+`window.print()` + `@media print` CSS (see `ReportCardDetailView.vue`,
+evaluation's `LaporanCetakView.vue`) — there is no Go PDF library anywhere
+in this repo, and none was added. The rebuild is a **new, separate** view,
+`web/src/views/report/admin/ReportCardPrintView.vue` (route
+`rapor/:id/cetak`, name `report-print`), reachable from
+`ReportCardDetailView.vue`'s new "Cetak Rapor (Format Resmi)" button.
+`ReportCardDetailView.vue`'s own on-screen 7-column table and its existing
+"Cetak / Simpan PDF" button are **unchanged** — the task was explicit that
+the on-screen edit table already matches the bug report's spec and print
+rendering is a separate concern from it.
+
+The print view matches the reference templates' structure: letterhead
+(logo + name + address) → "LAPORAN HASIL BELAJAR" title → report-type
+subtitle → "TAHUN AJARAN" → student info block (Nama/NISN/Nama
+Sekolah/Alamat left, Fase/Kelas/Semester/Tahun Ajaran right — Fase has no
+source data anywhere in the system and renders as a literal "-", not
+fabricated) → "I. INTRAKURIKULER" grouped subject table → (semester type
+only) "D. JUMLAH DAN RATA-RATA NILAI" summary → signature block
+(date/Orang Tua-Wali/Wali Kelas/Kepala Sekolah). **F4 paper size** is set
+via `@page { size: 215mm 330mm; margin: 15mm; }` inside a `@media print`
+block — the only place a browser print pipeline reads page dimensions
+from.
+
+- `report_type=bayangan` (the quarterly report) renders the Tengah Semester
+  layout: NO / MATA PELAJARAN / NILAI FORMATIF (30%) / NILAI PRAKTIK (40%)
+  / **NILAI PTS (30%)** / NILAI AKHIR. The template's own label is "PTS"
+  (Penilaian Tengah Semester), not "STS" — this is display-only, the
+  underlying `sts_score` field/bucket name is unchanged.
+- `report_type=semester` renders the Akhir Semester layout: NO / MATA
+  PELAJARAN / NILAI AKHIR / CAPAIAN KOMPETENSI, where the two narrative
+  sub-lines reuse Deskripsi Rapor's existing fields rather than adding new
+  ones: **Capaian Pembelajaran = `final_note`** (the existing Capaian SAS
+  narrative) and **Kemajuan Belajar = `mid_note`** (the existing Capaian
+  STS narrative, read as "progress during the semester"). No new DB
+  columns for this.
+- Subject grouping ("A. Mata Pelajaran Umum / B. Kejuruan / ...") reuses
+  academic-service's existing `subjects.subject_group` field (already used
+  for religion-elective grouping) — resolved **live**, not cached, via
+  `enrichSubjectGroups` in `handler/report_card.go`
+  (`ReportCardSubject.SubjectGroup`, API-only, same "computed at read time,
+  not stored" pattern as `GradeLabel`). Schools that haven't set a
+  `subject_group` on any subject get a flat, ungrouped table instead of an
+  assumed 4-way SMK split.
+- **II. KOKURIKULER** is intentionally **omitted** — there is no
+  co-curricular-activity data model anywhere in this codebase to render;
+  building one would be a new feature, not a print-formatting change. Left
+  as a `ponytail:` comment in `ReportCardPrintView.vue`.
+- Halaman 2's "Konsentrasi Keahlian continuation + signature page" isn't
+  reproduced as a literal second physical page — the print view renders
+  every subject group in one continuous flow (the browser paginates a long
+  table naturally) with `break-inside: avoid` on each group's table, which
+  achieves the same effect without hardcoding a literal group-name string
+  no school is guaranteed to use.
+
+**Dynamic school info** (the multi-tenancy requirement — every school must
+see its own identity, never the reference school's): `GET
+/report-cards/{id}` now resolves a `school` field
+(`model.SchoolInfo`: name/address/city/province/logo) **live** from
+identity-service's already-internal-key-reachable `GET /schools/{id}`
+(`upstream.IdentityClient.GetSchool`, `fetchSchoolInfo` in
+`handler/report_card.go`) — deliberately **not** cached onto `report_cards`
+like the other header-snapshot fields (student_name/classroom_name/etc.).
+Reasoning: that caching pattern exists specifically to avoid multiplying
+upstream calls across list/per-row reads (Leger, generate's N-student
+loop); `GetReportCard` is a single-card read, so one extra call per open of
+the print view is cheap, and it means every read always reflects the
+school's current name/address rather than whatever was cached at the last
+`generate` run. Same non-cached rationale for `SubjectGroup` above. Kepala
+Sekolah (`principal_name`) and Wali Kelas (`homeroom_teacher_name`) were
+already resolved dynamically per-school before this session (identity's
+Organisasi Sekolah / academic's homeroom assignment) and are unchanged.
+Akreditasi was **not** added — identity-service's `schools` table has no
+such field, and adding one is data-entry plumbing out of scope here.
+
+### 3. Import Template (upload/store, migration 0008)
+
+New table `report_templates` (school_id, template_type, file_name,
+content_type, file_size, file_data BYTEA, uploaded_by, uploaded_at; UNIQUE
+`(school_id, template_type)`), storing the raw bytes **directly in
+Postgres**, not a filesystem path or object store — no prior convention
+for storing a raw uploaded file exists anywhere in this codebase (compare
+`services/evaluation`'s dimensi_lulusan import, which parses an uploaded
+.xlsx into DB rows immediately and never persists the file itself), and
+report-service's whole architecture is otherwise "just Postgres" — adding
+a filesystem volume or MinIO/S3 dependency for one small (<10MB),
+rarely-written admin file-of-record per school would be new infrastructure
+for very little payoff. Reconsider if templates need CDN serving or grow
+past a few MB.
+
+New endpoints (admin/superadmin write, staff read, all JWT-gated):
+```
+GET  /settings/report-templates                    -- list metadata (no file bytes) for this school
+POST /settings/report-templates                     -- multipart: template_type + file (.xlsx, max 10MB)
+GET  /settings/report-templates/{type}/download      -- raw file, admin verification/record-keeping
+```
+`template_type` is one of `tengah_semester` / `akhir_semester` /
+`akhir_semester_hal2`, matching the 3 reference files.
+
+**Deliberate scope cut** (explicitly out of scope per the task, called out
+here and as a `ponytail:` comment at the top of
+`handler/report_template.go`): this is **upload/storage/replace only**.
+The uploaded `.xlsx` is never parsed or rendered from — actual print
+output still comes from the hardcoded-but-dynamic-per-school layout in
+`ReportCardPrintView.vue` described above. Building a generic "render PDF
+from an arbitrary uploaded template" engine was explicit YAGNI for this
+pass. Upgrade path if a school genuinely needs a custom layout: parse the
+uploaded sheet's cell positions the same way `evaluation`'s
+dimensi_lulusan import reads a fixed header row (already uses `excelize`,
+if that dependency is ever added to report-service), and feed the result
+into the print view instead of/alongside the hardcoded template.
+
+Frontend: `ReportCardGenerateView.vue` gained an "Import Template" button
+opening a popup — pick a rapor-type, see the currently-uploaded file (name
++ date, with a Download button reusing the blob+`URL.createObjectURL`
+pattern already used elsewhere in this codebase for authenticated
+downloads), upload a replacement.
 
 ## Report structure (Sekolah GPM 2026-08-05 revision)
 
@@ -346,7 +503,60 @@ curl -s "http://localhost:8086/formative?term_id=$TERM&classroom_subject_id=<cs_
 curl -s -X PUT http://localhost:8086/formative -H "Authorization: Bearer $GURU_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"term_id":"'"$TERM"'","classroom_subject_id":"<cs_id>","student_id":"<student_id>","assessment_type_id":"<type_id>","score":85}'
+
+# Import Template (migration 0008) -- upload/list/download reference .xlsx
+# files, storage/record-keeping only (see "Print/PDF, Leger cascade,
+# Import Template" section above for the scope-cut note).
+curl -s http://localhost:8086/settings/report-templates -H "Authorization: Bearer $ADMIN_TOKEN"
+curl -s -X POST http://localhost:8086/settings/report-templates -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -F "template_type=tengah_semester" -F "file=@Format Rapor Tengah Semester (3 Bulan).xlsx"
+curl -s http://localhost:8086/settings/report-templates/tengah_semester/download \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -o downloaded.xlsx
+
+# Official-format print/PDF -- GET /report-cards/{id} now includes a live
+# `school` field (name/address/city/province/logo); the F4/letterhead
+# rendering itself is entirely client-side (ReportCardPrintView.vue,
+# window.print()), report-service returns structured JSON only, unchanged
+# from the original "no Go PDF library" decision.
+curl -s http://localhost:8086/report-cards/<id> -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
+
+## What was tested (2026-08-11 print-template session: Leger cascade, print/PDF rebuild, Import Template)
+
+- `go build ./...`, `go vet ./...`, `gofmt -l .` clean. `npx vue-tsc -b`
+  clean (0 errors); `npx vite build` succeeded (`ReportCardPrintView`,
+  `SemesterKelasPicker` bundled without error).
+- `docker compose up -d --build` → healthy; `go run ./cmd/migrate up` →
+  `version=8 dirty=false`. Verified via `psql \d report_templates`: table
+  exists with the expected columns, `UNIQUE (school_id, template_type)`,
+  and the `template_type` CHECK constraint.
+- Import Template: `POST /settings/report-templates` (multipart,
+  `template_type=tengah_semester` + a real `.xlsx`-named file) → `200`
+  with metadata (no file bytes in the response). `GET
+  /settings/report-templates` → list shows the one uploaded row. `GET
+  /settings/report-templates/tengah_semester/download` → downloaded bytes
+  `diff`ed byte-identical against the originally uploaded file.
+- Dynamic school info (`GET /report-cards/{id}`'s new `school` field):
+  inserted a `report_cards` row directly via SQL (no academic/exam/
+  identity services running) → `GET` returned `200` with no `school` key
+  at all (graceful degrade, not a crash) when identity-service is
+  unreachable. Then ran report-service via `go run ./cmd/server` on the
+  host (pointed at the dockerized Postgres) against a throwaway Python
+  stub standing in for identity-service's `GET /schools/{id}` (returning a
+  deliberately *non*-GPM school name/address/city/province, "SMK Uji Coba
+  Mandiri") — `GET /report-cards/{id}` came back with
+  `"school":{"name":"SMK Uji Coba Mandiri",...}`, proving the enrichment
+  is genuinely per-school/dynamic, not hardcoded, and doesn't crash either
+  way. Test report card row deleted afterward.
+- Not exercised end-to-end in this session (no academic/exam services
+  running alongside report-service, same constraint as the 2026-08-11
+  dynamic-report-structure session below): the Leger semester+kelas
+  cascade against real classroom/term data, `enrichSubjectGroups` against
+  a real `subject_group` value, and the print view's rendered output in an
+  actual browser. `vue-tsc`/`vite build` passing is the fallback proof the
+  new Vue components/types are internally consistent; the backend
+  enrichment's live-fetch behavior above is proven directly.
+- `docker compose down` → clean teardown.
 
 ## What was tested (2026-08-11 dynamic-report-structure session)
 
