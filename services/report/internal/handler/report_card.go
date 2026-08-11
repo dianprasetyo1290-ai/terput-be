@@ -62,6 +62,58 @@ func classifyExamType(mappingRapor, name string) string {
 	return classifyMapping(name)
 }
 
+// resolveExamBucketScore (item 5): finds one student's exam-based score
+// for a subject+bucket ("sts"/"sas") within a classroom+term, for the
+// Penilaian Formatif dropdown's STS/SAS auto-populate. Deliberately reuses
+// the same ListExams/ListExamTypes/GetScores calls (and classifyExamType
+// bucketing) GenerateReportCards already relies on instead of adding a new
+// exam-service endpoint -- exam-service's existing GET /exams/{id}/scores
+// (all students for one exam) already carries everything needed; this
+// just filters client-side for the one student being asked about. A
+// small classroom makes the extra round-trips cheap; this is a
+// single-teacher-loading-a-screen path, not a hot loop.
+func (h *Handler) resolveExamBucketScore(ctx context.Context, classroomID, termID, academicYearID, subjectID, studentID, bucket string) *float64 {
+	exams, err := h.d.Exam.ListExams(ctx, classroomID, termID)
+	if err != nil {
+		return nil
+	}
+	examTypes, err := h.d.Exam.ListExamTypes(ctx, academicYearID)
+	if err != nil {
+		return nil
+	}
+	mappingByType := map[string]string{}
+	nameByType := map[string]string{}
+	for _, et := range examTypes {
+		mappingByType[et.ID] = et.MappingRapor
+		nameByType[et.ID] = et.Name
+	}
+	sum, count := 0.0, 0
+	for _, e := range exams {
+		if e.SubjectID != subjectID {
+			continue
+		}
+		m := mappingByType[e.ExamTypeID]
+		if m == "" || classifyExamType(m, nameByType[e.ExamTypeID]) != bucket {
+			continue
+		}
+		scores, err := h.d.Exam.GetScores(ctx, e.ID)
+		if err != nil {
+			continue
+		}
+		for _, sc := range scores {
+			if sc.StudentID == studentID && sc.Score != nil {
+				sum += *sc.Score
+				count++
+			}
+		}
+	}
+	if count == 0 {
+		return nil
+	}
+	avg := sum / float64(count)
+	return &avg
+}
+
 func isAdmin(c *common.Claims) bool {
 	return c != nil && (c.ActiveRole == "admin" || c.ActiveRole == "superadmin")
 }
@@ -96,9 +148,31 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "classroom_id and term_id query params are required")
 		return
 	}
+	// Item 3: Rapot Bayangan is the same generate flow, just a different
+	// report_type (which weight formula/subject columns get populated,
+	// see calcSubjectScores) and a required period_label (e.g. "Triwulan
+	// 1") since it's a quarterly report, not tied 1:1 to a semester term.
+	reportType := r.URL.Query().Get("report_type")
+	if reportType == "" {
+		reportType = "semester"
+	}
+	if reportType != "semester" && reportType != "bayangan" {
+		common.WriteError(w, http.StatusBadRequest, "report_type must be 'semester' or 'bayangan'")
+		return
+	}
+	periodLabel := r.URL.Query().Get("period_label")
+	if reportType == "bayangan" && periodLabel == "" {
+		common.WriteError(w, http.StatusBadRequest, "period_label is required when report_type=bayangan (e.g. 'Triwulan 1')")
+		return
+	}
 	schoolID := resolveSchoolID(r, claims)
 	if schoolID == "" {
 		common.WriteError(w, http.StatusBadRequest, "school_id could not be resolved (superadmin must pass ?school_id=)")
+		return
+	}
+	weights, err := h.d.Store.GetWeightSettings(r.Context(), schoolID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to load weight settings")
 		return
 	}
 
@@ -197,6 +271,13 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 		nameByExamType[et.ID] = et.Name
 	}
 
+	// examCategory only tracks "sts"/"sas" now -- item 2 restructures Nilai
+	// Akhir into an explicit Formatif/STS/SAS weighted formula (see
+	// calcSubjectScores below), so exams that classify as anything else
+	// (old "sumatif"/"formatif"/"other" pooling) no longer feed a report
+	// column; only exam-service's STS/SAS results still do, and Nilai
+	// Formatif is now sourced purely from formative_grades (item 5's
+	// dropdown-entered scores), not blended with misc exam scores.
 	examsBySubject := map[string][]string{}
 	examCategory := map[string]string{} // exam ID -> "sts" | "sas" | ""
 	for _, e := range exams {
@@ -204,8 +285,12 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 		if m == "" {
 			continue // not mapped to any report bucket, e.g. old "TKA" type
 		}
+		cat := classifyExamType(m, nameByExamType[e.ExamTypeID])
+		if cat != "sts" && cat != "sas" {
+			continue
+		}
 		examsBySubject[e.SubjectID] = append(examsBySubject[e.SubjectID], e.ID)
-		examCategory[e.ID] = classifyExamType(m, nameByExamType[e.ExamTypeID])
+		examCategory[e.ID] = cat
 	}
 	scoresByExam := map[string]map[string]*float64{}
 	for _, e := range exams {
@@ -229,7 +314,7 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 
 	for _, stu := range roster {
 		studentID := stu.StudentUserID
-		rc, isNew, err := h.d.Store.GetOrCreateReportCard(ctx, schoolID, academicYearID, termID, classroomID, studentID)
+		rc, isNew, err := h.d.Store.GetOrCreateReportCard(ctx, schoolID, academicYearID, termID, classroomID, studentID, reportType, periodLabel)
 		if err != nil || rc == nil {
 			warnings["db_"+studentID] = "failed to create report card row"
 			continue
@@ -276,21 +361,13 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 			hadir, sakit, izin, tanpa = &hd, &sk, &iz, &tk
 		}
 		_ = h.d.Store.UpdateAttendance(ctx, rc.ID, hadir, sakit, izin, tanpa, nowPtr(), attErr)
-
-		// Nilai Akhir's attendance component: kehadiran as a percentage of
-		// every recorded session this term (hadir / total). One value per
-		// student, shared across every subject below -- attendance is a
-		// classroom-level fact, not a per-subject one. nil (not 0) when no
-		// attendance was recorded at all, so a subject with only exam/
-		// formatif data isn't unfairly dragged down by a missing summary.
-		var attendancePct *float64
-		if hadir != nil && sakit != nil && izin != nil && tanpa != nil {
-			total := *hadir + *sakit + *izin + *tanpa
-			if total > 0 {
-				pct := 100 * float64(*hadir) / float64(total)
-				attendancePct = &pct
-			}
-		}
+		// Note: attendance is still recorded/displayed on the report card
+		// header (above) but item 2 dropped it from the Nilai Akhir formula
+		// -- the client's explicit spec is "Nilai Akhir dari Nilai Formatif
+		// + Nilai STS + Nilai SAS" only (see calcSubjectScores), superseding
+		// the old ad-hoc 90/10 academic/attendance blend that used to live
+		// here (that was this codebase's own "simplest reasonable call",
+		// never a client requirement).
 
 		// Agama religion-based filtering (item 13, V4, same rule already
 		// applied in exam/attendance services): `subjects` above is every
@@ -313,110 +390,102 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 			if allowedSubjects != nil && !allowedSubjects[subj.SubjectID] {
 				continue
 			}
-			var computed, stsScore, sasScore *float64
 			var sErr *string
 			examIDs := examsBySubject[subj.SubjectID]
-			
-			sumatifSum := 0.0
-			sumatifCount := 0
-			formatifExamSum := 0.0
-			formatifExamCount := 0
-			
+			if len(examIDs) == 0 && exams == nil {
+				e := "exam-service unavailable"
+				sErr = &e
+			}
+
+			// Nilai STS / Nilai SAS: averaged over this subject's exams
+			// whose ExamType.mapping_rapor classifies as that bucket (same
+			// classifyExamType used everywhere else in this handler).
 			stsSum, sasSum := 0.0, 0.0
 			stsCount, sasCount := 0, 0
-			
-			if len(examIDs) == 0 {
-				if exams == nil {
-					e := "exam-service unavailable"
-					sErr = &e
+			for _, eid := range examIDs {
+				scoresForExam, ok := scoresByExam[eid]
+				if !ok {
+					continue
 				}
+				sc, ok := scoresForExam[studentID]
+				if !ok || sc == nil {
+					continue
+				}
+				switch examCategory[eid] {
+				case "sts":
+					stsSum += *sc
+					stsCount++
+				case "sas":
+					sasSum += *sc
+					sasCount++
+				}
+			}
+			var stsScore, sasScore *float64
+			if stsCount > 0 {
+				avg := stsSum / float64(stsCount)
+				stsScore = &avg
+			}
+			if sasCount > 0 {
+				avg := sasSum / float64(sasCount)
+				sasScore = &avg
+			}
+
+			// Nilai Formatif / Nilai Praktik: item 5's dropdown-entered
+			// formative_grades, pooled per bucket (weighted by each
+			// assessment type's admin-configured weight_percent).
+			buckets, berr := h.d.Store.GetFormativeBucketScores(ctx, schoolID, termID, subj.ID, studentID)
+			if berr != nil {
+				w := "failed to load formative grades"
+				sErr = &w
+			}
+			var formatifScore, praktikScore *float64
+			count := stsCount + sasCount
+			if b, ok := buckets["formatif"]; ok {
+				formatifScore = b.Score
+				count += b.Count
+			}
+			if b, ok := buckets["praktik"]; ok {
+				praktikScore = b.Score
+				count += b.Count
+			}
+
+			// Item 2/3: Nilai Akhir (semester) / Nilai Sementara (bayangan)
+			// are each an admin-configurable weighted formula over the
+			// buckets above -- see report_weight_settings (item 4). A
+			// missing bucket (e.g. no STS exam yet) is excluded rather than
+			// treated as 0 (model.WeightedAverage renormalizes over what's
+			// present), so a subject isn't unfairly dragged down just
+			// because one input hasn't arrived yet.
+			var computed *float64
+			if reportType == "bayangan" {
+				// Client's text literally says "kalkulasi dari nilai
+				// formatif dan sts" but the weight list right next to it
+				// gives three components (formatif 30/praktik 40/sts 30) --
+				// using all three since that's what the weights describe;
+				// the two-component sentence appears to be the source
+				// text's own inconsistency, not a deliberate exclusion of
+				// Nilai Praktik (which the client lists as its own column).
+				computed = model.WeightedAverage(
+					model.WeightedPair{Value: formatifScore, Weight: weights.SementaraFormatifWeight},
+					model.WeightedPair{Value: praktikScore, Weight: weights.SementaraPraktikWeight},
+					model.WeightedPair{Value: stsScore, Weight: weights.SementaraStsWeight},
+				)
 			} else {
-				for _, eid := range examIDs {
-					scoresForExam, ok := scoresByExam[eid]
-					if !ok {
-						continue
-					}
-					if sc, ok := scoresForExam[studentID]; ok && sc != nil {
-						cat := examCategory[eid]
-						switch cat {
-						case "sts":
-							stsSum += *sc
-							stsCount++
-							sumatifSum += *sc
-							sumatifCount++
-						case "sas":
-							sasSum += *sc
-							sasCount++
-							sumatifSum += *sc
-							sumatifCount++
-						case "sumatif":
-							sumatifSum += *sc
-							sumatifCount++
-						default:
-							// "formatif" or anything else mapped
-							formatifExamSum += *sc
-							formatifExamCount++
-						}
-					}
-				}
-				if stsCount > 0 {
-					avg := stsSum / float64(stsCount)
-					stsScore = &avg
-				}
-				if sasCount > 0 {
-					avg := sasSum / float64(sasCount)
-					sasScore = &avg
-				}
+				computed = model.WeightedAverage(
+					model.WeightedPair{Value: formatifScore, Weight: weights.AkhirFormatifWeight},
+					model.WeightedPair{Value: stsScore, Weight: weights.AkhirStsWeight},
+					model.WeightedPair{Value: sasScore, Weight: weights.AkhirSasWeight},
+				)
 			}
-			
-			dbFormativeSum, dbFormativeCount := h.d.Store.SumFormativeGrades(ctx, termID, subj.ID, studentID)
-			
-			var pureFormatif *float64
-			if dbFormativeCount > 0 {
-				avg := dbFormativeSum / float64(dbFormativeCount)
-				pureFormatif = &avg
-			}
-			
-			totalFormatifSum := formatifExamSum + dbFormativeSum
-			totalFormatifCount := formatifExamCount + dbFormativeCount
-			
-			var avgFormatif *float64
-			if totalFormatifCount > 0 {
-				avg := totalFormatifSum / float64(totalFormatifCount)
-				avgFormatif = &avg
-			}
-			
-			var avgSumatif *float64
-			if sumatifCount > 0 {
-				avg := sumatifSum / float64(sumatifCount)
-				avgSumatif = &avg
-			}
-			
-			if avgSumatif != nil && avgFormatif != nil {
-				val := 0.7*(*avgFormatif) + 0.3*(*avgSumatif)
-				computed = &val
-			} else if avgFormatif != nil {
-				computed = avgFormatif
-			} else if avgSumatif != nil {
-				computed = avgSumatif
-			}
-			
-			count := totalFormatifCount + sumatifCount
-			// Nilai Akhir = weighted blend of academic performance (exam +
-			// formatif, pooled above) and kehadiran -- illustrative weights
-			// per the spec ("bobot bisa disesuaikan kebijakan sekolah"), not
-			// meant to be precise, just a real accumulation instead of an
-			// unweighted "Nilai Berjalan" that ignored attendance entirely.
-			// Skipped when either side has no data, so a subject with only
-			// exam/formatif and no attendance record yet isn't dragged to a
-			// half-weighted score against a phantom 0.
-			const academicWeight, attendanceWeight = 0.9, 0.1
-			if computed != nil && attendancePct != nil {
-				blended := academicWeight*(*computed) + attendanceWeight*(*attendancePct)
-				computed = &blended
-			}
+
 			name, code := subj.Name, subj.Code
-			_ = h.d.Store.UpsertSubjectComputed(ctx, rc.ID, schoolID, subj.SubjectID, &name, &code, computed, pureFormatif, stsScore, sasScore, count, nowPtr(), sErr)
+			if reportType == "bayangan" {
+				// sas_score doesn't apply to Rapot Bayangan's column set.
+				_ = h.d.Store.UpsertSubjectComputed(ctx, rc.ID, schoolID, subj.SubjectID, &name, &code, computed, formatifScore, stsScore, nil, praktikScore, count, nowPtr(), sErr)
+			} else {
+				// praktik_score doesn't apply to the semester report's column set.
+				_ = h.d.Store.UpsertSubjectComputed(ctx, rc.ID, schoolID, subj.SubjectID, &name, &code, computed, formatifScore, stsScore, sasScore, nil, count, nowPtr(), sErr)
+			}
 		}
 
 		full, _ := h.loadReportCard(ctx, rc.ID)
@@ -448,15 +517,34 @@ func (h *Handler) loadReportCard(ctx context.Context, id string) (*model.ReportC
 		return nil, err
 	}
 	bands, _ := h.d.Store.GetGradeBands(ctx, rc.SchoolID)
+	applyGradeLabels(subjects, bands)
+	rc.Subjects = subjects
+	return rc, nil
+}
+
+// applyGradeLabels resolves predikat labels against a school's grade
+// bands: GradeLabel for the blended final score (as before), plus
+// StsLabel/SasLabel (item 2's "Capaian STS"/"Capaian SAS") applying the
+// exact same bands mechanism to StsScore/SasScore individually. Computed
+// at read time everywhere a report card is returned, never stored.
+func applyGradeLabels(subjects []model.ReportCardSubject, bands []model.GradeBand) {
 	for i := range subjects {
 		if f := subjects[i].Final(); f != nil {
 			if label := model.LabelFor(*f, bands); label != "" {
 				subjects[i].GradeLabel = &label
 			}
 		}
+		if subjects[i].StsScore != nil {
+			if label := model.LabelFor(*subjects[i].StsScore, bands); label != "" {
+				subjects[i].StsLabel = &label
+			}
+		}
+		if subjects[i].SasScore != nil {
+			if label := model.LabelFor(*subjects[i].SasScore, bands); label != "" {
+				subjects[i].SasLabel = &label
+			}
+		}
 	}
-	rc.Subjects = subjects
-	return rc, nil
 }
 
 func (h *Handler) GetReportCard(w http.ResponseWriter, r *http.Request) {
@@ -483,14 +571,7 @@ func (h *Handler) GetReportCard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bands, _ := h.d.Store.GetGradeBands(r.Context(), rc.SchoolID)
-	for i := range subjects {
-		if f := subjects[i].Final(); f != nil {
-			label := model.LabelFor(*f, bands)
-			if label != "" {
-				subjects[i].GradeLabel = &label
-			}
-		}
-	}
+	applyGradeLabels(subjects, bands)
 	rc.Subjects = subjects
 	common.WriteJSON(w, http.StatusOK, rc, nil)
 }
@@ -539,13 +620,7 @@ func (h *Handler) ListStudentReportCards(w http.ResponseWriter, r *http.Request)
 		subjects, err := h.d.Store.ListSubjects(r.Context(), rc.ID)
 		if err == nil {
 			bands, _ := h.d.Store.GetGradeBands(r.Context(), rc.SchoolID)
-			for i := range subjects {
-				if f := subjects[i].Final(); f != nil {
-					if label := model.LabelFor(*f, bands); label != "" {
-						subjects[i].GradeLabel = &label
-					}
-				}
-			}
+			applyGradeLabels(subjects, bands)
 			rc.Subjects = subjects
 		}
 		out = append(out, rc)

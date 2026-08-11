@@ -8,27 +8,133 @@ academic, attendance, exam, evaluation) follows.
 
 This is an **aggregator**, not a source of truth for student/classroom/exam
 data — it owns only report-configuration/override state (`report_cards`,
-`report_card_subjects`, `report_grade_bands`) and pulls everything else
+`report_card_subjects`, `report_grade_bands`, `report_assessment_types`,
+`report_weight_settings`, `formative_grades`) and pulls everything else
 (student names, classroom/term info, attendance summaries, exam scores)
 from sibling services over internal HTTP. See "Expected upstream
 contracts" below for exactly what it expects those services to expose.
 
+## Report structure (Sekolah GPM 2026-08-05 revision)
+
+This section documents the 2026-08-11 dynamic-report-structure work
+(migration `0007_dynamic_report_settings`) on top of the original design
+below.
+
+1. **Leger is view/print only.** The old "Detail" drill-down button/route
+   was removed from `LegerView.vue` — Leger is a read-only classroom x
+   term grid with a print button, nothing else. `GET .../leger` gained a
+   `?report_type=` filter (default `semester`) so it never mixes Rapot
+   Bayangan rows into the semester grid.
+2. **Generate Rapor's columns are now**: Mata Pelajaran, Nilai Formatif,
+   Nilai STS, Nilai SAS, Capaian STS, Capaian SAS, Nilai Akhir. The old
+   "Override"/"Sinkronisasi" columns are gone; correcting Nilai Akhir is
+   now an inline edit affordance on that cell (still the same
+   `PATCH .../subjects/{subject_id}` override, just a different UI), and a
+   sync problem shows as an inline warning next to the subject name
+   instead of an always-visible column.
+3. **Rapot Bayangan** (`report_type=bayangan`) is a second, quarterly
+   report sharing `report_cards`/`report_card_subjects` and the whole
+   draft/finalize/unlock lifecycle with the regular semester report —
+   only the weight formula and which columns get populated differ (see
+   `calcSubjectScores`-equivalent logic in `GenerateReportCards`). Its
+   columns: Mata Pelajaran, Nilai Formatif, Nilai Praktik, Nilai STS,
+   Capaian STS, Nilai Sementara. `period_label` (e.g. `"Triwulan 1"`)
+   disambiguates multiple bayangan reports within one term, since
+   academic-service's `Term` only models ganjil/genap, not quarters.
+   Nilai Sementara uses all three weighted components
+   (formatif/praktik/sts) per the client's explicit weight list, even
+   though the client's own prose only says "formatif dan sts" — treated
+   as the source text's own inconsistency (Nilai Praktik is listed as its
+   own report column, so it isn't dropped).
+4. **Dynamic, admin-configurable report structure** — the architectural
+   core of this revision, see "Dynamic report configuration" below.
+5. **Penilaian Formatif (guru)** is now a dropdown-per-tipe-penilaian
+   picker instead of a spreadsheet add/remove-column grid: pick one
+   `report_assessment_types` row, get one score column for the roster,
+   save per student. STS/SAS-tagged types auto-suggest a score from
+   exam-service (still fully editable — deliberately, so a guru can raise
+   a low score) via `GET /formative`'s `assessment_type_id` param.
+
+### Dynamic report configuration (`report_assessment_types` / `report_weight_settings`)
+
+Two per-school tables replace every previously-hardcoded weight:
+
+- **`report_assessment_types`** — the "tipe penilaian" an admin defines
+  (tugas, praktek, STS, SAS, ...). Each row has a `bucket`
+  (`formatif`|`praktik`|`sts`|`sas` — which report column it feeds),
+  its own `weight_percent` (pools multiple types sharing a bucket, e.g.
+  Tugas 60% + Kuis 40% → one Nilai Formatif), and `exam_linked` (marks
+  STS/SAS-style types whose score can auto-populate from exam-service).
+  This is also what powers the Penilaian Formatif dropdown — same table,
+  two consumers (admin CRUD screen, guru picker).
+- **`report_weight_settings`** — one row per school, the top-level
+  formula weights for Nilai Akhir (`akhir_formatif_weight` /
+  `akhir_sts_weight` / `akhir_sas_weight`) and Nilai Sementara
+  (`sementara_formatif_weight` / `sementara_praktik_weight` /
+  `sementara_sts_weight`). A school with no row gets illustrative
+  defaults (`model.DefaultWeightSettings`), same fallback pattern as
+  `report_grade_bands`.
+- Both are **per-school only, not per-academic-year** — the simplest
+  shape that satisfies "diatur di Admin"; a school's grading policy
+  changing mid-year was judged unlikely enough not to warrant threading
+  `academic_year_id` through every read here too (YAGNI — add it if a
+  real school needs different weights across years).
+- `model.WeightedAverage` (in `internal/model/model.go`) is the one
+  calculation function both Nilai Akhir and Nilai Sementara go through:
+  a normalized weighted average that **excludes** a missing bucket
+  (e.g. no STS exam yet) rather than treating it as zero, renormalizing
+  the remaining weights to fill the gap.
+- **Design note for whoever builds Wali Kelas's scoped Generate Rapor
+  next**: `GenerateReportCards` (handler/report_card.go) already takes
+  `report_type`/`period_label` as query params and loads weights once per
+  call via `h.d.Store.GetWeightSettings(schoolID)` — a Wali Kelas-scoped
+  variant should reuse this same handler/calc path with an added
+  classroom-ownership check, not reimplement the scoring, since the
+  bucket-pooling (`GetFormativeBucketScores`) and STS/SAS exam
+  aggregation are the parts worth not duplicating.
+- Item 5's STS/SAS auto-populate (`resolveExamBucketScore`, same file)
+  deliberately adds **no new exam-service endpoint** — it composes
+  exam-service's existing `GET /exams?classroom_id=&term_id=`,
+  `GET /exam-types?academic_year_id=`, and `GET /exams/{id}/scores`
+  (already used by `GenerateReportCards`) client-side, filtering to one
+  student. Checked exam-service's real routes (`internal/handler/scores.go`,
+  `router.go`) first — no per-student endpoint exists, but the
+  classroom-wide one already carries everything needed, so adding a new
+  endpoint would have been redundant.
+
 ## Data model
 
-- **`report_cards`** — one row per `(student_id, classroom_id, term_id)`.
-  Header + status envelope: `status` (`draft`|`finalized`), `finalized_at/by`,
-  `unlocked_at/by`, a cached header snapshot (student name/NISN, classroom
-  name, term name) and a cached attendance summary (hadir/sakit/izin/tanpa
-  keterangan), each with a `*_synced_at`/`*_sync_error` so the UI can show
-  "last synced" / "could not reach attendance-service" honestly.
+- **`report_cards`** — one row per `(student_id, classroom_id, term_id,
+  report_type, period_label)`. `report_type` (`semester`|`bayangan`,
+  default `semester`) and `period_label` (quarterly label, `""` for
+  semester rows) were added in migration 0007 — see "Report structure"
+  above. Header + status envelope: `status` (`draft`|`finalized`),
+  `finalized_at/by`, `unlocked_at/by`, a cached header snapshot (student
+  name/NISN, classroom name, term name) and a cached attendance summary
+  (hadir/sakit/izin/tanpa keterangan), each with a `*_synced_at`/
+  `*_sync_error` so the UI can show "last synced" / "could not reach
+  attendance-service" honestly.
 - **`report_card_subjects`** — one row per `(report_card_id, subject_id)`.
-  `computed_score` is the aggregated (average) value pulled from
-  exam-service; `override_score`, if set, is what an admin manually
-  adjusted it to — **both are kept**, never destroyed by a regenerate, so
-  the UI can show "computed vs overridden". `final_score` (API-only, not a
-  DB column) = `override_score` if set, else `computed_score`.
-  `grade_label` (predikat A/B/C/D) is resolved at read time against
-  `report_grade_bands`.
+  `computed_score` is Nilai Akhir (semester rows) or Nilai Sementara
+  (bayangan rows) — an admin-configurable weighted formula over
+  `formatif_score`/`sts_score`/`sas_score` (semester) or
+  `formatif_score`/`praktik_score`/`sts_score` (bayangan), see "Dynamic
+  report configuration" above. `override_score`, if set, is what an admin
+  manually adjusted it to — **both are kept**, never destroyed by a
+  regenerate, so the UI can show "computed vs overridden". `final_score`
+  (API-only, not a DB column) = `override_score` if set, else
+  `computed_score`. `grade_label` (predikat for the final score),
+  `sts_label`/`sas_label` (Capaian STS/Capaian SAS — the same
+  `report_grade_bands` mechanism applied to `sts_score`/`sas_score`
+  individually) are all resolved at read time, not stored.
+- **`report_assessment_types`** / **`report_weight_settings`** — see
+  "Dynamic report configuration" above.
+- **`formative_grades`** — one row per `(term_id, classroom_subject_id,
+  student_id, assessment_type_id)`, the guru's Penilaian Formatif entry
+  (item 5). Replaced the old `order_index` spreadsheet-column shape in
+  migration 0007; `formative_headers` (the old per-column display name
+  table) was dropped entirely, superseded by
+  `report_assessment_types.name`.
 - **`report_grade_bands`** — optional per-school predikat thresholds
   (`min_score`–`max_score` → `label`). If a school has none, a built-in
   Kurikulum-Merdeka-style default (90-100=A, 80-89.99=B, 70-79.99=C,
@@ -214,11 +320,82 @@ curl -s -X PATCH "http://localhost:8086/report-cards/<id>/subjects/<subject_id>"
 curl -s -X POST "http://localhost:8086/report-cards/<id>/finalize" -H "Authorization: Bearer $ADMIN_TOKEN"
 curl -s -X PUT  "http://localhost:8086/report-cards/<id>/unlock"   -H "Authorization: Bearer $ADMIN_TOKEN"
 
-# Leger: classroom x term rekap grid (admin/guru/superadmin only)
-curl -s "http://localhost:8086/classrooms/$CLASSROOM/leger?term_id=$TERM" -H "Authorization: Bearer $ADMIN_TOKEN"
+# Leger: classroom x term rekap grid (admin/guru/superadmin only), scoped
+# to one report_type (default "semester")
+curl -s "http://localhost:8086/classrooms/$CLASSROOM/leger?term_id=$TERM&report_type=semester" -H "Authorization: Bearer $ADMIN_TOKEN"
+
+# Rapot Bayangan: same generate endpoint, report_type=bayangan requires period_label
+curl -s -X POST "http://localhost:8086/report-cards/generate?classroom_id=$CLASSROOM&term_id=$TERM&report_type=bayangan&period_label=Triwulan%201" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+
+# Item 4: dynamic report settings (admin CRUD)
+curl -s http://localhost:8086/settings/assessment-types -H "Authorization: Bearer $ADMIN_TOKEN"
+curl -s -X POST http://localhost:8086/settings/assessment-types -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"code":"tugas","name":"Tugas","bucket":"formatif","weight_percent":60,"exam_linked":false,"sort_order":1}'
+curl -s http://localhost:8086/settings/weights -H "Authorization: Bearer $ADMIN_TOKEN"
+curl -s -X PUT http://localhost:8086/settings/weights -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"akhir_formatif_weight":30,"akhir_sts_weight":30,"akhir_sas_weight":40,"sementara_formatif_weight":30,"sementara_praktik_weight":40,"sementara_sts_weight":30}'
+
+# Item 5: Penilaian Formatif (guru) -- dropdown-per-tipe-penilaian.
+# GET auto-suggests a score for exam_linked types (STS/SAS) from
+# exam-service when the guru hasn't saved their own value yet.
+curl -s "http://localhost:8086/formative?term_id=$TERM&classroom_subject_id=<cs_id>&classroom_id=$CLASSROOM&assessment_type_id=<type_id>&subject_id=<subject_id>&academic_year_id=<ay_id>" \
+  -H "Authorization: Bearer $GURU_TOKEN"
+curl -s -X PUT http://localhost:8086/formative -H "Authorization: Bearer $GURU_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"term_id":"'"$TERM"'","classroom_subject_id":"<cs_id>","student_id":"<student_id>","assessment_type_id":"<type_id>","score":85}'
 ```
 
-## What was tested (this session, local dev, no prod risk)
+## What was tested (2026-08-11 dynamic-report-structure session)
+
+- `go build ./...`, `go vet ./...`, `gofmt -l .` clean. `npx vue-tsc -b`
+  and `npx vite build` (web/) clean.
+- `docker compose up -d --build` → healthy; `go run ./cmd/migrate up` →
+  `version=7 dirty=false` (migration 0007 applied cleanly on top of the
+  existing 0001-0006 chain).
+- `POST /settings/assessment-types` created 5 types (tugas/kuis formatif,
+  praktek praktik, sts/sas exam_linked); a duplicate `code` → `409`
+  (fixed a bug caught here: the driver is pgx/v5/stdlib so Postgres
+  errors surface as `*pgconn.PgError`, not `lib/pq`'s `*pq.Error` — an
+  initial `err.(*pq.Error)` type assertion silently never matched and
+  fell through to a generic 500; replaced with `errors.As` against
+  `pgconn.PgError`).
+- `PUT /formative` (guru) saved Tugas=85 (weight 60) and Kuis=70 (weight
+  40) for one student; verified via direct SQL join that
+  `GetFormativeBucketScores`' weighted-average math is exactly
+  `(85*60+70*40)/100 = 79.0` for the pooled formatif bucket.
+- `DELETE /settings/assessment-types/{id}` on a type still referenced by
+  `formative_grades` → `409` (FK `ON DELETE` default RESTRICT, not a
+  crash); `PUT` to rename/reweight a type → `200`.
+- `POST /report-cards/generate` (semester, all 4 upstreams down) → `200`,
+  `created:0`, per-integration `warnings` — same documented graceful
+  pattern as before, confirms the new `report_type`/weight-loading logic
+  doesn't regress the base path.
+- `POST /report-cards/generate?report_type=bayangan` without
+  `period_label` → `400`; with it → `200`; `report_type=bogus` → `400`.
+- `PUT /settings/weights` → `200`, persisted (`GET` after showed
+  `updated_by`/`updated_at` set).
+- `GET /classrooms/{id}/leger?report_type=semester` → `200`, empty grid.
+- Verified schema directly via `psql`: `report_cards.report_type`/
+  `period_label` columns exist with the expected `UNIQUE
+  (student_id, classroom_id, term_id, report_type, period_label)`
+  constraint (replacing the old 3-column one) and `report_type` CHECK;
+  `report_card_subjects.praktik_score` exists.
+- `docker compose down` → clean teardown.
+- Not exercised end-to-end (no academic-service/exam-service running
+  alongside report-service in this session — see other three parallel
+  workstreams): the roster-populated generate path, STS/SAS auto-populate
+  actually resolving a real exam score, and the Vue views against a live
+  backend. The graceful-degradation path above and the direct-SQL/unit
+  verification of the weighted-average math are the fallback proof for
+  the scoring logic; the original 2026-07 session already proved the
+  roster-populated path works once academic/identity/exam are up (see
+  below), and this session's changes to that path are additive
+  (report_type param, new bucket-based score calc) not structural.
+
+## What was tested (original 2026-07 session, local dev, no prod risk)
 
 - `go build ./...` and `go vet ./...` clean; `gofmt -l .` clean.
 - `docker compose up -d --build` → both containers healthy; `go run
