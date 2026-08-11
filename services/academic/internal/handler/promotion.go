@@ -30,6 +30,25 @@ func (h *Handler) GradePromotion(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "source_academic_year_id, target_academic_year_id, and a non-empty promotions array are required")
 		return
 	}
+	// Wali kelas's Kenaikan Kelas "Proses Kenaikan Kelas" button posts here
+	// too — every promotion's from_classroom_id must be their own homeroom
+	// classroom (checked once per distinct classroom, not per student, since
+	// a wali kelas processes their whole roster in one request). Admin/
+	// superadmin (and any other role) are unaffected, same as every other
+	// use of requireOwnClassroomIfWaliKelas.
+	claims := common.FromCtx(r)
+	if claims != nil && claims.ActiveRole == "walikelas" {
+		checked := map[string]bool{}
+		for _, p := range req.Promotions {
+			if checked[p.FromClassroomID] {
+				continue
+			}
+			checked[p.FromClassroomID] = true
+			if !h.requireOwnClassroomIfWaliKelas(w, r, schoolID, p.FromClassroomID) {
+				return
+			}
+		}
+	}
 	results, err := h.Store.PromoteStudents(r.Context(), schoolID, req.SourceAcademicYearID, req.TargetAcademicYearID, req.Promotions)
 	if err != nil {
 		common.WriteError(w, http.StatusBadRequest, err.Error())

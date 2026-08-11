@@ -116,6 +116,9 @@ func (h *Handler) GetStudentSubjectMatrix(w http.ResponseWriter, r *http.Request
 		common.WriteError(w, http.StatusNotFound, "classroom not found")
 		return
 	}
+	if !h.requireOwnClassroomIfWaliKelas(w, r, schoolID, classroomID) {
+		return
+	}
 	subjects, err := h.Store.ListClassroomSubjects(r.Context(), schoolID, classroomID, true)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -181,6 +184,12 @@ func (h *Handler) BulkSetStudentSubjectMatrix(w http.ResponseWriter, r *http.Req
 	}
 	if classroom == nil {
 		common.WriteError(w, http.StatusNotFound, "classroom not found")
+		return
+	}
+	// Wali kelas's Matriks Pelajaran menu writes into this same endpoint,
+	// scoped to their own classroom only (see requireOwnClassroomIfWaliKelas
+	// doc comment) — every other role's behavior is unchanged.
+	if !h.requireOwnClassroomIfWaliKelas(w, r, schoolID, classroomID) {
 		return
 	}
 	var req bulkSetMatrixRequest

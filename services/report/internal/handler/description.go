@@ -34,15 +34,18 @@ type descriptionRow struct {
 // classroom/term at least once), same precondition as Leger.
 func (h *Handler) GetSubjectDescriptionGrid(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if !isStaff(claims) {
-		common.WriteError(w, http.StatusForbidden, "admin/superadmin/guru only")
-		return
-	}
 	classroomID := chi.URLParam(r, "id")
 	subjectID := chi.URLParam(r, "subject_id")
 	termID := r.URL.Query().Get("term_id")
 	if termID == "" {
 		common.WriteError(w, http.StatusBadRequest, "term_id query param is required")
+		return
+	}
+	// Wali kelas's "Deskripsi Rapor" menu reuses this endpoint scoped to
+	// their own classroom (see isWaliKelasOwner) — admin/superadmin/guru
+	// behavior is unchanged.
+	if !isStaff(claims) && !h.isWaliKelasOwner(r.Context(), claims, classroomID) {
+		common.WriteError(w, http.StatusForbidden, "admin/superadmin/guru only, or the wali kelas of this classroom")
 		return
 	}
 

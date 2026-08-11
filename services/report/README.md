@@ -642,6 +642,21 @@ curl -s http://localhost:8086/report-cards/<id> -H "Authorization: Bearer $ADMIN
 - `docker compose down` → clean teardown, no orphaned containers/volumes
   left running.
 
+## Wali Kelas role (Bug Report SEKOCI GPM 5 Agustus 2026)
+
+`active_role == "walikelas"` can now call `POST /report-cards/generate`,
+`GET /classrooms/{id}/subjects/{subject_id}/description`,
+`PATCH /report-cards/{id}/subjects/{subject_id}/notes`, and read
+`GET /report-cards/{id}` / `GET /students/{id}/report-cards` — the same
+Generate & Deskripsi Rapor endpoints admin/guru already use, restricted to
+their own homeroom classroom via `isWaliKelasOwner` (report_card.go), which
+re-checks `classrooms.homeroom_teacher_user_id` against academic-service's
+`GET /classrooms/{id}` live on every call (that response already carried
+`homeroom_teacher_user_id`, used for the Wali Kelas header field — nothing
+new needed on the academic side). `finalize`/`unlock`/`PATCH override`
+remain admin/superadmin-only — the spec only asks wali kelas to generate and
+write descriptions, not lock/override scores.
+
 ## Assumptions
 
 - **Role gates**: `generate`, `PATCH override`, `finalize`, `unlock` are

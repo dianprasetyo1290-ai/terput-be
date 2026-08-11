@@ -229,6 +229,22 @@ rules.
    endpoint with neither a valid JWT nor the internal key -> 401.
 10. `docker compose down` — clean teardown, containers/network removed.
 
+## Wali Kelas role (Bug Report SEKOCI GPM 5 Agustus 2026)
+
+`active_role == "walikelas"` was added to `requireRole` on
+`/admin/student-attendance`, `/admin/student-attendance/summary`,
+`/dashboard/active-teachers`, and `/dashboard/student-attendance-summary` —
+their read-only "Presensi Siswa" recap, "Guru Sedang Mengajar" widget, and
+per-semester attendance charts. Unlike admin/superadmin (unfiltered or
+optionally filtered), a walikelas caller MUST pass `?classroom_id=` and it
+is independently re-verified against academic-service
+(`requireOwnClassroom` in handler.go, via `GET /classrooms/{id}` — the
+existing `ClassroomSummary` client struct now also decodes
+`homeroom_teacher_user_id`) rather than trusted from the query string —
+`403` on a classroom they don't own. `DashboardStudentSummary` gained a
+`classroomID` filter param for this (empty string = unfiltered, admin's
+prior behavior unchanged).
+
 ## Assumptions
 
 Ambiguities in the spec were resolved as follows, simplest-reasonable-call

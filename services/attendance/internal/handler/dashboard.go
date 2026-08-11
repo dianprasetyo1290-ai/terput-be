@@ -77,13 +77,35 @@ func (h *Handler) activeTeachersNow(r *http.Request, schoolID string) ([]model.A
 // not they've checked in yet (see activeTeachersNow).
 func (h *Handler) ActiveTeachers(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if !requireRole(w, claims, "admin", "superadmin") {
+	if !requireRole(w, claims, "admin", "superadmin", "walikelas") {
 		return
+	}
+	classroomID := r.URL.Query().Get("classroom_id")
+	// Wali kelas's dashboard "Guru Sedang Mengajar" widget must only ever
+	// show their own classroom, never every classroom in the school like
+	// the admin dashboard's widget does — classroom_id is required and
+	// ownership-checked for this role, ignored (unfiltered, unchanged) for
+	// admin/superadmin.
+	if claims.ActiveRole == "walikelas" {
+		if !h.requireOwnClassroom(w, r, claims, classroomID) {
+			return
+		}
+	} else {
+		classroomID = "" // admin/superadmin: no classroom filter, matches prior behavior
 	}
 	list, err := h.activeTeachersNow(r, scopeFromRequest(claims, r))
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if classroomID != "" {
+		filtered := make([]model.ActiveTeacher, 0, len(list))
+		for _, t := range list {
+			if t.ClassroomID == classroomID {
+				filtered = append(filtered, t)
+			}
+		}
+		list = filtered
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
 }
@@ -152,10 +174,21 @@ func (h *Handler) resolveTermLabels(r *http.Request, list []model.MonthlyStatusC
 // school year.
 func (h *Handler) StudentAttendanceSummaryDashboard(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if !requireRole(w, claims, "admin", "superadmin") {
+	if !requireRole(w, claims, "admin", "superadmin", "walikelas") {
 		return
 	}
-	list, err := h.Store.DashboardStudentSummary(r.Context(), scopeFromRequest(claims, r), academicYearFromRequest(r))
+	classroomID := r.URL.Query().Get("classroom_id")
+	// Wali kelas dashboard's "Ringkasan Kehadiran Siswa" charts (Bug Report
+	// SEKOCI GPM 5 Agustus 2026): same per-term aggregation admin's dashboard
+	// chart already uses, just forced+verified to their own classroom
+	// instead of the whole school. classifyTermLabels below then already
+	// groups by term_id, which for a normal 2-term academic year yields
+	// exactly one row per semester — the frontend renders each row as its
+	// own chart (two separate charts, not one grouped chart).
+	if claims.ActiveRole == "walikelas" && !h.requireOwnClassroom(w, r, claims, classroomID) {
+		return
+	}
+	list, err := h.Store.DashboardStudentSummary(r.Context(), scopeFromRequest(claims, r), academicYearFromRequest(r), classroomID)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
