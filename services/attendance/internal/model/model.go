@@ -60,8 +60,8 @@ type ClassSession struct {
 	GuruID         string  `json:"guru_id"`
 	SessionDate    string  `json:"session_date"` // YYYY-MM-DD
 
-	CheckedInAt   *time.Time `json:"checked_in_at,omitempty"`  // jam masuk
-	CheckedOutAt  *time.Time `json:"checked_out_at,omitempty"` // jam keluar
+	CheckedInAt   *time.Time `json:"checked_in_at,omitempty"`   // jam masuk
+	CheckedOutAt  *time.Time `json:"checked_out_at,omitempty"`  // jam keluar
 	SlotStartTime *string    `json:"slot_start_time,omitempty"` // HH:MM:SS
 	SlotEndTime   *string    `json:"slot_end_time,omitempty"`
 
@@ -141,6 +141,63 @@ type MonthlyStatusCount struct {
 	Sakit           int    `json:"sakit"`
 	Izin            int    `json:"izin"`
 	TanpaKeterangan int    `json:"tanpa_keterangan"`
+}
+
+// SubstituteReason enumerates the "Alasan" dropdown on the "Assign
+// Pengganti" request popup (Bug Report SEKOCI GPM 5 Agustus 2026).
+type SubstituteReason string
+
+const (
+	ReasonSakit SubstituteReason = "sakit"
+	ReasonIzin  SubstituteReason = "izin"
+	ReasonCuti  SubstituteReason = "cuti"
+)
+
+var ValidSubstituteReason = map[string]bool{
+	string(ReasonSakit): true,
+	string(ReasonIzin):  true,
+	string(ReasonCuti):  true,
+}
+
+type SubstituteRequestStatus string
+
+const (
+	SubstituteStatusPending  SubstituteRequestStatus = "pending"
+	SubstituteStatusAccepted SubstituteRequestStatus = "accepted"
+	SubstituteStatusRejected SubstituteRequestStatus = "rejected"
+)
+
+// SubstituteRequest is a "pergantian guru" handoff request: Guru A asks
+// Guru B to cover a specific teaching slot (schedule_id + session_date).
+// Nothing on class_sessions moves until status flips to "accepted" -- see
+// store.AcceptSubstituteRequest, which is the only place that actually
+// reassigns class_sessions.guru_id (reusing the original_guru_id/
+// substituted_at/substituted_by columns from migration 0004).
+type SubstituteRequest struct {
+	ID             string  `json:"id"`
+	SchoolID       string  `json:"school_id"`
+	AcademicYearID string  `json:"academic_year_id"`
+	TermID         *string `json:"term_id,omitempty"`
+	ScheduleID     string  `json:"schedule_id"`
+	ClassroomID    string  `json:"classroom_id"`
+	SubjectID      *string `json:"subject_id,omitempty"`
+	SessionDate    string  `json:"session_date"`
+	SlotStartTime  *string `json:"slot_start_time,omitempty"`
+	SlotEndTime    *string `json:"slot_end_time,omitempty"`
+
+	RequestedBy string `json:"requested_by"` // Guru A
+	RequestedTo string `json:"requested_to"` // Guru B
+	Reason      string `json:"reason"`       // sakit | izin | cuti
+	Status      string `json:"status"`       // pending | accepted | rejected
+
+	CreatedAt   time.Time  `json:"created_at"`
+	RespondedAt *time.Time `json:"responded_at,omitempty"`
+
+	// enrichment, best-effort, populated from identity/academic internal calls
+	RequestedByName string `json:"requested_by_name,omitempty"`
+	RequestedToName string `json:"requested_to_name,omitempty"`
+	ClassroomName   string `json:"classroom_name,omitempty"`
+	SubjectName     string `json:"subject_name,omitempty"`
 }
 
 // ActiveTeacher is a row in the "guru sedang mengajar" dashboard monitor.

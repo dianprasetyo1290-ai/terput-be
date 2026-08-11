@@ -85,21 +85,29 @@ func (s *Store) CheckIn(ctx context.Context, in CheckInInput) (*model.ClassSessi
 // guru who will cover it instead (client request: "guru bisa menunjuk guru
 // pengganti jika berhalangan hadir").
 type SubstituteInput struct {
-	SchoolID       string
-	AcademicYearID string
-	TermID         *string
-	ScheduleID     string
-	ClassroomID    string
-	SubjectID      *string
-	SessionDate    string
-	SlotStartTime  *string
-	SlotEndTime    *string
-	OriginalGuruID *string // who is being replaced, if known
-	SubstituteGuruID string // who will cover the slot -- becomes guru_id
-	SubstitutedBy  string  // who performed the reassignment (the outgoing guru, or an admin)
+	SchoolID         string
+	AcademicYearID   string
+	TermID           *string
+	ScheduleID       string
+	ClassroomID      string
+	SubjectID        *string
+	SessionDate      string
+	SlotStartTime    *string
+	SlotEndTime      *string
+	OriginalGuruID   *string // who is being replaced, if known
+	SubstituteGuruID string  // who will cover the slot -- becomes guru_id
+	SubstitutedBy    string  // who performed the reassignment (the outgoing guru, or an admin)
 }
 
-// AssignSubstitute upserts the class_sessions row for (schedule_id,
+// queryRower is satisfied by both *sql.DB and *sql.Tx -- lets
+// assignSubstituteTx run inside AcceptSubstituteRequest's transaction
+// (the only caller now that direct reassignment is gone -- see the
+// substitute_requests section below) without a separate non-tx code path.
+type queryRower interface {
+	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
+}
+
+// assignSubstituteTx upserts the class_sessions row for (schedule_id,
 // session_date) with guru_id set to the substitute. On first substitution of
 // an existing (already checked-in) row, original_guru_id captures whoever
 // was guru_id beforehand; on insert (no session existed yet, e.g. the
@@ -107,8 +115,8 @@ type SubstituteInput struct {
 // checked_in_at is left untouched either way -- the substitute still does
 // their own check-in via the normal CheckIn endpoint (see handler.CheckIn's
 // pre-authorization check against an existing session's guru_id).
-func (s *Store) AssignSubstitute(ctx context.Context, in SubstituteInput) (*model.ClassSession, error) {
-	row := s.DB.QueryRowContext(ctx, `
+func assignSubstituteTx(ctx context.Context, db queryRower, in SubstituteInput) (*model.ClassSession, error) {
+	row := db.QueryRowContext(ctx, `
 		INSERT INTO class_sessions (
 			school_id, academic_year_id, term_id, schedule_id, classroom_id,
 			subject_id, guru_id, session_date, slot_start_time, slot_end_time,
@@ -125,6 +133,198 @@ func (s *Store) AssignSubstitute(ctx context.Context, in SubstituteInput) (*mode
 		in.SubjectID, in.SubstituteGuruID, in.SessionDate, in.SlotStartTime, in.SlotEndTime,
 		in.OriginalGuruID, in.SubstitutedBy)
 	return scanClassSession(row)
+}
+
+// ---- substitute_requests (pergantian guru request/response) -----------
+//
+// Bug Report SEKOCI (GPM 5 Agustus 2026): a guru can no longer reassign a
+// slot directly (AssignSubstitute above is now only reached via accept,
+// below) -- they request a named colleague, who must accept before
+// class_sessions.guru_id actually moves.
+
+const substituteRequestColumns = `
+	id, school_id, academic_year_id, term_id, schedule_id, classroom_id,
+	subject_id, session_date, slot_start_time, slot_end_time,
+	requested_by, requested_to, reason, status, created_at, responded_at`
+
+type CreateSubstituteRequestInput struct {
+	SchoolID       string
+	AcademicYearID string
+	TermID         *string
+	ScheduleID     string
+	ClassroomID    string
+	SubjectID      *string
+	SessionDate    string
+	SlotStartTime  *string
+	SlotEndTime    *string
+	RequestedBy    string
+	RequestedTo    string
+	Reason         string
+}
+
+// CreateSubstituteRequest records Guru A's "Kirim Permintaan" -- a plain
+// insert, no reassignment happens here. This IS the "notification" Guru B
+// sees: it shows up in their ListIncomingSubstituteRequests on "Jadwal
+// Saya" the moment this returns.
+func (s *Store) CreateSubstituteRequest(ctx context.Context, in CreateSubstituteRequestInput) (*model.SubstituteRequest, error) {
+	row := s.DB.QueryRowContext(ctx, `
+		INSERT INTO substitute_requests (
+			school_id, academic_year_id, term_id, schedule_id, classroom_id,
+			subject_id, session_date, slot_start_time, slot_end_time,
+			requested_by, requested_to, reason
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		RETURNING `+substituteRequestColumns+`
+	`, in.SchoolID, in.AcademicYearID, in.TermID, in.ScheduleID, in.ClassroomID,
+		in.SubjectID, in.SessionDate, in.SlotStartTime, in.SlotEndTime,
+		in.RequestedBy, in.RequestedTo, in.Reason)
+	return scanSubstituteRequest(row)
+}
+
+func (s *Store) GetSubstituteRequest(ctx context.Context, id string) (*model.SubstituteRequest, error) {
+	row := s.DB.QueryRowContext(ctx, `SELECT `+substituteRequestColumns+` FROM substitute_requests WHERE id = $1`, id)
+	return scanSubstituteRequest(row)
+}
+
+// ListIncomingSubstituteRequests: Guru B's pending list on their own
+// "Jadwal Saya" -- requests made TO the caller, still awaiting a response.
+func (s *Store) ListIncomingSubstituteRequests(ctx context.Context, requestedTo string) ([]model.SubstituteRequest, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT `+substituteRequestColumns+`
+		FROM substitute_requests WHERE requested_to = $1 AND status = 'pending'
+		ORDER BY created_at DESC
+	`, requestedTo)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSubstituteRequestRows(rows)
+}
+
+// ListOutgoingSubstituteRequests: Guru A's own requests, any status -- lets
+// them see a rejection ("Guru A gets a rejection notification") and confirm
+// the slot is still theirs to hand off to someone else.
+func (s *Store) ListOutgoingSubstituteRequests(ctx context.Context, requestedBy string) ([]model.SubstituteRequest, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT `+substituteRequestColumns+`
+		FROM substitute_requests WHERE requested_by = $1
+		ORDER BY created_at DESC
+	`, requestedBy)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSubstituteRequestRows(rows)
+}
+
+// RejectSubstituteRequest: Guru B clicks "Tolak Permintaan". Scoped to
+// status='pending' so a stale/double click can't re-resolve an already
+// answered request.
+func (s *Store) RejectSubstituteRequest(ctx context.Context, id string) (*model.SubstituteRequest, error) {
+	row := s.DB.QueryRowContext(ctx, `
+		UPDATE substitute_requests SET status = 'rejected', responded_at = now()
+		WHERE id = $1 AND status = 'pending'
+		RETURNING `+substituteRequestColumns+`
+	`, id)
+	return scanSubstituteRequest(row)
+}
+
+// AcceptSubstituteRequest is the only place that actually performs the
+// "pergantian guru" handoff: it flips the request to accepted AND moves
+// class_sessions.guru_id to the substitute, in one transaction, so the
+// request can never end up "accepted" without the reassignment having
+// actually happened (or vice versa).
+func (s *Store) AcceptSubstituteRequest(ctx context.Context, id string) (*model.SubstituteRequest, *model.ClassSession, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+
+	row := tx.QueryRowContext(ctx, `
+		UPDATE substitute_requests SET status = 'accepted', responded_at = now()
+		WHERE id = $1 AND status = 'pending'
+		RETURNING `+substituteRequestColumns+`
+	`, id)
+	sr, err := scanSubstituteRequest(row)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cs, err := assignSubstituteTx(ctx, tx, SubstituteInput{
+		SchoolID:         sr.SchoolID,
+		AcademicYearID:   sr.AcademicYearID,
+		TermID:           sr.TermID,
+		ScheduleID:       sr.ScheduleID,
+		ClassroomID:      sr.ClassroomID,
+		SubjectID:        sr.SubjectID,
+		SessionDate:      sr.SessionDate,
+		SlotStartTime:    sr.SlotStartTime,
+		SlotEndTime:      sr.SlotEndTime,
+		OriginalGuruID:   &sr.RequestedBy,
+		SubstituteGuruID: sr.RequestedTo,
+		SubstitutedBy:    sr.RequestedTo, // the accepting guru performed the handoff
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, nil, err
+	}
+	return sr, cs, nil
+}
+
+func scanSubstituteRequest(row *sql.Row) (*model.SubstituteRequest, error) {
+	sr := &model.SubstituteRequest{}
+	var termID, subjectID, slotStart, slotEnd sql.NullString
+	var respondedAt sql.NullTime
+	err := row.Scan(&sr.ID, &sr.SchoolID, &sr.AcademicYearID, &termID, &sr.ScheduleID, &sr.ClassroomID,
+		&subjectID, &sr.SessionDate, &slotStart, &slotEnd,
+		&sr.RequestedBy, &sr.RequestedTo, &sr.Reason, &sr.Status, &sr.CreatedAt, &respondedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	fillSubstituteRequest(sr, termID, subjectID, slotStart, slotEnd, respondedAt)
+	return sr, nil
+}
+
+func scanSubstituteRequestRows(rows *sql.Rows) ([]model.SubstituteRequest, error) {
+	out := []model.SubstituteRequest{}
+	for rows.Next() {
+		sr := model.SubstituteRequest{}
+		var termID, subjectID, slotStart, slotEnd sql.NullString
+		var respondedAt sql.NullTime
+		if err := rows.Scan(&sr.ID, &sr.SchoolID, &sr.AcademicYearID, &termID, &sr.ScheduleID, &sr.ClassroomID,
+			&subjectID, &sr.SessionDate, &slotStart, &slotEnd,
+			&sr.RequestedBy, &sr.RequestedTo, &sr.Reason, &sr.Status, &sr.CreatedAt, &respondedAt); err != nil {
+			return nil, err
+		}
+		fillSubstituteRequest(&sr, termID, subjectID, slotStart, slotEnd, respondedAt)
+		out = append(out, sr)
+	}
+	return out, rows.Err()
+}
+
+func fillSubstituteRequest(sr *model.SubstituteRequest, termID, subjectID, slotStart, slotEnd sql.NullString, respondedAt sql.NullTime) {
+	if termID.Valid {
+		sr.TermID = &termID.String
+	}
+	if subjectID.Valid {
+		sr.SubjectID = &subjectID.String
+	}
+	if slotStart.Valid {
+		sr.SlotStartTime = &slotStart.String
+	}
+	if slotEnd.Valid {
+		sr.SlotEndTime = &slotEnd.String
+	}
+	if respondedAt.Valid {
+		v := respondedAt.Time
+		sr.RespondedAt = &v
+	}
 }
 
 // CheckOut records jam keluar (clock-out) for a session -- the counterpart
@@ -286,12 +486,12 @@ func (s *Store) ListSessions(ctx context.Context, f ListSessionsFilter) ([]model
 // fillClassSession stay a single column list to maintain instead of two.
 type classSessionScanTargets struct {
 	termID, subjectID, pertemuan, pembahasan, materi sql.NullString
-	checkedIn, checkedOut, agendaFilled               sql.NullTime
-	slotStart, slotEnd                                sql.NullString
-	catatan, tugasJenis                               sql.NullString
-	originalGuruID, substitutedBy                     sql.NullString
-	substitutedAt                                     sql.NullTime
-	bk                                                []byte
+	checkedIn, checkedOut, agendaFilled              sql.NullTime
+	slotStart, slotEnd                               sql.NullString
+	catatan, tugasJenis                              sql.NullString
+	originalGuruID, substitutedBy                    sql.NullString
+	substitutedAt                                    sql.NullTime
+	bk                                               []byte
 }
 
 func (t *classSessionScanTargets) dest(cs *model.ClassSession) []interface{} {
