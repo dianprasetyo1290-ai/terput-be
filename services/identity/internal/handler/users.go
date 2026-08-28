@@ -131,6 +131,19 @@ func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role strin
 		args = append(args, "%"+q+"%")
 		where += ` AND (u.name ILIKE $` + placeholder(len(args)) + ` OR u.email ILIKE $` + placeholder(len(args)) + `)`
 	}
+	// Data Siswa's "Filter Kelas" (classroom_id lives in academic-service, not here) resolves
+	// a roster of student user ids client-side, then filters/paginates against that id set
+	// server-side -- fixes the row-number-vs-page mismatch and "students beyond page 1
+	// invisible" bugs a purely client-side post-filter over one page had (GPM School bug
+	// report 2026-08-28: siswa order scrambled across classroom-filter switches).
+	if idsParam := strings.TrimSpace(r.URL.Query().Get("ids")); idsParam != "" {
+		args = append(args, pqStringArray(strings.Split(idsParam, ",")))
+		where += ` AND u.id = ANY($` + placeholder(len(args)) + `::uuid[])`
+	}
+	if excludeParam := strings.TrimSpace(r.URL.Query().Get("exclude_ids")); excludeParam != "" {
+		args = append(args, pqStringArray(strings.Split(excludeParam, ",")))
+		where += ` AND u.id != ALL($` + placeholder(len(args)) + `::uuid[])`
+	}
 
 	var total int
 	if err := a.DB.QueryRow(`SELECT count(*) FROM users u WHERE `+where, args...).Scan(&total); err != nil {
