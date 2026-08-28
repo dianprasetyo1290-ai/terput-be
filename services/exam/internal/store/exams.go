@@ -528,16 +528,17 @@ func (s *Store) GetExamQuestion(ctx context.Context, examQuestionID string) (*mo
 // NormalizeAndPublish proportionally scales exam_questions.points so they sum
 // to exactly 100, then marks the exam published. See README "Score
 // normalization" for the approach.
-func (s *Store) NormalizeAndPublish(ctx context.Context, examID, schoolID string) error {
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
+// scalePointsTo100 rescales an exam's existing exam_questions.points
+// proportionally so they sum to exactly 100, preserving relative weights
+// (last item absorbs rounding residue). Returns the question count so
+// callers can decide how to treat zero questions -- NormalizeAndPublish
+// treats it as a validation error (can't publish an empty exam),
+// RenormalizePublishedPoints treats it as a harmless no-op (the guru just
+// removed the last question, nothing left to scale).
+func scalePointsTo100(ctx context.Context, tx *sql.Tx, examID string) (int, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT id, points FROM exam_questions WHERE exam_id=$1 ORDER BY order_index`, examID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	type row struct {
 		id     string
@@ -549,7 +550,7 @@ func (s *Store) NormalizeAndPublish(ctx context.Context, examID, schoolID string
 		var r row
 		if err := rows.Scan(&r.id, &r.points); err != nil {
 			rows.Close()
-			return err
+			return 0, err
 		}
 		items = append(items, r)
 		sum += r.points
@@ -557,14 +558,12 @@ func (s *Store) NormalizeAndPublish(ctx context.Context, examID, schoolID string
 	rows.Close()
 
 	if len(items) == 0 {
-		return fmt.Errorf("exam has no questions")
+		return 0, nil
 	}
 	if sum <= 0 {
-		return fmt.Errorf("exam total raw points must be greater than zero")
+		return len(items), fmt.Errorf("exam total raw points must be greater than zero")
 	}
 
-	// Scale proportionally to sum to 100; last item absorbs rounding residue
-	// so the total is always exactly 100.00.
 	var running float64
 	for i, it := range items {
 		var scaled float64
@@ -575,8 +574,25 @@ func (s *Store) NormalizeAndPublish(ctx context.Context, examID, schoolID string
 			running += scaled
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE exam_questions SET points=$1 WHERE id=$2`, scaled, it.id); err != nil {
-			return err
+			return len(items), err
 		}
+	}
+	return len(items), nil
+}
+
+func (s *Store) NormalizeAndPublish(ctx context.Context, examID, schoolID string) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	n, err := scalePointsTo100(ctx, tx, examID)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("exam has no questions")
 	}
 
 	res, err := tx.ExecContext(ctx, `
@@ -585,11 +601,30 @@ func (s *Store) NormalizeAndPublish(ctx context.Context, examID, schoolID string
 	if err != nil {
 		return err
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
+	n2, _ := res.RowsAffected()
+	if n2 == 0 {
 		return ErrNotEditable
 	}
 
+	return tx.Commit()
+}
+
+// RenormalizePublishedPoints: Bug Report SKCIXGPM 0.1 -- guru can keep
+// adding/removing questions on a published exam (until any exam_attempts
+// row exists, guarded at the handler level via HasAnyAttempt), so the
+// "points sum to 100" invariant NormalizeAndPublish established at first
+// publish must be re-applied after every such edit, not just once. Unlike
+// NormalizeAndPublish this never touches is_published/published_at --
+// the exam is already published, this only rescales points.
+func (s *Store) RenormalizePublishedPoints(ctx context.Context, examID string) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := scalePointsTo100(ctx, tx, examID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 

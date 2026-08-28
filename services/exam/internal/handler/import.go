@@ -68,8 +68,15 @@ func (h *Handler) ImportQuestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if exam.IsPublished {
-		common.WriteError(w, http.StatusConflict, "cannot import questions into a published exam")
-		return
+		hasAttempt, err := h.Store.HasAnyAttempt(r.Context(), examID)
+		if err != nil {
+			writeStoreErr(w, err)
+			return
+		}
+		if hasAttempt {
+			common.WriteError(w, http.StatusConflict, "cannot import questions: siswa sudah mulai mengerjakan ujian ini")
+			return
+		}
 	}
 
 	if err := r.ParseMultipartForm(20 << 20); err != nil {
@@ -152,6 +159,18 @@ func (h *Handler) ImportQuestions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		created = append(created, q)
+	}
+
+	if exam.IsPublished {
+		if err := h.Store.RenormalizePublishedPoints(r.Context(), examID); err != nil {
+			common.WriteJSON(w, http.StatusCreated, map[string]interface{}{
+				"folder_id":      folderID,
+				"imported_count": len(created),
+				"questions":      created,
+				"warning":        "soal diimpor, tapi gagal menyesuaikan ulang poin otomatis: " + err.Error(),
+			}, nil)
+			return
+		}
 	}
 
 	common.WriteJSON(w, http.StatusCreated, map[string]interface{}{

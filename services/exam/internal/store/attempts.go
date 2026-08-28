@@ -88,6 +88,19 @@ func (s *Store) ListAttemptsByExam(ctx context.Context, examID string) ([]model.
 	return out, rows.Err()
 }
 
+// HasAnyAttempt: Bug Report SKCIXGPM 0.1 -- guru wants to keep adding
+// questions to a published exam ("input soal menyicil"), but once any
+// student has entered it (any status: belum_mulai/aktif/selesai/etc.), the
+// question set must lock again -- EnterExam (below) snapshots the current
+// exam_questions into the attempt's question_order, and SubmitAnswer looks
+// answers up by that snapshot; removing/adding questions after a student
+// has already been handed that snapshot could silently break their attempt.
+func (s *Store) HasAnyAttempt(ctx context.Context, examID string) (bool, error) {
+	var exists bool
+	err := s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM exam_attempts WHERE exam_id=$1)`, examID).Scan(&exists)
+	return exists, err
+}
+
 func (s *Store) ListAttemptsByStudent(ctx context.Context, userID string) ([]model.ExamAttempt, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT `+attemptCols+` FROM exam_attempts WHERE user_id=$1 ORDER BY created_at DESC`, userID)
 	if err != nil {

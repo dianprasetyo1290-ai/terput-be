@@ -223,7 +223,15 @@ func (h *Handler) GetExam(w http.ResponseWriter, r *http.Request) {
 		writeStoreErr(w, err)
 		return
 	}
-	common.WriteJSON(w, http.StatusOK, map[string]interface{}{"exam": e, "questions": questions}, nil)
+	// has_attempts: Bug Report SKCIXGPM 0.1 -- ExamDetailView uses this to
+	// decide whether question-editing controls stay visible on a published
+	// exam (locked again once any student has entered, see HasAnyAttempt).
+	hasAttempts, err := h.Store.HasAnyAttempt(r.Context(), id)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]interface{}{"exam": e, "questions": questions, "has_attempts": hasAttempts}, nil)
 }
 
 func (h *Handler) UpdateExam(w http.ResponseWriter, r *http.Request) {
@@ -327,9 +335,19 @@ func (h *Handler) AddExamQuestion(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusNotFound, "exam not found")
 		return
 	}
+	// Bug Report SKCIXGPM 0.1: guru can keep adding questions to a published
+	// exam ("input soal menyicil") -- only locked once a student has
+	// actually entered it (see HasAnyAttempt's doc comment for why).
 	if exam.IsPublished {
-		common.WriteError(w, http.StatusConflict, "cannot modify questions on a published exam")
-		return
+		hasAttempt, err := h.Store.HasAnyAttempt(r.Context(), examID)
+		if err != nil {
+			writeStoreErr(w, err)
+			return
+		}
+		if hasAttempt {
+			common.WriteError(w, http.StatusConflict, "cannot modify questions: siswa sudah mulai mengerjakan ujian ini")
+			return
+		}
 	}
 	var req addExamQuestionReq
 	if !common.DecodeJSON(w, r, &req) {
@@ -353,6 +371,14 @@ func (h *Handler) AddExamQuestion(w http.ResponseWriter, r *http.Request) {
 		writeStoreErr(w, err)
 		return
 	}
+	if exam.IsPublished {
+		if err := h.Store.RenormalizePublishedPoints(r.Context(), examID); err != nil {
+			common.WriteJSON(w, http.StatusCreated, eq, map[string]interface{}{
+				"warning": "soal ditambahkan, tapi gagal menyesuaikan ulang poin otomatis: " + err.Error(),
+			})
+			return
+		}
+	}
 	common.WriteJSON(w, http.StatusCreated, eq, nil)
 }
 
@@ -372,13 +398,28 @@ func (h *Handler) RemoveExamQuestion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if exam.IsPublished {
-		common.WriteError(w, http.StatusConflict, "cannot modify questions on a published exam")
-		return
+		hasAttempt, err := h.Store.HasAnyAttempt(r.Context(), examID)
+		if err != nil {
+			writeStoreErr(w, err)
+			return
+		}
+		if hasAttempt {
+			common.WriteError(w, http.StatusConflict, "cannot modify questions: siswa sudah mulai mengerjakan ujian ini")
+			return
+		}
 	}
 	eqID := chi.URLParam(r, "eqId")
 	if err := h.Store.RemoveExamQuestion(r.Context(), examID, eqID); err != nil {
 		writeStoreErr(w, err)
 		return
+	}
+	if exam.IsPublished {
+		if err := h.Store.RenormalizePublishedPoints(r.Context(), examID); err != nil {
+			common.WriteJSON(w, http.StatusOK, nil, map[string]interface{}{
+				"warning": "soal dihapus, tapi gagal menyesuaikan ulang poin otomatis: " + err.Error(),
+			})
+			return
+		}
 	}
 	common.WriteJSON(w, http.StatusOK, nil, nil)
 }
