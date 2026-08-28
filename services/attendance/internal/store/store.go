@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -825,6 +826,98 @@ func (s *Store) StudentAttendanceMonthlySummary(ctx context.Context, schoolID, a
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// StudentAttendanceMonthlyGrid backs the "Presensi Siswa" admin monthly
+// grid print view (client revision, item 1): every recorded status for one
+// classroom/month, pivoted so each row is one student and each key in Days
+// is a day-of-month. Unlike StudentAttendanceMonthlySummary (counts only),
+// this preserves which specific day each status fell on.
+func (s *Store) StudentAttendanceMonthlyGrid(ctx context.Context, schoolID, academicYearID, classroomID, month string) ([]model.StudentAttendanceGridRow, error) {
+	if month == "" {
+		month = time.Now().Format("2006-01")
+	}
+	where := []string{"sa.classroom_id = $1", "to_char(sa.session_date, 'YYYY-MM') = $2"}
+	args := []interface{}{classroomID, month}
+	add := func(cond string, val interface{}) {
+		args = append(args, val)
+		where = append(where, fmt.Sprintf(cond, len(args)))
+	}
+	if schoolID != "" {
+		add("sa.school_id = $%d", schoolID)
+	}
+	if academicYearID != "" {
+		add("sa.academic_year_id = $%d", academicYearID)
+	}
+	query := fmt.Sprintf(`
+		SELECT sa.student_id, extract(day from sa.session_date)::int, sa.status
+		FROM student_attendances sa
+		WHERE %s
+		ORDER BY sa.student_id, sa.session_date
+	`, strings.Join(where, " AND "))
+	rows, err := s.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	byStudent := map[string]*model.StudentAttendanceGridRow{}
+	var order []string
+	for rows.Next() {
+		var studentID, status string
+		var day int
+		if err := rows.Scan(&studentID, &day, &status); err != nil {
+			return nil, err
+		}
+		g, ok := byStudent[studentID]
+		if !ok {
+			g = &model.StudentAttendanceGridRow{StudentID: studentID, Days: map[string]string{}}
+			byStudent[studentID] = g
+			order = append(order, studentID)
+		}
+		g.Days[strconv.Itoa(day)] = status
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]model.StudentAttendanceGridRow, 0, len(order))
+	for _, id := range order {
+		out = append(out, *byStudent[id])
+	}
+	return out, nil
+}
+
+// FindOrCreateImportSession returns the id of the "import" class_session for
+// (classroom_id, session_date), creating it on first use. Import-created
+// sessions carry no real schedule_id (see migration 0007) -- guru_id is set
+// to the importing admin's own user id, source='import' is what the partial
+// unique index keys on, so re-importing the same date is idempotent instead
+// of piling up duplicate sessions.
+func (s *Store) FindOrCreateImportSession(ctx context.Context, schoolID, academicYearID, termID, classroomID, sessionDate, importedBy string) (string, error) {
+	var id string
+	err := s.DB.QueryRowContext(ctx, `
+		INSERT INTO class_sessions (school_id, academic_year_id, term_id, classroom_id, guru_id, session_date, source)
+		VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, 'import')
+		ON CONFLICT (classroom_id, session_date) WHERE source = 'import'
+		DO UPDATE SET updated_at = now()
+		RETURNING id
+	`, schoolID, academicYearID, termID, classroomID, importedBy, sessionDate).Scan(&id)
+	return id, err
+}
+
+// UpsertStudentAttendanceImport writes/overwrites one student's status for
+// one imported day. Conflict target matches student_attendances_classroom_
+// date_student_unique (migration 0003) -- the same constraint the guru's own
+// daily marking flow relies on -- so re-uploading the same month safely
+// overwrites rather than duplicating.
+func (s *Store) UpsertStudentAttendanceImport(ctx context.Context, classSessionID, schoolID, academicYearID, termID, classroomID, studentID, sessionDate, status, markedBy string) error {
+	_, err := s.DB.ExecContext(ctx, `
+		INSERT INTO student_attendances (class_session_id, school_id, academic_year_id, term_id, classroom_id, student_id, session_date, status, marked_by)
+		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8, $9)
+		ON CONFLICT (classroom_id, session_date, student_id)
+		DO UPDATE SET status = EXCLUDED.status, class_session_id = EXCLUDED.class_session_id, marked_by = EXCLUDED.marked_by, updated_at = now()
+	`, classSessionID, schoolID, academicYearID, termID, classroomID, studentID, sessionDate, status, markedBy)
+	return err
 }
 
 // StudentAttendanceSummary aggregates counts by status for one student,

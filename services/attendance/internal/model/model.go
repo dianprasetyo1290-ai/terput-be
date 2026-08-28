@@ -134,6 +134,16 @@ type StudentMonthlyAttendance struct {
 	TanpaKeterangan int    `json:"tanpa_keterangan"`
 }
 
+// StudentAttendanceGridRow is one student's full-month day-by-day status,
+// pivoted for the printable monthly grid (client revision, GPM School
+// 2026-08-24, item 1: replace the day-by-day print flow with one printable
+// table per month, columns 1..N). Days with no recorded status (a holiday,
+// or a day nobody has imported/marked yet) are simply absent from the map.
+type StudentAttendanceGridRow struct {
+	StudentID string            `json:"student_id"`
+	Days      map[string]string `json:"days"` // day-of-month ("1".."31") -> status
+}
+
 // MonthlyStatusCount is one bucket for the dashboard chart endpoints.
 type MonthlyStatusCount struct {
 	Month           string `json:"month"` // YYYY-MM
