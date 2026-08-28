@@ -71,6 +71,56 @@ func (h *Handler) StudentAttendanceSummaryAdmin(w http.ResponseWriter, r *http.R
 	common.WriteJSON(w, http.StatusOK, list, nil)
 }
 
+// StudentAttendanceMonthlyGridAdmin serves the "Presensi Siswa" admin
+// monthly grid print view (client revision, GPM School 2026-08-24, item 1):
+// replaces the day-by-day print flow with one printable table per month
+// (columns = day 1..N). Requires a specific classroom_id (unlike the
+// counts-only summary above, which can aggregate "Semua Kelas") because the
+// roster merge below needs one classroom to enumerate students from.
+func (h *Handler) StudentAttendanceMonthlyGridAdmin(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if !requireRole(w, claims, "admin", "superadmin", "walikelas") {
+		return
+	}
+	q := r.URL.Query()
+	classroomID := q.Get("classroom_id")
+	if claims.ActiveRole == "walikelas" && !h.requireOwnClassroom(w, r, claims, classroomID) {
+		return
+	}
+	if classroomID == "" {
+		common.WriteError(w, http.StatusBadRequest, "classroom_id is required")
+		return
+	}
+	grid, err := h.Store.StudentAttendanceMonthlyGrid(r.Context(), scopeFromRequest(claims, r), academicYearFromRequest(r), classroomID, q.Get("month"))
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	roster, err := h.Client.GetRoster(r.Context(), classroomID)
+	if err != nil {
+		common.WriteError(w, http.StatusBadGateway, "could not load classroom roster")
+		return
+	}
+	byStudent := map[string]map[string]string{}
+	for _, g := range grid {
+		byStudent[g.StudentID] = g.Days
+	}
+	type gridRow struct {
+		StudentID   string            `json:"student_id"`
+		StudentName string            `json:"student_name"`
+		Days        map[string]string `json:"days"`
+	}
+	out := make([]gridRow, 0, len(roster))
+	for _, s := range roster {
+		days := byStudent[s.StudentID]
+		if days == nil {
+			days = map[string]string{}
+		}
+		out = append(out, gridRow{StudentID: s.StudentID, StudentName: s.Name, Days: days})
+	}
+	common.WriteJSON(w, http.StatusOK, out, nil)
+}
+
 // StudentAttendanceExport returns the same filtered set as
 // StudentAttendanceAdmin as CSV, for the admin's export/print flow (actual
 // print formatting is left to the frontend, per the task spec).
