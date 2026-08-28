@@ -136,9 +136,14 @@ func (h *Handler) AdminAttendanceImport(w http.ResponseWriter, r *http.Request) 
 		common.WriteError(w, http.StatusBadGateway, "could not load classroom roster")
 		return
 	}
-	byName := map[string]string{} // lower(trim(name)) -> student_id
+	byName := map[string]string{}       // lower(trim(name)) -> student_id
+	ambiguousNames := map[string]bool{} // names shared by 2+ students in this classroom
 	for _, s := range roster {
-		byName[strings.ToLower(strings.TrimSpace(s.Name))] = s.StudentID
+		key := strings.ToLower(strings.TrimSpace(s.Name))
+		if _, seen := byName[key]; seen {
+			ambiguousNames[key] = true
+		}
+		byName[key] = s.StudentID
 	}
 
 	header := records[0]
@@ -158,7 +163,12 @@ func (h *Handler) AdminAttendanceImport(w http.ResponseWriter, r *http.Request) 
 		if len(row) == 0 || strings.TrimSpace(row[0]) == "" {
 			continue
 		}
-		studentID, ok := byName[strings.ToLower(strings.TrimSpace(row[0]))]
+		key := strings.ToLower(strings.TrimSpace(row[0]))
+		if ambiguousNames[key] {
+			common.WriteError(w, http.StatusBadRequest, fmt.Sprintf("row %d: ada lebih dari satu siswa bernama %q di kelas ini, import berdasarkan nama tidak bisa dipakai -- hubungi admin", rowNum+2, row[0]))
+			return
+		}
+		studentID, ok := byName[key]
 		if !ok {
 			common.WriteError(w, http.StatusBadRequest, fmt.Sprintf("row %d: siswa %q tidak ditemukan di kelas ini", rowNum+2, row[0]))
 			return
