@@ -18,12 +18,12 @@ func (s *Store) CreateFolder(ctx context.Context, f *model.QuestionFolder) error
 
 func (s *Store) ListFolders(ctx context.Context, schoolID, academicYearID string, page, perPage int) ([]model.QuestionFolder, int64, error) {
 	var total int64
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM question_folders WHERE school_id=$1 AND academic_year_id=$2 AND deleted_at IS NULL`, schoolID, academicYearID).Scan(&total); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM question_folders WHERE school_id=$1 AND academic_year_id=$2 AND deleted_at IS NULL AND is_hidden = false`, schoolID, academicYearID).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, school_id, academic_year_id, name, description, created_by, created_at, updated_at
-		FROM question_folders WHERE school_id=$1 AND academic_year_id=$2 AND deleted_at IS NULL
+		FROM question_folders WHERE school_id=$1 AND academic_year_id=$2 AND deleted_at IS NULL AND is_hidden = false
 		ORDER BY created_at DESC LIMIT $3 OFFSET $4`, schoolID, academicYearID, perPage, (page-1)*perPage)
 	if err != nil {
 		return nil, 0, err
