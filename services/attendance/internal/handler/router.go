@@ -60,6 +60,9 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 		pr.Get("/admin/student-attendance", h.StudentAttendanceAdmin)
 		pr.Get("/admin/student-attendance/summary", h.StudentAttendanceSummaryAdmin)
 		pr.Get("/admin/student-attendance/export", h.StudentAttendanceExport)
+		pr.Get("/admin/student-attendance/monthly-grid", h.StudentAttendanceMonthlyGridAdmin)
+		pr.Get("/admin/student-attendance/import-template", h.AdminAttendanceImportTemplate)
+		pr.Post("/admin/student-attendance/import", h.AdminAttendanceImport)
 		pr.Get("/admin/teacher-attendance", h.TeacherAttendanceAdmin)
 		pr.Get("/admin/teacher-attendance/export", h.TeacherAttendanceExport)
 
