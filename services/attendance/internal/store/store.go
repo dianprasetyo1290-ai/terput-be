@@ -897,7 +897,7 @@ func (s *Store) FindOrCreateImportSession(ctx context.Context, schoolID, academi
 	var id string
 	err := s.DB.QueryRowContext(ctx, `
 		INSERT INTO class_sessions (school_id, academic_year_id, term_id, classroom_id, guru_id, session_date, source)
-		VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, 'import')
+		VALUES ($1, $2, NULLIF($3, '')::uuid, $4, $5, $6, 'import')
 		ON CONFLICT (classroom_id, session_date) WHERE source = 'import'
 		DO UPDATE SET updated_at = now()
 		RETURNING id
@@ -913,7 +913,7 @@ func (s *Store) FindOrCreateImportSession(ctx context.Context, schoolID, academi
 func (s *Store) UpsertStudentAttendanceImport(ctx context.Context, classSessionID, schoolID, academicYearID, termID, classroomID, studentID, sessionDate, status, markedBy string) error {
 	_, err := s.DB.ExecContext(ctx, `
 		INSERT INTO student_attendances (class_session_id, school_id, academic_year_id, term_id, classroom_id, student_id, session_date, status, marked_by)
-		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8, $9)
+		VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6, $7, $8, $9)
 		ON CONFLICT (classroom_id, session_date, student_id)
 		DO UPDATE SET status = EXCLUDED.status, class_session_id = EXCLUDED.class_session_id, marked_by = EXCLUDED.marked_by, updated_at = now()
 	`, classSessionID, schoolID, academicYearID, termID, classroomID, studentID, sessionDate, status, markedBy)
