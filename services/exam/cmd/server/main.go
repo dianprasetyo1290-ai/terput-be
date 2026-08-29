@@ -3,9 +3,11 @@ package main
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/joho/godotenv"
 
+	"skci/exam/internal/cache"
 	"skci/exam/internal/common"
 	"skci/exam/internal/config"
 	"skci/exam/internal/handler"
@@ -35,7 +37,11 @@ func main() {
 	ic := httpclient.New(cfg.IdentityURL, cfg.AcademicURL, cfg.InternalKey)
 	h := handler.New(s, ic)
 
-	router := handler.NewRouter(h, cfg.JWTSecret, cfg.InternalKey, cfg.CORSOrigins)
+	// Redis response cache (client request 2026-08-29): fails open if
+	// REDIS_URL is unset/unreachable, see internal/cache's doc comment.
+	respCache := cache.New(cfg.RedisURL, 15*time.Second)
+
+	router := handler.NewRouter(h, cfg.JWTSecret, cfg.InternalKey, cfg.CORSOrigins, respCache)
 
 	log.Printf("exam-service listening on :%s", cfg.Port)
 	if err := http.ListenAndServe(":"+cfg.Port, router); err != nil {

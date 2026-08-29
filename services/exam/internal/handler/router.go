@@ -2,15 +2,26 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
+	"skci/exam/internal/cache"
 	"skci/exam/internal/common"
 )
 
-func NewRouter(h *Handler, jwtSecret, internalKey string, corsOrigins []string) http.Handler {
+// skipExamCache excludes every live-proctoring and student-attempt route
+// from the response cache -- monitor polls every 5s and must always be
+// current, and a student's own attempt state (position/status/answers) is
+// safety-critical: caching it risks the exam-taking UI showing stale
+// progress or letting a stale answer overwrite a newer one.
+func skipExamCache(r *http.Request) bool {
+	return strings.Contains(r.URL.Path, "/attempt") || strings.Contains(r.URL.Path, "/monitor")
+}
+
+func NewRouter(h *Handler, jwtSecret, internalKey string, corsOrigins []string, respCache *cache.Cache) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -29,6 +40,8 @@ func NewRouter(h *Handler, jwtSecret, internalKey string, corsOrigins []string) 
 
 	r.Group(func(pr chi.Router) {
 		pr.Use(common.JWTMiddleware(jwtSecret))
+		// Client request 2026-08-29: cache GET responses in Redis.
+		pr.Use(respCache.Middleware(skipExamCache))
 
 		// Kelola Tipe Ujian
 		pr.Route("/exam-types", func(rt chi.Router) {
@@ -111,6 +124,7 @@ func NewRouter(h *Handler, jwtSecret, internalKey string, corsOrigins []string) 
 	// with wget from inside the report container, not just code review.
 	r.Group(func(ir chi.Router) {
 		ir.Use(common.InternalOrJWTMiddleware(jwtSecret, internalKey))
+		ir.Use(respCache.Middleware(nil))
 		ir.Get("/exams/{id}/scores", h.ExamScores)
 		ir.Get("/exams", h.ListExams)
 		ir.Get("/exam-types", h.ListExamTypes)

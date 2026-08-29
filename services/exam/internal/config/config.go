@@ -15,6 +15,7 @@ type Config struct {
 	CORSOrigins       []string
 	SentryDSN         string
 	SentryEnvironment string
+	RedisURL          string
 }
 
 func Load() Config {
@@ -28,6 +29,7 @@ func Load() Config {
 		CORSOrigins:       corsOrigins(),
 		SentryDSN:         getEnv("SENTRY_DSN", ""),
 		SentryEnvironment: getEnv("SENTRY_ENVIRONMENT", "development"),
+		RedisURL:          getEnv("REDIS_URL", ""),
 	}
 }
 
