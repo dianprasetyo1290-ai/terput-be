@@ -15,6 +15,7 @@ type Config struct {
 	CORSOrigins       []string
 	SentryDSN         string
 	SentryEnvironment string
+	RedisURL          string
 }
 
 func getenv(key, fallback string) string {
@@ -53,5 +54,6 @@ func Load() Config {
 		CORSOrigins:       corsOrigins(),
 		SentryDSN:         getenv("SENTRY_DSN", ""),
 		SentryEnvironment: getenv("SENTRY_ENVIRONMENT", "development"),
+		RedisURL:          getenv("REDIS_URL", ""),
 	}
 }

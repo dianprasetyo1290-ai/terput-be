@@ -8,10 +8,11 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
+	"skci/evaluation/internal/cache"
 	"skci/evaluation/internal/common"
 )
 
-func NewRouter(h *Handler, jwtSecret string, corsOrigins []string) http.Handler {
+func NewRouter(h *Handler, jwtSecret string, corsOrigins []string, respCache *cache.Cache) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(common.SentryMiddleware())
@@ -29,6 +30,8 @@ func NewRouter(h *Handler, jwtSecret string, corsOrigins []string) http.Handler 
 
 	r.Group(func(pr chi.Router) {
 		pr.Use(common.JWTMiddleware(jwtSecret))
+		// Client request 2026-08-29: cache GET responses in Redis.
+		pr.Use(respCache.Middleware(nil))
 
 		// Feature 1: RPM (lesson plans)
 		pr.Route("/me/lesson-plans", func(sr chi.Router) {

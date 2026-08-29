@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"skci/evaluation/internal/cache"
 	"skci/evaluation/internal/client"
 	"skci/evaluation/internal/common"
 	"skci/evaluation/internal/config"
@@ -49,7 +50,12 @@ func main() {
 	clients := client.New(cfg.IdentityBaseURL, cfg.AcademicBaseURL, cfg.InternalKey)
 
 	h := handler.New(lessonPlanStore, periodStore, formStore, taskStore, protaStore, prosemStore, clients)
-	router := handler.NewRouter(h, cfg.JWTSecret, cfg.CORSOrigins)
+
+	// Redis response cache (client request 2026-08-29): fails open if
+	// REDIS_URL is unset/unreachable, see internal/cache's doc comment.
+	respCache := cache.New(cfg.RedisURL, 15*time.Second)
+
+	router := handler.NewRouter(h, cfg.JWTSecret, cfg.CORSOrigins, respCache)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
