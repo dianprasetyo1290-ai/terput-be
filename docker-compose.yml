@@ -40,6 +40,15 @@ services:
       timeout: 5s
       retries: 10
 
+  # Response cache (client request 2026-08-29: "cache semua di redis"),
+  # shared by all 6 services -- see each service's internal/cache package.
+  # No volume: purely a cache, losing it on restart is fine (every service
+  # fails open if this is ever unreachable, so it's not a startup dependency
+  # either -- no depends_on wiring needed on the app services below).
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
   # ---------- identity ----------
   identity-migrate:
     image: migrate/migrate:v4.18.1
@@ -63,6 +72,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${IDENTITY_DB_NAME}?sslmode=disable
       SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
       SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      REDIS_URL: redis://redis:6379/0
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
       SENTRY_DSN: ${SENTRY_DSN}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
@@ -93,6 +103,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${ACADEMIC_DB_NAME}?sslmode=disable
       SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
       SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      REDIS_URL: redis://redis:6379/0
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
       SENTRY_DSN: ${SENTRY_DSN}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
@@ -126,6 +137,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${ATTENDANCE_DB_NAME}?sslmode=disable
       SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
       SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      REDIS_URL: redis://redis:6379/0
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
       SENTRY_DSN: ${SENTRY_DSN}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
@@ -160,6 +172,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${EXAM_DB_NAME}?sslmode=disable
       SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
       SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      REDIS_URL: redis://redis:6379/0
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
       SENTRY_DSN: ${SENTRY_DSN}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
@@ -194,6 +207,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${EVALUATION_DB_NAME}?sslmode=disable
       SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
       SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      REDIS_URL: redis://redis:6379/0
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
       SENTRY_DSN: ${SENTRY_DSN}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
@@ -232,6 +246,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${REPORT_DB_NAME}?sslmode=disable
       SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
       SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      REDIS_URL: redis://redis:6379/0
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
       SENTRY_DSN: ${SENTRY_DSN}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
