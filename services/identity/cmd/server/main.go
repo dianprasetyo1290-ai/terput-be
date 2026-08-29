@@ -5,12 +5,14 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/joho/godotenv"
 
+	"skci/identity/internal/cache"
 	"skci/identity/internal/common"
 	"skci/identity/internal/handler"
 	"skci/identity/internal/store"
@@ -65,6 +67,16 @@ func main() {
 
 	app := handler.NewApp(db, jwtSecret, internalKey)
 
+	// Redis response cache (client request 2026-08-29): fails open if
+	// REDIS_URL is unset/unreachable, see internal/cache's doc comment.
+	respCache := cache.New(getenv("REDIS_URL", ""), 15*time.Second)
+	skipCache := func(r *http.Request) bool {
+		// /auth/me directly reflects the caller's just-switched active_role
+		// (POST /auth/switch-role) -- caching it risks a stale role
+		// showing right when the user is watching for the switch to land.
+		return r.URL.Path == "/auth/me"
+	}
+
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(common.SentryMiddleware())
@@ -83,6 +95,7 @@ func main() {
 	// Everything else requires a valid JWT.
 	r.Group(func(pr chi.Router) {
 		pr.Use(common.JWTMiddleware(jwtSecret))
+		pr.Use(respCache.Middleware(skipCache))
 
 		pr.Post("/auth/switch-role", app.SwitchRole)
 		pr.Get("/auth/me", app.Me)
@@ -196,6 +209,12 @@ func main() {
 	// through), so browser traffic is unaffected.
 	r.Group(func(ir chi.Router) {
 		ir.Use(common.InternalOrJWTMiddleware(jwtSecret, internalKey))
+		// Safe for X-Internal-Key callers too: cacheKey falls back to a
+		// shared "anon" scope when there are no JWT claims, but every
+		// tenant-scoping param these internal reads rely on (school_id
+		// etc.) travels as a query string param either way, and the full
+		// query string is already part of the key.
+		ir.Use(respCache.Middleware(nil))
 
 		// GET /users/export and /users/import-template are registered here
 		// (static siblings of /users/{id}), not in the JWT-only /users route
