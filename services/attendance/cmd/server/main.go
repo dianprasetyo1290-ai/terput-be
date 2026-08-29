@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/joho/godotenv"
 
+	"skci/attendance/internal/cache"
 	"skci/attendance/internal/client"
 	"skci/attendance/internal/common"
 	"skci/attendance/internal/handler"
@@ -66,10 +68,15 @@ func main() {
 	c := client.New()
 	h := handler.New(s, c)
 
+	// Redis response cache (client request 2026-08-29): fails open if
+	// REDIS_URL is unset/unreachable, see internal/cache's doc comment.
+	respCache := cache.New(getEnv("REDIS_URL", ""), 15*time.Second)
+
 	router := handler.NewRouter(h, handler.RouterConfig{
 		JWTSecret:   jwtSecret,
 		InternalKey: internalKey,
 		CORSOrigins: corsOrigins(),
+		Cache:       respCache,
 	})
 
 	log.Printf("attendance-service listening on :%s", port)

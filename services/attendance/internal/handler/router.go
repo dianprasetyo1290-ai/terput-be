@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
+	"skci/attendance/internal/cache"
 	"skci/attendance/internal/common"
 )
 
@@ -14,6 +15,7 @@ type RouterConfig struct {
 	JWTSecret   string
 	InternalKey string
 	CORSOrigins []string
+	Cache       *cache.Cache
 }
 
 func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
@@ -37,6 +39,17 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 
 	r.Group(func(pr chi.Router) {
 		pr.Use(common.JWTMiddleware(cfg.JWTSecret))
+		// Client request 2026-08-29: cache GET responses in Redis. "Now"
+		// dashboards excluded -- caching them defeats their purpose (they
+		// exist to show live state, e.g. who's teaching this exact moment).
+		pr.Use(cfg.Cache.Middleware(func(r *http.Request) bool {
+			switch r.URL.Path {
+			case "/me/sessions/today", "/dashboard/active-teachers":
+				return true
+			default:
+				return false
+			}
+		}))
 
 		// guru daily flow
 		pr.Post("/sessions/checkin", h.CheckIn)
@@ -78,6 +91,7 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 	// or a normal user JWT (see common.InternalOrJWTMiddleware).
 	r.Group(func(ir chi.Router) {
 		ir.Use(common.InternalOrJWTMiddleware(cfg.JWTSecret, cfg.InternalKey))
+		ir.Use(cfg.Cache.Middleware(nil))
 		ir.Get("/students/{id}/attendance-summary", h.StudentAttendanceSummary)
 	})
 
