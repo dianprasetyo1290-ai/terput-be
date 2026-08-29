@@ -14,6 +14,11 @@
 // opportunity (each user gets their own cached copies rather than sharing
 // with every other user at their school) in exchange for being safe by
 // construction.
+//
+// Content-Type/Content-Disposition are captured and replayed too, not
+// just the body -- several GET endpoints here return file downloads
+// (xlsx/csv templates and exports) rather than JSON; a cache hit that
+// forced application/json on those would corrupt the download.
 package cache
 
 import (
@@ -76,10 +81,12 @@ func cacheKey(r *http.Request) string {
 	return keyPrefix + hex.EncodeToString(sum[:])
 }
 
-// Middleware caches 200 responses to GET requests. skip lets a route opt
-// out (live/polling data that must never be stale -- see each service's
-// main.go for its own bypass list) — return true to bypass the cache
-// entirely for that request.
+// Middleware caches 200 responses to GET requests as a Redis hash (body +
+// Content-Type + Content-Disposition, so file downloads replay correctly
+// from cache too). skip lets a route opt out (live/polling data that must
+// never be stale -- see each service's main.go/router.go for its own
+// bypass list) — return true to bypass the cache entirely for that
+// request.
 func (c *Cache) Middleware(skip func(*http.Request) bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -88,19 +95,36 @@ func (c *Cache) Middleware(skip func(*http.Request) bool) func(http.Handler) htt
 				return
 			}
 			key := cacheKey(r)
-			if cached, err := c.rdb.Get(r.Context(), key).Result(); err == nil {
-				w.Header().Set("Content-Type", "application/json")
+			if fields, err := c.rdb.HGetAll(r.Context(), key).Result(); err == nil && len(fields) > 0 {
+				if ct := fields["ct"]; ct != "" {
+					w.Header().Set("Content-Type", ct)
+				}
+				if cd := fields["cd"]; cd != "" {
+					w.Header().Set("Content-Disposition", cd)
+				}
 				w.Header().Set("X-Cache", "HIT")
-				_, _ = io.WriteString(w, cached)
+				_, _ = io.WriteString(w, fields["body"])
 				return
 			}
 			rec := &recorder{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rec, r)
-			if rec.status == http.StatusOK && rec.body.Len() > 0 {
-				// Best-effort: a failed Set means the next request just
-				// misses the cache too, not an error the caller ever sees.
-				_ = c.rdb.Set(context.Background(), key, rec.body.String(), c.ttl).Err()
+			if rec.status != http.StatusOK || rec.body.Len() == 0 {
+				return
 			}
+			fields := map[string]interface{}{"body": rec.body.String()}
+			if ct := rec.Header().Get("Content-Type"); ct != "" {
+				fields["ct"] = ct
+			}
+			if cd := rec.Header().Get("Content-Disposition"); cd != "" {
+				fields["cd"] = cd
+			}
+			// Best-effort: a failed Set means the next request just misses
+			// the cache too, not an error the caller ever sees.
+			ctx := context.Background()
+			pipe := c.rdb.Pipeline()
+			pipe.HSet(ctx, key, fields)
+			pipe.Expire(ctx, key, c.ttl)
+			_, _ = pipe.Exec(ctx)
 		})
 	}
 }
