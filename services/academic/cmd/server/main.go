@@ -5,12 +5,14 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/joho/godotenv"
 
+	"skci/academic/internal/cache"
 	"skci/academic/internal/client"
 	"skci/academic/internal/common"
 	"skci/academic/internal/handler"
@@ -79,6 +81,10 @@ func main() {
 	ic := client.NewIdentityClient()
 	h := handler.New(s, ic)
 
+	// Redis response cache (client request 2026-08-29): fails open if
+	// REDIS_URL is unset/unreachable, see internal/cache's doc comment.
+	respCache := cache.New(os.Getenv("REDIS_URL"), 15*time.Second)
+
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(common.SentryMiddleware())
@@ -94,6 +100,8 @@ func main() {
 
 	r.Group(func(r chi.Router) {
 		r.Use(common.JWTMiddleware(jwtSecret))
+		// Client request 2026-08-29: cache GET responses in Redis.
+		r.Use(respCache.Middleware(nil))
 
 		// Tahun Akademik / Term
 		r.Post("/academic-years/{academic_year_id}/terms/bootstrap", h.BootstrapTerms)
@@ -162,6 +170,13 @@ func main() {
 	// by its UUID path param.
 	r.Group(func(r chi.Router) {
 		r.Use(common.InternalOrJWTMiddleware(jwtSecret, internalKey))
+		// active-now is deliberately excluded -- it's "who's teaching this
+		// exact moment", the one route in this service where caching would
+		// defeat the point (matches attendance-service's identical
+		// exclusion of its downstream /dashboard/active-teachers).
+		r.Use(respCache.Middleware(func(req *http.Request) bool {
+			return req.URL.Path == "/schedules/active-now"
+		}))
 
 		r.Get("/terms/{id}", h.GetTerm)
 		r.Get("/classrooms/{id}", h.GetClassroom)
