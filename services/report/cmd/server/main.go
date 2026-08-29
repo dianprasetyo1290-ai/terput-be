@@ -9,6 +9,7 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"skci/report/internal/cache"
 	"skci/report/internal/common"
 	"skci/report/internal/handler"
 	"skci/report/internal/store"
@@ -75,7 +76,11 @@ func main() {
 		Exam:       upstream.NewExamClient(examURL, internalKey, timeout),
 	}
 
-	router := handler.NewRouter(deps, jwtSecret, corsOrigins())
+	// Redis response cache (client request 2026-08-29): fails open if
+	// REDIS_URL is unset/unreachable, see internal/cache's doc comment.
+	respCache := cache.New(getenv("REDIS_URL", ""), 15*time.Second)
+
+	router := handler.NewRouter(deps, jwtSecret, corsOrigins(), respCache)
 
 	log.Printf("report-service listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, router); err != nil {
