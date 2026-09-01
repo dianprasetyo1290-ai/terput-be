@@ -6,6 +6,10 @@
 # zero application code changes, since every service already just reads
 # DATABASE_URL from env. See docs/CONVENTIONS.md.
 #
+# Postgres itself is NOT one of the services below — it runs off-compose on
+# its own VM (POSTGRES_HOST/POSTGRES_PORT in .env). See the note above the
+# `redis:` service for why, and don't add a local `postgres:` service back.
+#
 # All secrets/ports/db-names are parameterized via .env (loaded
 # automatically by `docker compose` from this same directory) — nothing
 # below is a hardcoded credential; see .env.example for the full list and
@@ -13,32 +17,22 @@
 #
 #   cp .env.example .env   # first time only
 #   docker compose up -d --build
-#   docker compose ps            # 1 postgres + 6 migrate (exit 0) + 6 app containers
+#   docker compose ps            # 6 migrate (exit 0) + 6 app containers + web
 #   curl localhost:8081/healthz  # ... 8082 8083 8084 8085 8086
-#   docker compose down          # -v to also wipe the shared DB volume
 #
 # Each service also keeps its own standalone services/<name>/docker-compose.yml
 # (own throwaway postgres) for developing that one service in total isolation —
 # unrelated to this file, left as-is.
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: postgres
-      POSTGRES_MULTIPLE_DATABASES: ${IDENTITY_DB_NAME},${ACADEMIC_DB_NAME},${ATTENDANCE_DB_NAME},${EXAM_DB_NAME},${EVALUATION_DB_NAME},${REPORT_DB_NAME}
-    ports: ["${POSTGRES_PORT}:5432"]
-    volumes:
-      - sekoci_pgdata:/var/lib/postgresql/data
-      - ./db-init/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+  # Postgres itself runs off-compose, on its own VM (sekoci-db-master,
+  # POSTGRES_HOST in .env) -- ops moved it there for reliability separate
+  # from app deploys/rebuilds. Every service below just points DATABASE_URL
+  # at ${POSTGRES_HOST}:${POSTGRES_PORT}; see docker-compose.ydk13.yml for
+  # the same pattern on the second tenant. Do not reintroduce a local
+  # `postgres:` container here -- docker compose up would then construct a
+  # brand-new empty volume and every service would silently start against
+  # that instead of the real data (this happened once, 2026-09-01).
 
   # Response cache (client request 2026-08-29: "cache semua di redis"),
   # shared by all 6 services -- see each service's internal/cache package.
@@ -52,24 +46,19 @@ services:
   # ---------- identity ----------
   identity-migrate:
     image: migrate/migrate:v4.18.1
-    depends_on:
-      postgres:
-        condition: service_healthy
     volumes: ["./services/identity/migrations:/migrations"]
-    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${IDENTITY_DB_NAME}?sslmode=disable", "up"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${IDENTITY_DB_NAME}?sslmode=disable", "up"]
     restart: "no"
 
   identity:
     build: ./services/identity
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       identity-migrate:
         condition: service_completed_successfully
     environment:
       PORT: ${IDENTITY_PORT}
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${IDENTITY_DB_NAME}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${IDENTITY_DB_NAME}?sslmode=disable
       SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
       SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
       REDIS_URL: redis://redis:6379/0
@@ -81,26 +70,21 @@ services:
   # ---------- academic ----------
   academic-migrate:
     image: migrate/migrate:v4.18.1
-    depends_on:
-      postgres:
-        condition: service_healthy
     volumes: ["./services/academic/migrations:/migrations"]
-    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${ACADEMIC_DB_NAME}?sslmode=disable", "up"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${ACADEMIC_DB_NAME}?sslmode=disable", "up"]
     restart: "no"
 
   academic:
     build: ./services/academic
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       academic-migrate:
         condition: service_completed_successfully
       identity:
         condition: service_started
     environment:
       PORT: ${ACADEMIC_PORT}
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${ACADEMIC_DB_NAME}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${ACADEMIC_DB_NAME}?sslmode=disable
       SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
       SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
       REDIS_URL: redis://redis:6379/0
@@ -113,19 +97,14 @@ services:
   # ---------- attendance ----------
   attendance-migrate:
     image: migrate/migrate:v4.18.1
-    depends_on:
-      postgres:
-        condition: service_healthy
     volumes: ["./services/attendance/migrations:/migrations"]
-    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${ATTENDANCE_DB_NAME}?sslmode=disable", "up"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${ATTENDANCE_DB_NAME}?sslmode=disable", "up"]
     restart: "no"
 
   attendance:
     build: ./services/attendance
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       attendance-migrate:
         condition: service_completed_successfully
       identity:
@@ -134,7 +113,7 @@ services:
         condition: service_started
     environment:
       PORT: ${ATTENDANCE_PORT}
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${ATTENDANCE_DB_NAME}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${ATTENDANCE_DB_NAME}?sslmode=disable
       SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
       SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
       REDIS_URL: redis://redis:6379/0
@@ -148,19 +127,14 @@ services:
   # ---------- exam ----------
   exam-migrate:
     image: migrate/migrate:v4.18.1
-    depends_on:
-      postgres:
-        condition: service_healthy
     volumes: ["./services/exam/migrations:/migrations"]
-    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${EXAM_DB_NAME}?sslmode=disable", "up"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${EXAM_DB_NAME}?sslmode=disable", "up"]
     restart: "no"
 
   exam:
     build: ./services/exam
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       exam-migrate:
         condition: service_completed_successfully
       identity:
@@ -169,7 +143,7 @@ services:
         condition: service_started
     environment:
       PORT: ${EXAM_PORT}
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${EXAM_DB_NAME}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${EXAM_DB_NAME}?sslmode=disable
       SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
       SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
       REDIS_URL: redis://redis:6379/0
@@ -183,19 +157,14 @@ services:
   # ---------- evaluation ----------
   evaluation-migrate:
     image: migrate/migrate:v4.18.1
-    depends_on:
-      postgres:
-        condition: service_healthy
     volumes: ["./services/evaluation/migrations:/migrations"]
-    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${EVALUATION_DB_NAME}?sslmode=disable", "up"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${EVALUATION_DB_NAME}?sslmode=disable", "up"]
     restart: "no"
 
   evaluation:
     build: ./services/evaluation
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       evaluation-migrate:
         condition: service_completed_successfully
       identity:
@@ -204,7 +173,7 @@ services:
         condition: service_started
     environment:
       PORT: ${EVALUATION_PORT}
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${EVALUATION_DB_NAME}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${EVALUATION_DB_NAME}?sslmode=disable
       SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
       SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
       REDIS_URL: redis://redis:6379/0
@@ -218,19 +187,14 @@ services:
   # ---------- report ----------
   report-migrate:
     image: migrate/migrate:v4.18.1
-    depends_on:
-      postgres:
-        condition: service_healthy
     volumes: ["./services/report/migrations:/migrations"]
-    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${REPORT_DB_NAME}?sslmode=disable", "up"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${REPORT_DB_NAME}?sslmode=disable", "up"]
     restart: "no"
 
   report:
     build: ./services/report
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       report-migrate:
         condition: service_completed_successfully
       identity:
@@ -243,7 +207,7 @@ services:
         condition: service_started
     environment:
       PORT: ${REPORT_PORT}
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${REPORT_DB_NAME}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${REPORT_DB_NAME}?sslmode=disable
       SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
       SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
       REDIS_URL: redis://redis:6379/0
@@ -258,7 +222,10 @@ services:
 
   # ---------- web (frontend, nginx reverse-proxying /api/<service>/) ----------
   web:
-    build: ./web
+    build:
+      context: ./web
+      args:
+        VITE_BASE: ${VITE_BASE:-/}
     restart: unless-stopped
     depends_on:
       - identity
@@ -268,6 +235,3 @@ services:
       - evaluation
       - report
     ports: ["80:80"]
-
-volumes:
-  sekoci_pgdata:
