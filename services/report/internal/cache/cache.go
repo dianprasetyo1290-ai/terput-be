@@ -69,13 +69,50 @@ func (r *recorder) Write(b []byte) (int, error) {
 	return r.ResponseWriter.Write(b)
 }
 
-func cacheKey(r *http.Request) string {
+func schoolScope(r *http.Request) string {
+	if c := common.FromCtx(r); c != nil {
+		return c.SchoolID
+	}
+	return "anon"
+}
+
+// versionKey holds a per-school counter that is part of every cache key
+// and is bumped on every mutating request. Bumping it orphans that
+// school's whole cached set at once (the orphans then die on their own
+// TTL), which is what makes a write immediately visible to the very next
+// read instead of up to `ttl` later.
+//
+// SEKOCI V8 ("Penilaian Formatif: nilai yang sudah diinput HILANG"): a
+// guru saved a nilai via PUT /formative, navigated away and back inside
+// the 15s window, and GET /formative replayed the cached pre-save body --
+// the score looked lost even though it was safely in Postgres. /settings/
+// had already been opted out of the cache for the same reason; this fixes
+// the cause instead of exempting one more path.
+func versionKey(schoolID string) string { return keyPrefix + "ver:" + schoolID }
+
+func (c *Cache) version(ctx context.Context, schoolID string) string {
+	v, err := c.rdb.Get(ctx, versionKey(schoolID)).Result()
+	if err != nil {
+		return "0"
+	}
+	return v
+}
+
+func cacheKey(r *http.Request, version string) string {
 	scope := "anon"
 	if c := common.FromCtx(r); c != nil {
 		scope = c.SchoolID + ":" + c.UserID
 	}
-	sum := sha256.Sum256([]byte(r.Method + " " + r.URL.Path + "?" + r.URL.RawQuery + " " + scope))
+	sum := sha256.Sum256([]byte(r.Method + " " + r.URL.Path + "?" + r.URL.RawQuery + " " + scope + " v" + version))
 	return keyPrefix + hex.EncodeToString(sum[:])
+}
+
+func isMutation(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	}
+	return false
 }
 
 // Middleware caches 200 responses to GET requests as a Redis hash (body +
@@ -86,11 +123,24 @@ func cacheKey(r *http.Request) string {
 func (c *Cache) Middleware(skip func(*http.Request) bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if c.rdb == nil || r.Method != http.MethodGet || (skip != nil && skip(r)) {
+			if c.rdb == nil {
 				next.ServeHTTP(w, r)
 				return
 			}
-			key := cacheKey(r)
+			if isMutation(r.Method) {
+				next.ServeHTTP(w, r)
+				// Bumped unconditionally, including for a write that
+				// failed: the cost is one extra cache miss, versus
+				// serving a stale body if a status check ever got the
+				// success/failure call wrong.
+				c.rdb.Incr(context.Background(), versionKey(schoolScope(r)))
+				return
+			}
+			if r.Method != http.MethodGet || (skip != nil && skip(r)) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			key := cacheKey(r, c.version(r.Context(), schoolScope(r)))
 			if fields, err := c.rdb.HGetAll(r.Context(), key).Result(); err == nil && len(fields) > 0 {
 				if ct := fields["ct"]; ct != "" {
 					w.Header().Set("Content-Type", ct)
