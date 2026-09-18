@@ -68,6 +68,15 @@ func HasRole(db *sql.DB, userID, role, schoolID string) (bool, error) {
 // dashboard roles (superadmin > admin > guru > siswa) since jabatan-only
 // roles have no dashboard of their own.
 func PickActiveRole(roles []model.UserSchoolRole) (activeRole, schoolID string, allRoleNames []string, ok bool) {
+	// Priority only orders the roles that can collide on one account; it is
+	// NOT an allowlist. It used to be treated as one -- any account holding
+	// *only* a role missing from this list (walikelas, kepala_sekolah,
+	// kepala_yayasan, and V11's pengawas) fell through to ok=false, so
+	// Login answered "account has no assigned role" and the login screen
+	// showed "Email atau password salah." The bug stayed hidden because
+	// every walikelas/kepala_sekolah in production also holds guru; the
+	// first pengawas-only account exposed it. The fallback below means a
+	// role added later never has to be remembered here again.
 	priority := []string{"superadmin", "admin", "guru", "siswa"}
 	byRole := map[string]model.UserSchoolRole{}
 	// roles is ordered by created_at ascending (see UserRoles) — a user can hold the same
@@ -91,6 +100,16 @@ func PickActiveRole(roles []model.UserSchoolRole) (activeRole, schoolID string, 
 			}
 			return r.Role, sid, allRoleNames, true
 		}
+	}
+	// Holds a role, just not a prioritised one: use the oldest assignment.
+	// roles is ordered by created_at ascending (see UserRoles).
+	if len(roles) > 0 {
+		r := roles[0]
+		sid := ""
+		if r.SchoolID != nil {
+			sid = *r.SchoolID
+		}
+		return r.Role, sid, allRoleNames, true
 	}
 	return "", "", allRoleNames, false
 }
