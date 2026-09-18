@@ -3,6 +3,7 @@ package upstream
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -68,12 +69,8 @@ type examScoresEnvelope struct {
 // ListExams fetches GET /exams?classroom_id=&term_id=, all exams scheduled
 // for that classroom in that term (across all subjects).
 func (ec *ExamClient) ListExams(ctx context.Context, classroomID, termID string) ([]Exam, error) {
-	var out []Exam
-	path := fmt.Sprintf("/exams?classroom_id=%s&term_id=%s", classroomID, termID)
-	if err := ec.c.getJSON(ctx, "ListExams", path, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return getAllPages[Exam](ctx, ec.c, "ListExams",
+		fmt.Sprintf("/exams?classroom_id=%s&term_id=%s", classroomID, termID))
 }
 
 // ListExamTypes fetches GET /exam-types?academic_year_id=, used to resolve
@@ -81,12 +78,45 @@ func (ec *ExamClient) ListExams(ctx context.Context, classroomID, termID string)
 // academic_year_id (it does not resolve "current year" itself, per its own
 // README).
 func (ec *ExamClient) ListExamTypes(ctx context.Context, academicYearID string) ([]ExamType, error) {
-	var out []ExamType
-	path := fmt.Sprintf("/exam-types?academic_year_id=%s", academicYearID)
-	if err := ec.c.getJSON(ctx, "ListExamTypes", path, &out); err != nil {
-		return nil, err
+	return getAllPages[ExamType](ctx, ec.c, "ListExamTypes",
+		fmt.Sprintf("/exam-types?academic_year_id=%s", academicYearID))
+}
+
+// getAllPages walks every page of a paginated exam-service list instead of
+// silently taking the first one.
+//
+// Both endpoints above run through common.Pagination, which defaults to
+// per_page=20 and orders exams created_at DESC. Asking for neither page nor
+// per_page therefore returned the 20 NEWEST exams and dropped the rest with
+// no error and no warning -- so at SMK Global Persada Mandiri, where two
+// classrooms hold 53 and 46 exams in one term, Generate Rapor could not see
+// the STS sat the week before, only the newest batch. The school read that
+// as "nilai ujian minggu lalu hilang". Same trap on exam-types: a school
+// with more than 20 types would lose the mapping_rapor for the extras, and
+// an exam whose type has no mapping is skipped outright.
+//
+// Stops on the first short page; the page cap is a guard against an
+// upstream that never returns one, not an expected limit.
+func getAllPages[T any](ctx context.Context, c *client, op, path string) ([]T, error) {
+	const perPage = 200 // exam-service caps per_page at 200
+	const maxPages = 50
+	sep := "&"
+	if !strings.Contains(path, "?") {
+		sep = "?"
 	}
-	return out, nil
+	var all []T
+	for page := 1; page <= maxPages; page++ {
+		var batch []T
+		p := fmt.Sprintf("%s%sper_page=%d&page=%d", path, sep, perPage, page)
+		if err := c.getJSON(ctx, op, p, &batch); err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < perPage {
+			break
+		}
+	}
+	return all, nil
 }
 
 // GetScores fetches GET /exams/{id}/scores, all students' scores for one
