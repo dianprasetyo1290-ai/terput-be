@@ -149,3 +149,97 @@ func TestListMyExams_DateBucketing(t *testing.T) {
 		t.Fatalf("expected ErrNotEditable unpublishing an already-draft exam, got %v", err)
 	}
 }
+
+// TestListExams_FolderNone is the runnable check for the "Tanpa Folder"
+// listing. An exam created outside a Bank Soal folder has folder_id NULL and
+// was reachable from nowhere in the UI, while the guru dashboard still
+// counted it -- SMK GPM saw "Total Ujian 4" and found only 3 in the folder.
+// folder_id=none must return exactly the unfiled ones, and a real folder id
+// must keep excluding them.
+func TestListExams_FolderNone(t *testing.T) {
+	dsn := os.Getenv("EXAM_TEST_DATABASE_URL")
+	if dsn == "" {
+		dsn = "postgres://sekoci:change-me@localhost:5480/skci_exam?sslmode=disable"
+	}
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Skipf("skipping: could not open %s: %v", dsn, err)
+	}
+	if err := db.Ping(); err != nil {
+		t.Skipf("skipping: dev postgres not reachable at %s: %v", dsn, err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	ctx := context.Background()
+	newID := func() string {
+		var id string
+		if err := db.QueryRowContext(ctx, "SELECT gen_random_uuid()").Scan(&id); err != nil {
+			t.Fatalf("gen_random_uuid: %v", err)
+		}
+		return id
+	}
+	schoolID, academicYearID, termID := newID(), newID(), newID()
+	classroomID, subjectID, teacherID := newID(), newID(), newID()
+
+	var examTypeID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO exam_types (school_id, academic_year_id, name, mapping_rapor, created_by)
+		VALUES ($1,$2,'folder filter type','sumatif',$3) RETURNING id`, schoolID, academicYearID, teacherID).Scan(&examTypeID); err != nil {
+		t.Fatalf("insert exam_type: %v", err)
+	}
+	t.Cleanup(func() { db.ExecContext(ctx, `DELETE FROM exam_types WHERE id=$1`, examTypeID) })
+
+	var folderID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO question_folders (school_id, academic_year_id, name, created_by)
+		VALUES ($1,$2,'folder filter',$3) RETURNING id`, schoolID, academicYearID, teacherID).Scan(&folderID); err != nil {
+		t.Fatalf("insert question_folder: %v", err)
+	}
+	t.Cleanup(func() { db.ExecContext(ctx, `DELETE FROM question_folders WHERE id=$1`, folderID) })
+
+	insertExam := func(title string, folder *string) string {
+		now := time.Now()
+		var id string
+		err := db.QueryRowContext(ctx, `
+			INSERT INTO exams (school_id, academic_year_id, term_id, exam_type_id, title, classroom_id, subject_id,
+				teacher_id, start_at, end_at, is_published, created_by, folder_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,$8,$11) RETURNING id`,
+			schoolID, academicYearID, termID, examTypeID, title, classroomID, subjectID, teacherID,
+			now, now.Add(time.Hour), folder).Scan(&id)
+		if err != nil {
+			t.Fatalf("insert exam %s: %v", title, err)
+		}
+		t.Cleanup(func() { db.ExecContext(ctx, `DELETE FROM exams WHERE id=$1`, id) })
+		return id
+	}
+	filedID := insertExam("di dalam folder", &folderID)
+	unfiledID := insertExam("tanpa folder", nil)
+
+	s := New(db)
+	ids := func(folderFilter string) map[string]bool {
+		rows, _, err := s.ListExams(ctx, ExamFilter{SchoolID: schoolID, FolderID: folderFilter}, 1, 100)
+		if err != nil {
+			t.Fatalf("ListExams(folder_id=%q): %v", folderFilter, err)
+		}
+		got := map[string]bool{}
+		for _, e := range rows {
+			got[e.ID] = true
+		}
+		return got
+	}
+
+	none := ids("none")
+	if !none[unfiledID] {
+		t.Errorf("folder_id=none must return the unfiled exam")
+	}
+	if none[filedID] {
+		t.Errorf("folder_id=none must not return an exam that has a folder")
+	}
+	inFolder := ids(folderID)
+	if !inFolder[filedID] || inFolder[unfiledID] {
+		t.Errorf("folder_id=<id> must return only that folder's exams")
+	}
+	if all := ids(""); !all[filedID] || !all[unfiledID] {
+		t.Errorf("no folder filter must return both")
+	}
+}

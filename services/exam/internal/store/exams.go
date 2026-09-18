@@ -135,7 +135,15 @@ func (s *Store) ListExams(ctx context.Context, f ExamFilter, page, perPage int) 
 	if f.IsPublished != nil {
 		add("e.is_published", *f.IsPublished)
 	}
-	if f.FolderID != "" {
+	// "none" means folder_id IS NULL. An exam created outside a Bank Soal
+	// folder used to be unreachable in the UI -- the sidebar has no Kelola
+	// Ujian entry (V4 item 1), so the only way in is a folder, and an exam
+	// with no folder belongs to none of them. The guru dashboard counted it
+	// anyway, which is how it surfaced: "terlihat di luar 4, pas masuk hanya
+	// ada 3". Bank Soal now shows a "Tanpa Folder" entry backed by this.
+	if f.FolderID == "none" {
+		where += " AND e.folder_id IS NULL"
+	} else if f.FolderID != "" {
 		add("e.folder_id", f.FolderID)
 	}
 	if f.Title != "" {
