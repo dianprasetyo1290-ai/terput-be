@@ -11,3 +11,4 @@ vendor/
 *.tar.gz
 web/playwright-report/
 web/test-results/
+.claude-flow/
