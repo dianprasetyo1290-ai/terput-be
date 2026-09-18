@@ -53,6 +53,47 @@ func (s *Store) IssueToken(ctx context.Context, schoolID, academicYearID, userID
 	return t, nil
 }
 
+// BulkIssueTokens issues vouchers for many students in one round trip
+// (single INSERT via unnest) instead of one query per student. A sequential
+// per-student loop over a large roster (270+ students) takes long enough on
+// an external-managed DB that a client/proxy timeout can cut the connection
+// mid-loop -- root-caused via "generate token dari nomer 201 gamau
+// ke-generate": the old loop aborted entirely on the first error (including
+// a context-canceled from a dropped connection), silently leaving every
+// remaining student without a token with no way to resume. A single
+// statement can't be interrupted mid-row this way.
+func (s *Store) BulkIssueTokens(ctx context.Context, schoolID, academicYearID string, userIDs []string, createdBy string, validFrom, validUntil time.Time) ([]*model.ExamToken, error) {
+	var ayID *string
+	if academicYearID != "" {
+		ayID = &academicYearID
+	}
+	codes := make([]string, len(userIDs))
+	for i := range userIDs {
+		codes[i] = GenerateCode(8)
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+		INSERT INTO exam_tokens (school_id, academic_year_id, user_id, code, valid_from, valid_until, created_by)
+		SELECT $1, $2, u, c, $5, $6, $7
+		FROM unnest($3::uuid[], $4::text[]) AS t(u, c)
+		ON CONFLICT (school_id, user_id) DO UPDATE SET valid_from=EXCLUDED.valid_from, valid_until=EXCLUDED.valid_until, updated_at=now()
+		RETURNING id, user_id, code, regenerated_count, created_at, updated_at`,
+		schoolID, ayID, userIDs, codes, validFrom, validUntil, createdBy,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.ExamToken
+	for rows.Next() {
+		t := &model.ExamToken{SchoolID: schoolID, AcademicYearID: ayID, ValidFrom: validFrom, ValidUntil: validUntil, CreatedBy: createdBy}
+		if err := rows.Scan(&t.ID, &t.UserID, &t.Code, &t.RegeneratedCount, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) RegenerateToken(ctx context.Context, id, schoolID string, validFrom, validUntil *time.Time) (*model.ExamToken, error) {
 	newCode := GenerateCode(8)
 	var t model.ExamToken

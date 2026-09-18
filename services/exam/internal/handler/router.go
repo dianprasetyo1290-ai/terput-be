@@ -78,9 +78,11 @@ func NewRouter(h *Handler, jwtSecret, internalKey string, corsOrigins []string, 
 
 			rt.Post("/{id}/questions", h.AddExamQuestion)
 			rt.Delete("/{id}/questions/{eqId}", h.RemoveExamQuestion)
+			rt.Patch("/{id}/questions/{eqId}/points", h.UpdateExamQuestionPoints)
 			rt.Post("/{id}/questions/import", h.ImportQuestions)
 			rt.Post("/{id}/normalize-points", h.NormalizeDraftPoints)
 			rt.Post("/{id}/publish", h.PublishExam)
+			rt.Post("/{id}/unpublish", h.UnpublishExam)
 			rt.Post("/{id}/duplicate", h.DuplicateExam)
 
 			// Live monitoring
@@ -128,6 +130,9 @@ func NewRouter(h *Handler, jwtSecret, internalKey string, corsOrigins []string, 
 		ir.Get("/exams/{id}/scores", h.ExamScores)
 		ir.Get("/exams", h.ListExams)
 		ir.Get("/exam-types", h.ListExamTypes)
+		// identity-service's Export CSV joins in each student's voucher code
+		// this way (see internal/handler/tokens.go ListTokens doc comment).
+		ir.Get("/vouchers", h.ListTokens)
 	})
 
 	return r

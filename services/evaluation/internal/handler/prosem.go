@@ -19,7 +19,7 @@ import (
 const prosemSheet = "TEMPLATE_PROSEM"
 
 var prosemHeaders = []string{
-	"No", "Materi Pokok / Aktivitas", "Alokasi (JP)", "Bulan Target", "Minggu Ke-",
+	"No", "Materi Pokok/Aktivitas", "Alokasi (JP)", "Bulan Target", "Minggu Ke-",
 	"Estimasi Tanggal (YYYY-MM-DD)", "Tipe Aktivitas LMS", "Status Input (Guru)",
 }
 

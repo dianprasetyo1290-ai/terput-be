@@ -16,8 +16,11 @@ func Pagination(r *http.Request) (page, perPage int) {
 		}
 	}
 	if v := r.URL.Query().Get("per_page"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			perPage = n
+			if perPage > 200 {
+				perPage = 200
+			}
 		}
 	}
 	return

@@ -31,15 +31,18 @@ type schoolRequest struct {
 	Email              *string `json:"email"`
 	Website            *string `json:"website"`
 	Logo               *string `json:"logo"`
+	// GovernmentLogo: SEKOCI V10 item C -- the "Logo Pemerintah" printed at
+	// the rapor letterhead's top-left, beside the school's own logo.
+	GovernmentLogo *string `json:"government_logo"`
 }
 
 const schoolCols = `id, foundation_id, name, code, level, address, subdistrict, district, city, province,
-	registration_number, year_founded, phone_number, email, website, logo, is_active, current_academic_year_id, created_at, updated_at`
+	registration_number, year_founded, phone_number, email, website, logo, government_logo, is_active, current_academic_year_id, created_at, updated_at`
 
 func scanSchool(row interface{ Scan(...interface{}) error }) (model.School, error) {
 	var s model.School
 	err := row.Scan(&s.ID, &s.FoundationID, &s.Name, &s.Code, &s.Level, &s.Address, &s.Subdistrict, &s.District, &s.City, &s.Province,
-		&s.RegistrationNumber, &s.YearFounded, &s.PhoneNumber, &s.Email, &s.Website, &s.Logo, &s.IsActive, &s.CurrentAcademicYearID, &s.CreatedAt, &s.UpdatedAt)
+		&s.RegistrationNumber, &s.YearFounded, &s.PhoneNumber, &s.Email, &s.Website, &s.Logo, &s.GovernmentLogo, &s.IsActive, &s.CurrentAcademicYearID, &s.CreatedAt, &s.UpdatedAt)
 	return s, err
 }
 
@@ -100,11 +103,11 @@ func (a *App) CreateSchool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	row := a.DB.QueryRow(`INSERT INTO schools (foundation_id, name, code, level, address, subdistrict, district, city, province,
-			registration_number, year_founded, phone_number, email, website, logo)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+			registration_number, year_founded, phone_number, email, website, logo, government_logo)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		RETURNING `+schoolCols,
 		req.FoundationID, req.Name, req.Code, req.Level, req.Address, req.Subdistrict, req.District, req.City, req.Province,
-		req.RegistrationNumber, req.YearFounded, req.PhoneNumber, req.Email, req.Website, req.Logo)
+		req.RegistrationNumber, req.YearFounded, req.PhoneNumber, req.Email, req.Website, req.Logo, req.GovernmentLogo)
 	s, err := scanSchool(row)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to create school: "+err.Error())
@@ -155,11 +158,11 @@ func (a *App) UpdateSchool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	row := a.DB.QueryRow(`UPDATE schools SET foundation_id=$1, name=$2, code=$3, level=$4, address=$5, subdistrict=$6, district=$7,
-			city=$8, province=$9, registration_number=$10, year_founded=$11, phone_number=$12, email=$13, website=$14, logo=$15, updated_at=now()
-		WHERE id=$16 AND deleted_at IS NULL
+			city=$8, province=$9, registration_number=$10, year_founded=$11, phone_number=$12, email=$13, website=$14, logo=$15, government_logo=$16, updated_at=now()
+		WHERE id=$17 AND deleted_at IS NULL
 		RETURNING `+schoolCols,
 		req.FoundationID, req.Name, req.Code, req.Level, req.Address, req.Subdistrict, req.District, req.City, req.Province,
-		req.RegistrationNumber, req.YearFounded, req.PhoneNumber, req.Email, req.Website, req.Logo, id)
+		req.RegistrationNumber, req.YearFounded, req.PhoneNumber, req.Email, req.Website, req.Logo, req.GovernmentLogo, id)
 	s, err := scanSchool(row)
 	if err == sql.ErrNoRows {
 		common.WriteError(w, http.StatusNotFound, "school not found")

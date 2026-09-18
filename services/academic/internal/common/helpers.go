@@ -30,8 +30,10 @@ func ParsePage(r *http.Request) (page, perPage int) {
 		page = 1
 	}
 	perPage, _ = strconv.Atoi(r.URL.Query().Get("per_page"))
-	if perPage < 1 || perPage > 200 {
+	if perPage < 1 {
 		perPage = 20
+	} else if perPage > 200 {
+		perPage = 200
 	}
 	return page, perPage
 }

@@ -29,6 +29,7 @@ type School struct {
 	Email                 *string   `json:"email"`
 	Website               *string   `json:"website"`
 	Logo                  *string   `json:"logo"`
+	GovernmentLogo        *string   `json:"government_logo"`
 	IsActive              bool      `json:"is_active"`
 	CurrentAcademicYearID *string   `json:"current_academic_year_id"`
 	CreatedAt             time.Time `json:"created_at"`

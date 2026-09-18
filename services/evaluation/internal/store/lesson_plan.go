@@ -23,23 +23,30 @@ func marshalMap(m map[string]interface{}) []byte {
 
 func (s *LessonPlanStore) Create(ctx context.Context, lp *model.LessonPlan) error {
 	row := s.db.QueryRow(ctx, `
-		INSERT INTO lesson_plans (school_id, academic_year_id, guru_user_id, title, section_a, section_b, section_c, status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		INSERT INTO lesson_plans (school_id, academic_year_id, guru_user_id, title, section_a, section_b, section_c, dimensi_lulusan, status)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		RETURNING id, created_at, updated_at`,
 		lp.SchoolID, lp.AcademicYearID, lp.GuruUserID, lp.Title,
-		marshalMap(lp.SectionA), marshalMap(lp.SectionB), marshalMap(lp.SectionC), lp.Status)
+		marshalMap(lp.SectionA), marshalMap(lp.SectionB), marshalMap(lp.SectionC), marshalMap(lp.DimensiLulusan), lp.Status)
 	return row.Scan(&lp.ID, &lp.CreatedAt, &lp.UpdatedAt)
 }
 
 // ImportSections overwrites section_a/b/c and dimensi_lulusan for a guru's
 // own RPM entry in one shot (used by the combined A/B/C/D Excel-import
-// handler, rpm_template.go). Returns false if no row matched (wrong id or
-// not the caller's own RPM).
-func (s *LessonPlanStore) ImportSections(ctx context.Context, id, guruUserID string, sectionA, sectionB, sectionC, dimensi map[string]interface{}) (bool, error) {
+// handler, rpm_template.go). title/status apply only if non-empty (the
+// template's "Judul RPM"/"Status" rows -- ROLE GURU V10 -- are optional on
+// a re-import; COALESCE(NULLIF(...)) keeps the existing value instead of
+// blanking it out when a row is missing/empty). Returns false if no row
+// matched (wrong id or not the caller's own RPM).
+func (s *LessonPlanStore) ImportSections(ctx context.Context, id, guruUserID, title, status string, sectionA, sectionB, sectionC, dimensi map[string]interface{}) (bool, error) {
 	tag, err := s.db.Exec(ctx, `
-		UPDATE lesson_plans SET section_a=$1, section_b=$2, section_c=$3, dimensi_lulusan=$4, updated_at=now()
-		WHERE id=$5 AND guru_user_id=$6 AND deleted_at IS NULL`,
-		marshalMap(sectionA), marshalMap(sectionB), marshalMap(sectionC), marshalMap(dimensi), id, guruUserID)
+		UPDATE lesson_plans SET
+			title = COALESCE(NULLIF($1,''), title),
+			section_a=$2, section_b=$3, section_c=$4, dimensi_lulusan=$5,
+			status = COALESCE(NULLIF($6,''), status),
+			updated_at=now()
+		WHERE id=$7 AND guru_user_id=$8 AND deleted_at IS NULL`,
+		title, marshalMap(sectionA), marshalMap(sectionB), marshalMap(sectionC), marshalMap(dimensi), status, id, guruUserID)
 	if err != nil {
 		return false, err
 	}
@@ -48,9 +55,9 @@ func (s *LessonPlanStore) ImportSections(ctx context.Context, id, guruUserID str
 
 func (s *LessonPlanStore) Update(ctx context.Context, id, guruUserID string, lp *model.LessonPlan) (bool, error) {
 	tag, err := s.db.Exec(ctx, `
-		UPDATE lesson_plans SET title=$1, section_a=$2, section_b=$3, section_c=$4, status=$5, updated_at=now()
-		WHERE id=$6 AND guru_user_id=$7 AND deleted_at IS NULL`,
-		lp.Title, marshalMap(lp.SectionA), marshalMap(lp.SectionB), marshalMap(lp.SectionC), lp.Status, id, guruUserID)
+		UPDATE lesson_plans SET title=$1, section_a=$2, section_b=$3, section_c=$4, dimensi_lulusan=$5, status=$6, updated_at=now()
+		WHERE id=$7 AND guru_user_id=$8 AND deleted_at IS NULL`,
+		lp.Title, marshalMap(lp.SectionA), marshalMap(lp.SectionB), marshalMap(lp.SectionC), marshalMap(lp.DimensiLulusan), lp.Status, id, guruUserID)
 	if err != nil {
 		return false, err
 	}

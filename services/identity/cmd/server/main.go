@@ -232,6 +232,11 @@ func main() {
 		ir.Get("/users/import-template", app.DownloadUsersTemplate)
 		ir.Get("/users/{id}", app.GetUser)
 		ir.Get("/users", app.ListUsers)
+		// Same handler as GET /users, reached when ids/exclude_ids is too large for
+		// a GET query string (see the "Belum ada kelas" / nginx 414 comment in
+		// listUsersByRole). A separate path, not POST /users, since that method+path
+		// is already CreateUser on the pr group above -- same underlying chi tree.
+		ir.Post("/users/search", app.ListUsers)
 		ir.Get("/students", app.ListStudents)
 		ir.Get("/teachers", app.ListTeachers)
 		// Data Sekolah's Riwayat Penghapusan: same static-before-wildcard

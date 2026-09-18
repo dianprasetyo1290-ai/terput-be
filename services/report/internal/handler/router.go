@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -30,12 +31,34 @@ func NewRouter(d *Deps, jwtSecret string, corsOrigins []string, respCache *cache
 	r.Group(func(pr chi.Router) {
 		pr.Use(common.JWTMiddleware(jwtSecret))
 		// Client request 2026-08-29: cache GET responses in Redis.
-		pr.Use(respCache.Middleware(nil))
+		// /settings/* opts out: it is a handful of rows that guru edit
+		// live from Penilaian Formatif's "+ Tambah Tipe Nilai", and the
+		// cache has no invalidation on write -- a 15s stale list there
+		// means a guru adds a tipe, doesn't see it, adds it again and
+		// gets "sudah ada" against a list that doesn't show it (prod,
+		// 2026-09-10). Nothing to gain from caching it anyway.
+		// The .docx/.zip mail-merge downloads also opt out: they are binary
+		// bodies sized in megabytes, and a rapor must never be served from
+		// a cache that could hand one student's document to another.
+		pr.Use(respCache.Middleware(func(r *http.Request) bool {
+			return strings.HasPrefix(r.URL.Path, "/settings/") ||
+				strings.HasSuffix(r.URL.Path, "/docx")
+		}))
 
 		pr.Post("/report-cards/generate", h.GenerateReportCards)
 		pr.Get("/report-cards/{id}", h.GetReportCard)
 		pr.Patch("/report-cards/{id}/subjects/{subject_id}", h.PatchSubjectOverride)
 		pr.Patch("/report-cards/{id}/subjects/{subject_id}/notes", h.PatchSubjectNotes)
+		// SEKOCI V10 item B: Kokurikuler / Ekstrakurikuler / Tanggapan Wali
+		// Kelas -- the hand-entered rapor sections below C. Muatan Lokal.
+		pr.Patch("/report-cards/{id}/extras", h.PatchRaporExtras)
+		// Mail merge: render this rapor through the school's own uploaded
+		// .docx template (handler/report_docx.go). Runs alongside the
+		// built-in print view, which stays the default.
+		pr.Get("/report-cards/{id}/docx", h.DownloadReportCardDocx)
+		pr.Get("/classrooms/{id}/report-cards/docx", h.DownloadClassroomDocxZip)
+		pr.Get("/settings/report-template-parameters", h.ListMergeParameters)
+
 		pr.Post("/report-cards/{id}/finalize", h.FinalizeReportCard)
 		pr.Put("/report-cards/{id}/unlock", h.UnlockReportCard)
 
@@ -70,6 +93,7 @@ func NewRouter(d *Deps, jwtSecret string, corsOrigins []string, respCache *cache
 		pr.Get("/settings/report-templates", h.ListReportTemplates)
 		pr.Post("/settings/report-templates", h.UploadReportTemplate)
 		pr.Get("/settings/report-templates/{type}/download", h.DownloadReportTemplate)
+		pr.Get("/settings/report-templates/{type}/content", h.GetReportTemplateContent)
 	})
 
 	return r

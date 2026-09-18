@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"database/sql"
 	"errors"
 	"net/http"
 	"time"
@@ -77,7 +78,7 @@ func (h *Handler) validateExamReq(req examReq, c *common.Claims, skipClassroomSu
 
 func (h *Handler) CreateExam(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin", "guru") {
+	if !requireRole(w, c, "admin", "superadmin", "guru", "pengawas") {
 		return
 	}
 	var req examReq
@@ -236,7 +237,7 @@ func (h *Handler) GetExam(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UpdateExam(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin", "guru") {
+	if !requireRole(w, c, "admin", "superadmin", "guru", "pengawas") {
 		return
 	}
 	id := chi.URLParam(r, "id")
@@ -284,7 +285,7 @@ func (h *Handler) UpdateExam(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteExam(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin", "guru") {
+	if !requireRole(w, c, "admin", "superadmin", "guru", "pengawas") {
 		return
 	}
 	id := chi.URLParam(r, "id")
@@ -305,8 +306,12 @@ func (h *Handler) DeleteExam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Store.DeleteExam(r.Context(), id, common.EffectiveSchoolID(r, c)); err != nil {
+		if errors.Is(err, store.ErrHasAttempts) {
+			common.WriteError(w, http.StatusConflict, "exam already has student attempts and cannot be deleted")
+			return
+		}
 		if errors.Is(err, store.ErrNotEditable) {
-			common.WriteError(w, http.StatusConflict, "exam is published (or not found) and cannot be deleted")
+			common.WriteError(w, http.StatusNotFound, "exam not found")
 			return
 		}
 		writeStoreErr(w, err)
@@ -424,11 +429,74 @@ func (h *Handler) RemoveExamQuestion(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusOK, nil, nil)
 }
 
+type updateExamQuestionPointsReq struct {
+	Points float64 `json:"points"`
+}
+
+// UpdateExamQuestionPoints syncs this exam's own point snapshot for a
+// question (exam_questions.points) when the guru edits a soal's poin from
+// inside an exam's question list -- editing the question alone only ever
+// touched the bank-wide questions.poin, leaving this exam's copy (what's
+// actually shown/summed for it) stale.
+func (h *Handler) UpdateExamQuestionPoints(w http.ResponseWriter, r *http.Request) {
+	c := common.FromCtx(r)
+	if !requireRole(w, c, "admin", "superadmin", "guru") {
+		return
+	}
+	examID := chi.URLParam(r, "id")
+	exam, err := h.Store.GetExam(r.Context(), examID, common.EffectiveSchoolID(r, c))
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	if exam == nil {
+		common.WriteError(w, http.StatusNotFound, "exam not found")
+		return
+	}
+	if exam.IsPublished {
+		hasAttempt, err := h.Store.HasAnyAttempt(r.Context(), examID)
+		if err != nil {
+			writeStoreErr(w, err)
+			return
+		}
+		if hasAttempt {
+			common.WriteError(w, http.StatusConflict, "cannot modify questions: siswa sudah mulai mengerjakan ujian ini")
+			return
+		}
+	}
+	var req updateExamQuestionPointsReq
+	if !common.DecodeJSON(w, r, &req) {
+		return
+	}
+	if req.Points <= 0 {
+		common.WriteError(w, http.StatusBadRequest, "points harus lebih dari 0")
+		return
+	}
+	eqID := chi.URLParam(r, "eqId")
+	if err := h.Store.UpdateExamQuestionPoints(r.Context(), examID, eqID, req.Points); err != nil {
+		if err == sql.ErrNoRows {
+			common.WriteError(w, http.StatusNotFound, "soal tidak ditemukan di ujian ini")
+			return
+		}
+		writeStoreErr(w, err)
+		return
+	}
+	if exam.IsPublished {
+		if err := h.Store.RenormalizePublishedPoints(r.Context(), examID); err != nil {
+			common.WriteJSON(w, http.StatusOK, nil, map[string]interface{}{
+				"warning": "poin diperbarui, tapi gagal menyesuaikan ulang poin otomatis: " + err.Error(),
+			})
+			return
+		}
+	}
+	common.WriteJSON(w, http.StatusOK, nil, nil)
+}
+
 // PublishExam normalizes points to sum to 100 (see README "Score
 // normalization") then flips the exam to published/live.
 func (h *Handler) PublishExam(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin", "guru") {
+	if !requireRole(w, c, "admin", "superadmin", "guru", "pengawas") {
 		return
 	}
 	examID := chi.URLParam(r, "id")
@@ -451,6 +519,45 @@ func (h *Handler) PublishExam(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		common.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	updated, _ := h.Store.GetExam(r.Context(), examID, exam.SchoolID)
+	common.WriteJSON(w, http.StatusOK, updated, nil)
+}
+
+// UnpublishExam: POST /exams/{id}/unpublish — reverts a published exam back
+// to draft. Sekoci revamp V1.docx: allowed only while the exam's own
+// scheduled window hasn't started yet (once it has, students may already be
+// mid-attempt, so unpublishing would pull the exam out from under them).
+func (h *Handler) UnpublishExam(w http.ResponseWriter, r *http.Request) {
+	c := common.FromCtx(r)
+	if !requireRole(w, c, "admin", "superadmin", "guru", "pengawas") {
+		return
+	}
+	examID := chi.URLParam(r, "id")
+	exam, err := h.Store.GetExam(r.Context(), examID, common.EffectiveSchoolID(r, c))
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	if exam == nil {
+		common.WriteError(w, http.StatusNotFound, "exam not found")
+		return
+	}
+	if c.ActiveRole == "guru" && exam.TeacherID != c.UserID {
+		common.WriteError(w, http.StatusForbidden, "you may only unpublish your own exams")
+		return
+	}
+	if !time.Now().Before(exam.StartAt) {
+		common.WriteError(w, http.StatusConflict, "tidak dapat membatalkan publikasi: waktu ujian sudah berlangsung atau berakhir")
+		return
+	}
+	if err := h.Store.UnpublishExam(r.Context(), examID, exam.SchoolID); err != nil {
+		if errors.Is(err, store.ErrNotEditable) {
+			common.WriteError(w, http.StatusConflict, "exam not found or belum dipublish")
+			return
+		}
+		writeStoreErr(w, err)
 		return
 	}
 	updated, _ := h.Store.GetExam(r.Context(), examID, exam.SchoolID)
@@ -498,7 +605,7 @@ func (h *Handler) NormalizeDraftPoints(w http.ResponseWriter, r *http.Request) {
 // Store.DuplicateExam.
 func (h *Handler) DuplicateExam(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin", "guru") {
+	if !requireRole(w, c, "admin", "superadmin", "guru", "pengawas") {
 		return
 	}
 	examID := chi.URLParam(r, "id")

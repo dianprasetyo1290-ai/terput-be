@@ -22,7 +22,7 @@ func (s *Store) AddClassroomSubject(ctx context.Context, cs model.ClassroomSubje
 // (GET /classrooms/{id}/subject-matrix) since is_active lives on this row.
 func (s *Store) ListClassroomSubjects(ctx context.Context, schoolID, classroomID string, activeOnly bool) ([]model.ClassroomSubject, error) {
 	q := `
-		SELECT cs.id, cs.school_id, cs.academic_year_id, cs.classroom_id, cs.subject_id, cs.teacher_user_id, cs.is_active, cs.created_at, cs.updated_at, sub.name, sub.subject_group
+		SELECT cs.id, cs.school_id, cs.academic_year_id, cs.classroom_id, cs.subject_id, cs.teacher_user_id, cs.is_active, cs.created_at, cs.updated_at, sub.name, sub.subject_group, sub.kelompok
 		FROM classroom_subjects cs
 		JOIN subjects sub ON sub.id = cs.subject_id
 		WHERE ($1 = '' OR cs.school_id::text = $1) AND cs.classroom_id = $2 AND cs.deleted_at IS NULL
@@ -41,7 +41,7 @@ func (s *Store) ListClassroomSubjects(ctx context.Context, schoolID, classroomID
 		var cs model.ClassroomSubject
 		var subjectName string
 		var subjectGroup *string
-		if err := rows.Scan(&cs.ID, &cs.SchoolID, &cs.AcademicYearID, &cs.ClassroomID, &cs.SubjectID, &cs.TeacherUserID, &cs.IsActive, &cs.CreatedAt, &cs.UpdatedAt, &subjectName, &subjectGroup); err != nil {
+		if err := rows.Scan(&cs.ID, &cs.SchoolID, &cs.AcademicYearID, &cs.ClassroomID, &cs.SubjectID, &cs.TeacherUserID, &cs.IsActive, &cs.CreatedAt, &cs.UpdatedAt, &subjectName, &subjectGroup, &cs.Kelompok); err != nil {
 			return nil, err
 		}
 		cs.SubjectName = &subjectName
@@ -155,49 +155,52 @@ func (s *Store) ListEnrollmentsForClassroom(ctx context.Context, schoolID, class
 // funnel through, so the invariant holds regardless of which button (or a
 // future caller) triggers the write.
 func (s *Store) BulkSetStudentSubjectEnrollments(ctx context.Context, schoolID, academicYearID, classroomID string, items []model.StudentSubjectEnrollment, siblingsOf map[string][]string) error {
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
+	if len(items) == 0 {
+		return nil
 	}
-	defer tx.Rollback()
 
+	// Resolve the final (student, classroom_subject) -> is_enrolled state
+	// in memory first, replaying the exact same "process in item order,
+	// later write wins" semantics the old per-row-round-trip loop had, so
+	// the whole batch can land in one multi-row UPSERT instead of N (or
+	// N x up-to-siblings) sequential round trips. Ceklis Semua on a full
+	// roster x subject grid was issuing hundreds to over a thousand
+	// individual INSERTs inside one transaction, which is what made the
+	// button feel unresponsive / need repeated clicks (root-caused from a
+	// "delay + butuh beberapa kali klik" report on Matriks Pelajaran,
+	// 2026-09-03). This MUST still be an upsert, not a plain UPDATE: on a
+	// fresh classroom (no prior enrollment rows at all), a student's
+	// sibling variants need an explicit is_enrolled=false row inserted, not
+	// just updated, or ActiveSubjectsForStudent's "nothing resolved yet,
+	// show every variant" fallback leaves the student active in every
+	// sibling too — see BulkSetStudentSubjectMatrix's frontend caller.
+	type cellKey struct{ studentID, subjectID string }
+	final := make(map[cellKey]bool, len(items)*2)
 	for _, item := range items {
 		if item.IsEnrolled {
-			// Siblings lists are small (a handful of religion variants at
-			// most) — a plain loop of scalar upserts avoids pulling in an
-			// array-param dependency academic-service doesn't otherwise need.
-			//
-			// This MUST be an upsert, not a plain UPDATE: on a fresh
-			// classroom (no prior enrollment rows at all — the common case
-			// the first time Auto-Enroll Agama is run), a bare UPDATE
-			// matches zero rows and silently does nothing, leaving NO row
-			// for the sibling at all. ActiveSubjectsForStudent's "nothing
-			// resolved yet, show every variant" fallback then still fires
-			// for that sibling, so a student ends up showing as active in
-			// BOTH their own Agama variant AND every other one — the exact
-			// "siswa...tercampur" bug the client reported. Explicitly
-			// inserting an is_enrolled=false row for every sibling closes
-			// that fallback for good, regardless of whether a row already
-			// existed.
 			for _, sibling := range siblingsOf[item.ClassroomSubjectID] {
-				if _, err := tx.ExecContext(ctx, `
-					INSERT INTO student_subject_enrollments (school_id, academic_year_id, student_user_id, classroom_subject_id, is_enrolled)
-					VALUES ($1, $2, $3, $4, false)
-					ON CONFLICT (student_user_id, classroom_subject_id) DO UPDATE SET is_enrolled = false, updated_at = now()
-				`, schoolID, academicYearID, item.StudentUserID, sibling); err != nil {
-					return err
-				}
+				final[cellKey{item.StudentUserID, sibling}] = false
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO student_subject_enrollments (school_id, academic_year_id, student_user_id, classroom_subject_id, is_enrolled)
-			VALUES ($1, $2, $3, $4, $5)
-			ON CONFLICT (student_user_id, classroom_subject_id) DO UPDATE SET is_enrolled = EXCLUDED.is_enrolled, updated_at = now()
-		`, schoolID, academicYearID, item.StudentUserID, item.ClassroomSubjectID, item.IsEnrolled); err != nil {
-			return err
-		}
+		final[cellKey{item.StudentUserID, item.ClassroomSubjectID}] = item.IsEnrolled
 	}
-	return tx.Commit()
+
+	students := make([]string, 0, len(final))
+	subjectIDs := make([]string, 0, len(final))
+	enrolled := make([]bool, 0, len(final))
+	for k, v := range final {
+		students = append(students, k.studentID)
+		subjectIDs = append(subjectIDs, k.subjectID)
+		enrolled = append(enrolled, v)
+	}
+
+	_, err := s.DB.ExecContext(ctx, `
+		INSERT INTO student_subject_enrollments (school_id, academic_year_id, student_user_id, classroom_subject_id, is_enrolled)
+		SELECT $1, $2, s, cs, e
+		FROM unnest($3::uuid[], $4::uuid[], $5::bool[]) AS t(s, cs, e)
+		ON CONFLICT (student_user_id, classroom_subject_id) DO UPDATE SET is_enrolled = EXCLUDED.is_enrolled, updated_at = now()
+	`, schoolID, academicYearID, students, subjectIDs, enrolled)
+	return err
 }
 
 // ActiveSubjectsForStudent resolves which subjects (and which specific
@@ -262,26 +265,40 @@ func (s *Store) ActiveSubjectsForStudent(ctx context.Context, schoolID, studentU
 // report-service's Penilaian Formatif (ClassroomSubjectID scopes which
 // formative-grade grid a guru may edit).
 type TeachingAssignment struct {
-	ClassroomSubjectID string `json:"classroom_subject_id"`
-	ClassroomID        string `json:"classroom_id"`
-	ClassroomName      string `json:"classroom_name"`
-	SubjectID          string `json:"subject_id"`
-	SubjectName        string `json:"subject_name"`
+	ClassroomSubjectID string  `json:"classroom_subject_id"`
+	ClassroomID        string  `json:"classroom_id"`
+	ClassroomName      string  `json:"classroom_name"`
+	SubjectID          string  `json:"subject_id"`
+	SubjectName        string  `json:"subject_name"`
+	GradeLevel         *string `json:"grade_level"`
 }
 
 // ListTeachingAssignments returns every active classroom+subject a teacher
 // is assigned to, across all schools (internal caller passes no school_id
 // scope — a teacher only ever belongs to one school in practice, and this
 // mirrors GetUser's cross-school lookup pattern for internal calls).
-func (s *Store) ListTeachingAssignments(ctx context.Context, teacherUserID string) ([]TeachingAssignment, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT cs.id, cs.classroom_id, c.name, cs.subject_id, sub.name
+// academicYearID, when non-empty, restricts results to that year's own
+// classrooms -- classrooms are re-created per academic year (often reusing
+// the same display name for the new year's section), so without this filter
+// a teacher creating an exam for the CURRENT year could pick a classroom
+// row that actually belongs to a PAST year: the exam then never matches any
+// student's dashboard (resolved by their current-year enrollment), with no
+// error anywhere. See exam-service's siswa dashboard bug, GPM school,
+// 2026-09-02.
+func (s *Store) ListTeachingAssignments(ctx context.Context, teacherUserID, academicYearID string) ([]TeachingAssignment, error) {
+	query := `
+		SELECT cs.id, cs.classroom_id, c.name, cs.subject_id, sub.name, c.grade_level
 		FROM classroom_subjects cs
 		JOIN classrooms c ON c.id = cs.classroom_id
 		JOIN subjects sub ON sub.id = cs.subject_id
-		WHERE cs.teacher_user_id = $1 AND cs.is_active = true AND cs.deleted_at IS NULL AND c.deleted_at IS NULL
-		ORDER BY c.name, sub.name
-	`, teacherUserID)
+		WHERE cs.teacher_user_id = $1 AND cs.is_active = true AND cs.deleted_at IS NULL AND c.deleted_at IS NULL`
+	args := []interface{}{teacherUserID}
+	if academicYearID != "" {
+		query += " AND c.academic_year_id = $2"
+		args = append(args, academicYearID)
+	}
+	query += " ORDER BY c.name, sub.name"
+	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +306,7 @@ func (s *Store) ListTeachingAssignments(ctx context.Context, teacherUserID strin
 	out := []TeachingAssignment{}
 	for rows.Next() {
 		var ta TeachingAssignment
-		if err := rows.Scan(&ta.ClassroomSubjectID, &ta.ClassroomID, &ta.ClassroomName, &ta.SubjectID, &ta.SubjectName); err != nil {
+		if err := rows.Scan(&ta.ClassroomSubjectID, &ta.ClassroomID, &ta.ClassroomName, &ta.SubjectID, &ta.SubjectName, &ta.GradeLevel); err != nil {
 			return nil, err
 		}
 		out = append(out, ta)

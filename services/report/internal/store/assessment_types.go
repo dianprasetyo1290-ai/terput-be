@@ -76,11 +76,27 @@ func (s *Store) UpdateAssessmentType(ctx context.Context, id, name, bucket strin
 	return &t, nil
 }
 
-// DeleteAssessmentType removes a tipe penilaian. If any formative_grades
-// rows still reference it, the FK (no ON DELETE clause = RESTRICT) makes
-// Postgres reject the delete; the caller maps that to a 409 rather than a
-// generic 500 (see handler/settings.go).
+// DeleteAssessmentType removes a tipe penilaian together with the
+// formative_grades rows that reference it, in one transaction.
+//
+// The FK has no ON DELETE clause (= RESTRICT), so deleting the type alone
+// fails with 23503 the moment a guru has entered a single score for it --
+// which is every type worth deleting. Penilaian Formatif's "Hapus" already
+// warns "Nilai yang sudah tersimpan untuk tipe ini akan ikut terhapus", so
+// the child rows go with it rather than the guru being stuck with a type
+// they can never remove (prod, 2026-09-10: "STS1" had 10 grades and could
+// not be deleted at all).
 func (s *Store) DeleteAssessmentType(ctx context.Context, id string) error {
-	_, err := s.DB.ExecContext(ctx, `DELETE FROM report_assessment_types WHERE id = $1`, id)
-	return err
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM formative_grades WHERE assessment_type_id = $1`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM report_assessment_types WHERE id = $1`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

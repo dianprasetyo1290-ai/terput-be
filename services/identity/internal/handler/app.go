@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"skci/identity/internal/client"
 	"skci/identity/internal/common"
 )
 
@@ -13,10 +14,12 @@ type App struct {
 	DB          *sql.DB
 	JWTSecret   string
 	InternalKey string
+	Exam        *client.ExamClient
+	Academic    *client.AcademicClient
 }
 
 func NewApp(db *sql.DB, jwtSecret, internalKey string) *App {
-	return &App{DB: db, JWTSecret: jwtSecret, InternalKey: internalKey}
+	return &App{DB: db, JWTSecret: jwtSecret, InternalKey: internalKey, Exam: client.NewExamClient(), Academic: client.NewAcademicClient()}
 }
 
 // requireRole rejects the request unless the caller's active_role is one of

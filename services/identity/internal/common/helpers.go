@@ -35,8 +35,10 @@ func ParsePage(r *http.Request) (page, perPage int) {
 		page = 1
 	}
 	perPage, _ = strconv.Atoi(r.URL.Query().Get("per_page"))
-	if perPage < 1 || perPage > 200 {
+	if perPage < 1 {
 		perPage = 20
+	} else if perPage > 200 {
+		perPage = 200
 	}
 	return page, perPage
 }
@@ -74,9 +76,15 @@ const (
 	RoleWalikelas     = "walikelas"
 	RoleKepalaSekolah = "kepala_sekolah"
 	RoleKepalaYayasan = "kepala_yayasan"
+	// RolePengawas (SEKOCI V11) is panitia ujian: it sets exam schedules,
+	// watches the live monitor and can larang/blokir a peserta, and reads
+	// the bank soal. It manages no users, no nilai and no settings, so it
+	// is deliberately NOT a dashboard role -- the frontend lands it on
+	// Jadwal Ujian instead (web/src/router/domains/exam.routes.ts).
+	RolePengawas = "pengawas"
 )
 
-var AllRoles = []string{RoleSuperadmin, RoleAdmin, RoleGuru, RoleSiswa, RoleWalikelas, RoleKepalaSekolah, RoleKepalaYayasan}
+var AllRoles = []string{RoleSuperadmin, RoleAdmin, RoleGuru, RoleSiswa, RoleWalikelas, RoleKepalaSekolah, RoleKepalaYayasan, RolePengawas}
 
 var DashboardRoles = map[string]bool{
 	RoleSuperadmin: true,

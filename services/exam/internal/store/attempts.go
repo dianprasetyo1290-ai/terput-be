@@ -18,6 +18,25 @@ var (
 	ErrTokenInvalid      = errors.New("token invalid or expired")
 )
 
+// wibLocation: bare time.Now() (server clock is UTC, no explicit tz config
+// on this Docker image) is up to 7 hours behind Indonesian wall-clock time.
+// exam_tokens.valid_from/valid_until are DATE columns representing the WIB
+// calendar day an admin picked ("valid starting today"), scanned back as
+// UTC midnight -- comparing that against raw time.Now() makes a token
+// issued right after WIB midnight look "not yet valid" for the ~7 hours
+// server UTC still has left on the previous day (root-caused via a "token
+// terbaru langsung kadaluwarsa" report for SMK YADIKA 13 (new), issued
+// 2026-09-02 18:04 UTC = 2026-09-03 01:04 WIB with valid_from='2026-09-03').
+// academic-service and attendance-service hit this same class of bug
+// before and fixed it by evaluating in Asia/Jakarta explicitly.
+var wibLocation = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		return time.FixedZone("WIB", 7*60*60) // fallback if tzdata isn't installed in the image
+	}
+	return loc
+}()
+
 func scanAttempt(row interface {
 	Scan(dest ...interface{}) error
 }) (*model.ExamAttempt, error) {
@@ -162,8 +181,13 @@ func (s *Store) EnterExam(ctx context.Context, examID, userID, code, studentClas
 	if err != nil {
 		return nil, err
 	}
-	today := time.Now()
-	if today.Before(validFrom) || today.After(validUntil.AddDate(0, 0, 1)) {
+	// valid_from/valid_until are DATE columns (no time-of-day), so compare
+	// calendar-date strings rather than instants: Before/After on the
+	// time.Time values themselves would compare absolute instants, and
+	// .In(wibLocation) doesn't change that -- it only affects display, not
+	// which instant is "earlier". ISO dates compare correctly as strings.
+	todayWIB := time.Now().In(wibLocation).Format("2006-01-02")
+	if todayWIB < validFrom.Format("2006-01-02") || todayWIB > validUntil.AddDate(0, 0, 1).Format("2006-01-02") {
 		return nil, ErrTokenInvalid
 	}
 

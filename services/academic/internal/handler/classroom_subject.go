@@ -380,18 +380,27 @@ func (h *Handler) GetStudentClassroom(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusOK, map[string]string{"classroom_id": classroomID}, nil)
 }
 
-// GetTeachingAssignments: GET /internal/teaching-assignments?guru_id=
+// GetTeachingAssignments: GET /internal/teaching-assignments?guru_id=&academic_year_id=
 // evaluation-service calls this to populate "Kelas yang Diampu"/"Mata
 // Pelajaran" on the printed Rapor Kinerja Guru. Previously unimplemented —
 // evaluation-service's client always got an empty list back, so those
 // fields were silently blank on every printed report.
+//
+// The exam-frontend's "Buat Ujian Baru" form is also a caller (browser JWT,
+// not internal-key) and always passes academic_year_id -- the classroom a
+// teaching assignment points at is year-scoped, so without this filter the
+// form could offer a classroom from a DIFFERENT year than the exam itself,
+// silently hiding the exam from every student (see store.ListTeachingAssignments'
+// doc comment). academic_year_id stays optional (unfiltered) for any other
+// caller that genuinely wants every year.
 func (h *Handler) GetTeachingAssignments(w http.ResponseWriter, r *http.Request) {
 	guruID := r.URL.Query().Get("guru_id")
 	if guruID == "" {
 		common.WriteError(w, http.StatusBadRequest, "guru_id query param is required")
 		return
 	}
-	items, err := h.Store.ListTeachingAssignments(r.Context(), guruID)
+	academicYearID := r.URL.Query().Get("academic_year_id")
+	items, err := h.Store.ListTeachingAssignments(r.Context(), guruID, academicYearID)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, err.Error())
 		return

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"skci/attendance/internal/client"
 	"skci/attendance/internal/common"
@@ -118,4 +119,26 @@ func (h *Handler) requireOwnClassroom(w http.ResponseWriter, r *http.Request, cl
 // concerns beyond what net/http already gives us via r.Context().
 func bg(r *http.Request) context.Context {
 	return r.Context()
+}
+
+// wibLocation/todayWIB: bare time.Now() (server clock is UTC, no explicit
+// tz config on this Docker image) is up to 7 hours off from Indonesian
+// wall-clock local time -- academic-service's ListSchedulesActiveNow hit
+// this same class of bug for "what class is happening right now" and fixed
+// it by evaluating in Asia/Jakarta explicitly (see its own doc comment).
+// This is the same fix for attendance-service's "what calendar date is
+// today" default (Bug Report SEKOCI GPM V10, ROLE WALI KELAS: "Guru Sedang
+// Mengajar" widget, plus check-in's session_date default), so a check-in
+// or dashboard lookup made between 17:00-23:59 UTC (00:00-06:59 WIB) can't
+// silently land on yesterday's date.
+var wibLocation = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		return time.FixedZone("WIB", 7*60*60) // fallback if tzdata isn't installed in the image
+	}
+	return loc
+}()
+
+func todayWIB() string {
+	return time.Now().In(wibLocation).Format("2006-01-02")
 }

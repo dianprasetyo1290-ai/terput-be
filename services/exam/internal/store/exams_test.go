@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -129,5 +130,22 @@ func TestListMyExams_DateBucketing(t *testing.T) {
 	}
 	if len(empty) != 0 {
 		t.Errorf("expected empty result for empty classroomID, got %d rows", len(empty))
+	}
+
+	// Sekoci revamp V1.docx item 2: unpublish reverts a published exam back
+	// to draft. Time-window gating (before start_at) is the handler's job;
+	// this only checks the store flips the flag and rejects a second call.
+	if err := s.UnpublishExam(ctx, todayExamID, schoolID); err != nil {
+		t.Fatalf("UnpublishExam: %v", err)
+	}
+	reverted, err := s.GetExam(ctx, todayExamID, schoolID)
+	if err != nil {
+		t.Fatalf("GetExam after unpublish: %v", err)
+	}
+	if reverted == nil || reverted.IsPublished {
+		t.Fatalf("expected exam to be draft after UnpublishExam, got %+v", reverted)
+	}
+	if err := s.UnpublishExam(ctx, todayExamID, schoolID); !errors.Is(err, ErrNotEditable) {
+		t.Fatalf("expected ErrNotEditable unpublishing an already-draft exam, got %v", err)
 	}
 }

@@ -15,6 +15,11 @@ type lessonPlanRequest struct {
 	SectionA       map[string]interface{} `json:"section_a"`
 	SectionB       map[string]interface{} `json:"section_b"`
 	SectionC       map[string]interface{} `json:"section_c"`
+	// DimensiLulusan (Bug Report SEKOCI GPM V10, ROLE GURU "Data RPM"): the
+	// manual "+ Buat RPM" form now has its own "D. Indikator 8 Dimensi
+	// Lulusan" fields (previously import-only, see model.LessonPlan's
+	// DimensiLulusan doc comment).
+	DimensiLulusan map[string]interface{} `json:"dimensi_lulusan"`
 	Status         string                 `json:"status"`
 }
 
@@ -57,7 +62,8 @@ func (h *Handler) CreateMyLessonPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	lp := &model.LessonPlan{
 		SchoolID: claims.SchoolID, AcademicYearID: ayID, GuruUserID: claims.UserID,
-		Title: req.Title, SectionA: req.SectionA, SectionB: req.SectionB, SectionC: req.SectionC, Status: status,
+		Title: req.Title, SectionA: req.SectionA, SectionB: req.SectionB, SectionC: req.SectionC,
+		DimensiLulusan: req.DimensiLulusan, Status: status,
 	}
 	if err := h.LessonPlans.Create(r.Context(), lp); err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to create lesson plan: "+err.Error())
@@ -79,7 +85,7 @@ func (h *Handler) UpdateMyLessonPlan(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	lp := &model.LessonPlan{Title: req.Title, SectionA: req.SectionA, SectionB: req.SectionB, SectionC: req.SectionC, Status: req.Status}
+	lp := &model.LessonPlan{Title: req.Title, SectionA: req.SectionA, SectionB: req.SectionB, SectionC: req.SectionC, DimensiLulusan: req.DimensiLulusan, Status: req.Status}
 	if lp.Status == "" {
 		lp.Status = "draft"
 	}

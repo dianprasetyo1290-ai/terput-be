@@ -8,6 +8,7 @@ package httpclient
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -162,6 +163,55 @@ func (c *Client) ActiveSubjectIDs(schoolID, studentUserID, academicYearID string
 		out[it.SubjectID] = true
 	}
 	return out
+}
+
+// AllStudentIDs fetches every siswa's user_id for a school by paging through
+// identity-service's GET /users server-to-server (X-Internal-Key), so the
+// caller never has to enumerate the roster itself. Unlike this file's other
+// lookups, it returns an error instead of failing open: it backs bulk voucher
+// issuance (BulkIssueTokens), and a silent empty result there would look like
+// "issued 0 tokens, nobody complained" instead of a visible failure. Paging
+// here (not raising identity's per_page cap) also means the roster never
+// has to be held in a browser tab or a single oversized request -- see
+// PenggunaView.vue's onBulkTokenSubmit, which used to do this same loop
+// client-side against the same per-page cap.
+func (c *Client) AllStudentIDs(schoolID string) ([]string, error) {
+	var ids []string
+	for page := 1; ; page++ {
+		url := fmt.Sprintf("%s/users?role=siswa&school_id=%s&page=%d&per_page=200", c.IdentityURL, schoolID, page)
+		req, err := http.NewRequest(http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("X-Internal-Key", c.InternalKey)
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		var body struct {
+			Data []struct {
+				ID string `json:"id"`
+			} `json:"data"`
+			Meta struct {
+				Total int `json:"total"`
+			} `json:"meta"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("identity-service GET /users returned %d", resp.StatusCode)
+		}
+		for _, u := range body.Data {
+			ids = append(ids, u.ID)
+		}
+		if len(body.Data) == 0 || len(ids) >= body.Meta.Total {
+			break
+		}
+	}
+	return ids, nil
 }
 
 // StudentClassroomID does a best-effort lookup of the classroom a student is

@@ -28,7 +28,7 @@ func (h *Handler) activeTeachersNow(r *http.Request, schoolID string) ([]model.A
 	if err != nil {
 		return nil, err
 	}
-	today := time.Now().Format("2006-01-02")
+	today := todayWIB()
 	out := make([]model.ActiveTeacher, 0, len(schedules))
 	for _, sc := range schedules {
 		if sc.TeacherUserID == nil || *sc.TeacherUserID == "" {

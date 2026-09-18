@@ -43,6 +43,7 @@ type Subject struct {
 	Name         string    `json:"name"`
 	Description  *string   `json:"description"`
 	SubjectGroup *string   `json:"subject_group"`
+	Kelompok     *string   `json:"kelompok"` // umum | kejuruan | muatan_lokal (E-Rapor print grouping)
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
@@ -61,6 +62,7 @@ type ClassroomSubject struct {
 	// Enriched fields, populated by joins for convenience (not DB columns).
 	SubjectName  *string `json:"subject_name,omitempty"`
 	SubjectGroup *string `json:"subject_group,omitempty"`
+	Kelompok     *string `json:"subject_kelompok,omitempty"`
 }
 
 type StudentSubjectEnrollment struct {

@@ -89,6 +89,9 @@ type School struct {
 	City     *string `json:"city"`
 	Province *string `json:"province"`
 	Logo     *string `json:"logo"`
+	// GovernmentLogo: SEKOCI V10 item C -- "Logo Pemerintah", printed at the
+	// rapor letterhead's top-left with the school's own logo at top-right.
+	GovernmentLogo *string `json:"government_logo"`
 }
 
 // GetSchool fetches GET /schools/{id}, already reachable via X-Internal-Key

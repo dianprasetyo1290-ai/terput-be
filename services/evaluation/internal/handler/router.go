@@ -38,6 +38,7 @@ func NewRouter(h *Handler, jwtSecret string, corsOrigins []string, respCache *ca
 			sr.Post("/", h.CreateMyLessonPlan)
 			sr.Get("/", h.ListMyLessonPlans)
 			sr.Get("/rpm-template", h.DownloadRpmTemplate)
+			sr.Post("/rpm-import", h.ImportRpmCreate)
 			sr.Get("/{id}", h.GetMyLessonPlan)
 			sr.Put("/{id}", h.UpdateMyLessonPlan)
 			sr.Delete("/{id}", h.DeleteMyLessonPlan)

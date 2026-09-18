@@ -256,9 +256,31 @@ func (s *Store) UpdateExam(ctx context.Context, e *model.Exam) error {
 }
 
 var ErrNotEditable = fmt.Errorf("exam is not editable (published or not found)")
+var ErrHasAttempts = fmt.Errorf("exam already has student attempts and cannot be deleted")
 
+// DeleteExam allows deleting a draft exam freely, and a published exam too as
+// long as no student has started it yet (e.g. published by mistake before
+// questions were finished, see Report sekoci: SMK GPM's "Ujian Pendidikan
+// Agama Katolik" stuck published with no way to remove it). Once any
+// exam_attempts row exists, the exam is locked from deletion regardless of
+// published state — matches the existing has_attempts guard already used by
+// AddExamQuestion/RemoveExamQuestion.
 func (s *Store) DeleteExam(ctx context.Context, id, schoolID string) error {
-	res, err := s.DB.ExecContext(ctx, `UPDATE exams SET deleted_at=now() WHERE id=$1 AND school_id=$2 AND is_published=false`, id, schoolID)
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var hasAttempt bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM exam_attempts WHERE exam_id=$1)`, id).Scan(&hasAttempt); err != nil {
+		return err
+	}
+	if hasAttempt {
+		return ErrHasAttempts
+	}
+
+	res, err := tx.ExecContext(ctx, `UPDATE exams SET deleted_at=now() WHERE id=$1 AND school_id=$2 AND deleted_at IS NULL`, id, schoolID)
 	if err != nil {
 		return err
 	}
@@ -266,22 +288,40 @@ func (s *Store) DeleteExam(ctx context.Context, id, schoolID string) error {
 	if n == 0 {
 		return ErrNotEditable
 	}
-	return nil
+	return tx.Commit()
 }
 
 // --- exam_questions ---
 
+// AddExamQuestion appends a question at the end of an exam's order. The
+// next order_index is read-then-written, so two concurrent calls for the
+// same exam (two admins importing at once, or a doubled-up click) could
+// both read the same MAX and collide on exam_questions_exam_id_order_index_key
+// -- root-caused via a 500 on POST /exams/{id}/questions/import that
+// happened mid live testing. pg_advisory_xact_lock serializes callers on
+// the same exam_id (auto-released at commit/rollback) so the read+insert
+// is effectively atomic instead of racing.
 func (s *Store) AddExamQuestion(ctx context.Context, examID, questionID string, points float64) (*model.ExamQuestion, error) {
 	var eq model.ExamQuestion
-	var nextIdx int
-	if err := s.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(order_index)+1, 0) FROM exam_questions WHERE exam_id=$1`, examID).Scan(&nextIdx); err != nil {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
 		return nil, err
 	}
-	err := s.DB.QueryRowContext(ctx, `
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, examID); err != nil {
+		return nil, err
+	}
+	var nextIdx int
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(order_index)+1, 0) FROM exam_questions WHERE exam_id=$1`, examID).Scan(&nextIdx); err != nil {
+		return nil, err
+	}
+	if err := tx.QueryRowContext(ctx, `
 		INSERT INTO exam_questions (exam_id, question_id, order_index, points)
 		VALUES ($1,$2,$3,$4) RETURNING id, created_at`,
-		examID, questionID, nextIdx, points).Scan(&eq.ID, &eq.CreatedAt)
-	if err != nil {
+		examID, questionID, nextIdx, points).Scan(&eq.ID, &eq.CreatedAt); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	eq.ExamID = examID
@@ -294,6 +334,26 @@ func (s *Store) AddExamQuestion(ctx context.Context, examID, questionID string, 
 func (s *Store) RemoveExamQuestion(ctx context.Context, examID, examQuestionID string) error {
 	_, err := s.DB.ExecContext(ctx, `DELETE FROM exam_questions WHERE id=$1 AND exam_id=$2`, examQuestionID, examID)
 	return err
+}
+
+// UpdateExamQuestionPoints updates this exam's own point snapshot for a
+// question, independent of questions.poin (the bank-wide default). Needed
+// because editing a question's poin from inside an exam's question list
+// only ever touched the bank record -- exam_questions.points (what's
+// actually displayed/summed for that exam) stayed stale.
+func (s *Store) UpdateExamQuestionPoints(ctx context.Context, examID, examQuestionID string, points float64) error {
+	res, err := s.DB.ExecContext(ctx, `UPDATE exam_questions SET points=$1 WHERE id=$2 AND exam_id=$3`, points, examQuestionID, examID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // ListExamQuestions returns exam_questions joined with their question, ordered
@@ -607,6 +667,23 @@ func (s *Store) NormalizeAndPublish(ctx context.Context, examID, schoolID string
 	}
 
 	return tx.Commit()
+}
+
+// UnpublishExam reverts a published exam back to draft. Time-window gating
+// (only before the exam's own start_at) is the caller's job -- see
+// UnpublishExam handler -- this just flips the flag once permitted.
+func (s *Store) UnpublishExam(ctx context.Context, examID, schoolID string) error {
+	res, err := s.DB.ExecContext(ctx, `
+		UPDATE exams SET is_published=false, published_at=NULL, updated_at=now()
+		WHERE id=$1 AND school_id=$2 AND deleted_at IS NULL AND is_published=true`, examID, schoolID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotEditable
+	}
+	return nil
 }
 
 // RenormalizePublishedPoints: Bug Report SKCIXGPM 0.1 -- guru can keep

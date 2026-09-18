@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"github.com/lib/pq"
@@ -22,6 +23,7 @@ func (s *Store) GetOrCreateReportCard(ctx context.Context, schoolID, academicYea
 		DO UPDATE SET updated_at = now()
 		RETURNING id, school_id, academic_year_id, term_id, classroom_id, student_id, status,
 			finalized_at, finalized_by, unlocked_at, unlocked_by, class_teacher_note,
+			kokurikuler_note, ekstrakurikuler, prestasi, kenaikan_status, kenaikan_kelas,
 			attendance_hadir, attendance_sakit, attendance_izin, attendance_tanpa_keterangan,
 			attendance_synced_at, attendance_sync_error,
 			student_name, student_nisn, classroom_name, term_name,
@@ -36,9 +38,96 @@ func (s *Store) GetOrCreateReportCard(ctx context.Context, schoolID, academicYea
 	return rc, inserted, nil
 }
 
+// raporExtras holds the hand-entered rapor sections' raw scan targets
+// (migrations 0010 + 0011). Grouped into one struct so the two scan sites
+// below stay a single line each instead of growing a variable per column.
+type raporExtras struct {
+	kokurikulerNote sql.NullString
+	ekskulJSON      []byte
+	prestasiJSON    []byte
+	kenaikanStatus  sql.NullString
+	kenaikanKelas   sql.NullString
+}
+
+// assign decodes the scanned extras onto a report card. The two JSONB
+// lists are normalized to non-nil slices so they marshal as [] rather than
+// null -- the print view and the admin form both iterate them unguarded. A
+// malformed JSONB value (only reachable by hand-editing the row) degrades
+// to an empty list rather than failing the whole read.
+func (e *raporExtras) assign(rc *model.ReportCard) {
+	if e.kokurikulerNote.Valid {
+		rc.KokurikulerNote = &e.kokurikulerNote.String
+	}
+	if e.kenaikanStatus.Valid {
+		rc.KenaikanStatus = &e.kenaikanStatus.String
+	}
+	if e.kenaikanKelas.Valid {
+		rc.KenaikanKelas = &e.kenaikanKelas.String
+	}
+	rc.Ekstrakurikuler = []model.Ekskul{}
+	if len(e.ekskulJSON) > 0 {
+		var list []model.Ekskul
+		if json.Unmarshal(e.ekskulJSON, &list) == nil && list != nil {
+			rc.Ekstrakurikuler = list
+		}
+	}
+	rc.Prestasi = []model.Prestasi{}
+	if len(e.prestasiJSON) > 0 {
+		var list []model.Prestasi
+		if json.Unmarshal(e.prestasiJSON, &list) == nil && list != nil {
+			rc.Prestasi = list
+		}
+	}
+}
+
+// UpdateRaporExtras writes the rapor sections an admin/wali kelas fills in
+// by hand -- Kokurikuler, Ekstrakurikuler, Catatan Wali Kelas, and (akhir
+// semester only) Prestasi and Kenaikan Kelas. All are replaced wholesale;
+// the caller passes the current value for anything it isn't changing.
+// Returns sql.ErrNoRows if the report card doesn't exist.
+type RaporExtrasInput struct {
+	KokurikulerNote  *string
+	ClassTeacherNote *string
+	Ekstrakurikuler  []model.Ekskul
+	Prestasi         []model.Prestasi
+	KenaikanStatus   *string
+	KenaikanKelas    *string
+}
+
+func (s *Store) UpdateRaporExtras(ctx context.Context, id string, in RaporExtrasInput) error {
+	if in.Ekstrakurikuler == nil {
+		in.Ekstrakurikuler = []model.Ekskul{}
+	}
+	if in.Prestasi == nil {
+		in.Prestasi = []model.Prestasi{}
+	}
+	raw, err := json.Marshal(in.Ekstrakurikuler)
+	if err != nil {
+		return err
+	}
+	rawPrestasi, err := json.Marshal(in.Prestasi)
+	if err != nil {
+		return err
+	}
+	res, err := s.DB.ExecContext(ctx, `
+		UPDATE report_cards
+		SET kokurikuler_note = $2, class_teacher_note = $3, ekstrakurikuler = $4::jsonb,
+			prestasi = $5::jsonb, kenaikan_status = $6, kenaikan_kelas = $7, updated_at = now()
+		WHERE id = $1`, id, in.KokurikulerNote, in.ClassTeacherNote, string(raw),
+		string(rawPrestasi), in.KenaikanStatus, in.KenaikanKelas)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func scanReportCard(row *sql.Row) (*model.ReportCard, bool, error) {
 	var rc model.ReportCard
 	var finalizedBy, unlockedBy, classTeacherNote sql.NullString
+	var extras raporExtras
 	var finalizedAt, unlockedAt, attendanceSyncedAt, headerSyncedAt sql.NullTime
 	var hadir, sakit, izin, tanpa sql.NullInt64
 	var attendanceSyncErr sql.NullString
@@ -48,6 +137,7 @@ func scanReportCard(row *sql.Row) (*model.ReportCard, bool, error) {
 	err := row.Scan(
 		&rc.ID, &rc.SchoolID, &rc.AcademicYearID, &rc.TermID, &rc.ClassroomID, &rc.StudentID, &rc.Status,
 		&finalizedAt, &finalizedBy, &unlockedAt, &unlockedBy, &classTeacherNote,
+		&extras.kokurikulerNote, &extras.ekskulJSON, &extras.prestasiJSON, &extras.kenaikanStatus, &extras.kenaikanKelas,
 		&hadir, &sakit, &izin, &tanpa,
 		&attendanceSyncedAt, &attendanceSyncErr,
 		&studentName, &studentNISN, &classroomName, &termName,
@@ -79,6 +169,7 @@ func scanReportCard(row *sql.Row) (*model.ReportCard, bool, error) {
 	if classTeacherNote.Valid {
 		rc.ClassTeacherNote = &classTeacherNote.String
 	}
+	extras.assign(&rc)
 	if hadir.Valid {
 		v := int(hadir.Int64)
 		rc.Attendance.Hadir = &v
@@ -129,6 +220,7 @@ func scanReportCard(row *sql.Row) (*model.ReportCard, bool, error) {
 
 const reportCardSelectCols = `id, school_id, academic_year_id, term_id, classroom_id, student_id, status,
 	finalized_at, finalized_by, unlocked_at, unlocked_by, class_teacher_note,
+	kokurikuler_note, ekstrakurikuler, prestasi, kenaikan_status, kenaikan_kelas,
 	attendance_hadir, attendance_sakit, attendance_izin, attendance_tanpa_keterangan,
 	attendance_synced_at, attendance_sync_error,
 	student_name, student_nisn, classroom_name, term_name,
@@ -184,6 +276,7 @@ func scanReportCardRows(rows *sql.Rows) ([]model.ReportCard, error) {
 	for rows.Next() {
 		var rc model.ReportCard
 		var finalizedBy, unlockedBy, classTeacherNote sql.NullString
+		var extras raporExtras
 		var finalizedAt, unlockedAt, attendanceSyncedAt, headerSyncedAt sql.NullTime
 		var hadir, sakit, izin, tanpa sql.NullInt64
 		var attendanceSyncErr sql.NullString
@@ -193,6 +286,7 @@ func scanReportCardRows(rows *sql.Rows) ([]model.ReportCard, error) {
 		if err := rows.Scan(
 			&rc.ID, &rc.SchoolID, &rc.AcademicYearID, &rc.TermID, &rc.ClassroomID, &rc.StudentID, &rc.Status,
 			&finalizedAt, &finalizedBy, &unlockedAt, &unlockedBy, &classTeacherNote,
+			&extras.kokurikulerNote, &extras.ekskulJSON, &extras.prestasiJSON, &extras.kenaikanStatus, &extras.kenaikanKelas,
 			&hadir, &sakit, &izin, &tanpa,
 			&attendanceSyncedAt, &attendanceSyncErr,
 			&studentName, &studentNISN, &classroomName, &termName,
@@ -219,6 +313,7 @@ func scanReportCardRows(rows *sql.Rows) ([]model.ReportCard, error) {
 		if classTeacherNote.Valid {
 			rc.ClassTeacherNote = &classTeacherNote.String
 		}
+		extras.assign(&rc)
 		if hadir.Valid {
 			v := int(hadir.Int64)
 			rc.Attendance.Hadir = &v
@@ -412,7 +507,15 @@ func (s *Store) ListSubjects(ctx context.Context, reportCardID string) ([]model.
 		sub.FinalScore = sub.Final()
 		out = append(out, sub)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// SEKOCI V10 item A: the rapor's mapel order is the curriculum's, not
+	// the alphabetical one the ORDER BY above gives (that's what put
+	// "Bahasa Indonesia" above "Pendidikan Agama"). Applied here, in the
+	// one place every reader of a report card's subjects goes through.
+	model.SortSubjectsCurriculum(out)
+	return out, nil
 }
 
 // PatchSubjectOverride sets (or clears, if overrideScore is nil) the manual

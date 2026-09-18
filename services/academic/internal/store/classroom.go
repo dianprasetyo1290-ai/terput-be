@@ -72,8 +72,38 @@ func (s *Store) UpdateClassroom(ctx context.Context, schoolID, id string, name, 
 	return c, err
 }
 
+// DeleteClassroom soft-deletes the classroom AND removes its class_enrollments
+// rows in the same transaction. The classrooms row itself is only
+// soft-deleted (deleted_at), which means its `class_enrollments.classroom_id
+// REFERENCES classrooms(id) ON DELETE CASCADE` FK never actually fires — the
+// row still exists. Without this explicit cleanup, DashboardCountsFor's siswa
+// count (raw `class_enrollments WHERE status='active'`, not joined against
+// classrooms) keeps counting students in a class that Data Kelas already
+// shows as deleted (see Report sekoci V3.docx: Total Siswa stuck at 422 after
+// every class was deleted).
 func (s *Store) DeleteClassroom(ctx context.Context, schoolID, id string) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE classrooms SET deleted_at = now() WHERE id = $1 AND school_id = $2`, id, schoolID)
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE classrooms SET deleted_at = now() WHERE id = $1 AND school_id = $2`, id, schoolID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM class_enrollments WHERE school_id = $1 AND classroom_id = $2`, schoolID, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// RemoveStudentEnrollments hard-deletes every class_enrollments row for a
+// student across all classrooms/years in a school. Called from
+// identity-service's DeleteUser (via AcademicClient) when the deleted
+// account holds a siswa role — the mirror-image gap of DeleteClassroom
+// above: deleting the student first, before their class, orphaned the same
+// way.
+func (s *Store) RemoveStudentEnrollments(ctx context.Context, schoolID, studentUserID string) error {
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM class_enrollments WHERE school_id = $1 AND student_user_id = $2`, schoolID, studentUserID)
 	return err
 }
 

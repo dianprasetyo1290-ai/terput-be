@@ -84,9 +84,10 @@ type parsedImport struct {
 	org               []map[string]string // jabatan, name (Struktur Organisasi's "Nama" column)
 	staged            map[string][]map[string]string // kind -> raw rows, see genericStagedSheets
 	report            importReport
+	existingSchoolID  string // "school_id" form field: add data to this school instead of creating a new one
 }
 
-func parseImportFile(f *excelize.File, schoolNameOverride string) *parsedImport {
+func parseImportFile(f *excelize.File, schoolNameOverride string, existingSchool bool) *parsedImport {
 	pi := &parsedImport{
 		guruEmailByName: map[string]string{},
 		staged:          map[string][]map[string]string{},
@@ -115,14 +116,18 @@ func parseImportFile(f *excelize.File, schoolNameOverride string) *parsedImport 
 		pi.school.phoneNumber = get("nomor telpon")
 		pi.school.email = get("email")
 		pi.school.logo = get("link logo sekolah (opsional)")
-	} else {
+	} else if !existingSchool {
 		pi.report.Errors = append(pi.report.Errors, importRowError{Sheet: sheetIdentitas, Row: 0, Issue: "sheet missing or has no data row"})
 	}
 	if schoolNameOverride != "" {
 		pi.school.name = schoolNameOverride
 	}
 	pi.report.SchoolName = pi.school.name
-	if pi.school.name == "" {
+	// Targeting an already-registered school (existingSchool) only adds
+	// data into it — "nama sekolah" is meaningless there, so it's not
+	// required (matches "Buat Sekolah" becoming a school picker: report
+	// 2026-09-03, note under Data Sekolah > Import Sekoci).
+	if pi.school.name == "" && !existingSchool {
 		pi.report.Errors = append(pi.report.Errors, importRowError{Sheet: sheetIdentitas, Row: 1, Field: "nama sekolah", Issue: "school name is required (from sheet or the 'Buat sekolah' field)"})
 	}
 
@@ -309,6 +314,13 @@ func (a *App) DryRunImport(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if pi.existingSchoolID != "" {
+		var exists bool
+		if err := a.DB.QueryRow(`SELECT true FROM schools WHERE id=$1`, pi.existingSchoolID).Scan(&exists); err != nil {
+			pi.report.OK = false
+			pi.report.Errors = append(pi.report.Errors, importRowError{Sheet: sheetIdentitas, Row: 1, Issue: "sekolah yang dipilih tidak ditemukan"})
+		}
+	}
 	a.checkExistingEmails(pi)
 	common.WriteJSON(w, http.StatusOK, pi.report, nil)
 }
@@ -347,28 +359,46 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	var schoolID string
-	err = tx.QueryRow(`INSERT INTO schools (name, address, subdistrict, district, city, province,
-			registration_number, year_founded, phone_number, email, logo)
-		VALUES ($1,NULLIF($2,''),NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),
-			NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),NULLIF($11,''))
-		RETURNING id`,
-		pi.school.name, pi.school.address, pi.school.subdistrict, pi.school.district,
-		pi.school.city, pi.school.province, pi.school.registrationNumber, pi.school.yearFounded,
-		pi.school.phoneNumber, pi.school.email, pi.school.logo).Scan(&schoolID)
-	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to create school: "+err.Error())
-		return
+	var hadCurrentYear bool
+	if pi.existingSchoolID != "" {
+		var currentYearID sql.NullString
+		if err := tx.QueryRow(`SELECT id, current_academic_year_id FROM schools WHERE id=$1`, pi.existingSchoolID).Scan(&schoolID, &currentYearID); err != nil {
+			common.WriteError(w, http.StatusBadRequest, "sekolah yang dipilih tidak ditemukan")
+			return
+		}
+		hadCurrentYear = currentYearID.Valid
+	} else {
+		err = tx.QueryRow(`INSERT INTO schools (name, address, subdistrict, district, city, province,
+				registration_number, year_founded, phone_number, email, logo)
+			VALUES ($1,NULLIF($2,''),NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),
+				NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),NULLIF($11,''))
+			RETURNING id`,
+			pi.school.name, pi.school.address, pi.school.subdistrict, pi.school.district,
+			pi.school.city, pi.school.province, pi.school.registrationNumber, pi.school.yearFounded,
+			pi.school.phoneNumber, pi.school.email, pi.school.logo).Scan(&schoolID)
+		if err != nil {
+			common.WriteError(w, http.StatusInternalServerError, "failed to create school: "+err.Error())
+			return
+		}
 	}
 
-	var academicYearID string
-	if err := tx.QueryRow(`INSERT INTO academic_years (school_id, label, is_current) VALUES ($1,$2,true) RETURNING id`,
-		schoolID, academicYearLabel).Scan(&academicYearID); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to create academic year: "+err.Error())
+	// find-or-create rather than a blind INSERT: an existing school may
+	// already have this label (re-running an import to add more students
+	// to the same tahun akademik must not create a duplicate row).
+	academicYearID, err := findOrCreateAcademicYear(tx, schoolID, academicYearLabel)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to resolve academic year: "+err.Error())
 		return
 	}
-	if _, err := tx.Exec(`UPDATE schools SET current_academic_year_id=$1 WHERE id=$2`, academicYearID, schoolID); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to link academic year: "+err.Error())
-		return
+	// Only (re)point "current academic year" for a brand-new school, or an
+	// existing one that didn't have one set yet — an admin adding a
+	// handful of students to an established school shouldn't silently flip
+	// which year the rest of the school is currently operating in.
+	if !hadCurrentYear {
+		if _, err := tx.Exec(`UPDATE schools SET current_academic_year_id=$1 WHERE id=$2`, academicYearID, schoolID); err != nil {
+			common.WriteError(w, http.StatusInternalServerError, "failed to link academic year: "+err.Error())
+			return
+		}
 	}
 
 	emailToUserID := map[string]string{}
@@ -391,6 +421,7 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 	}
 
 	siswaCreated := 0
+	siswaUserIDByEmail := map[string]string{}
 	for _, s := range pi.siswa {
 		userID, _, err := createImportedUser(tx, s["name"], s["email"], s["phone"], s["birth_date"], s["birth_place"], s["address"], s["religion"],
 			extraJSON(map[string]string{"nisn": s["nisn"], "kelas": s["kelas"], "tahun_akademik": s["tahun_akademik"], "asal_sekolah": s["asal_sekolah"], "nama_orang_tua": s["nama_orang_tua"]}))
@@ -403,6 +434,7 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 			common.WriteError(w, http.StatusInternalServerError, "failed to assign siswa role: "+err.Error())
 			return
 		}
+		siswaUserIDByEmail[s["email"]] = userID
 		siswaCreated++
 	}
 
@@ -458,17 +490,155 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Data Siswa's "Kelas"/"Tahun Akademik" cells and Data Kelas's own rows
+	// auto-place every imported student into the right academic-service
+	// classroom (find-or-create classroom, then enroll) — best-effort and
+	// run after commit since this is a cross-service call that can't share
+	// the DB transaction above; a failure here doesn't roll back the
+	// students already created, it's reported back for the superadmin to
+	// retry/fix manually.
+	classroomErrors := a.reconcileClassrooms(pi, schoolID, academicYearLabel, emailToUserID, siswaUserIDByEmail)
+
 	common.WriteJSON(w, http.StatusCreated, map[string]interface{}{
 		"school_id":              schoolID,
 		"academic_year_id":       academicYearID,
 		"guru_created":           guruCreated,
 		"siswa_created":          siswaCreated,
 		"positions_assigned":     positionsAssigned,
+		"classroom_errors":       classroomErrors,
 		"kelas_staged":           stagedCounts["kelas"],
 		"mata_pelajaran_staged":  stagedCounts["mata_pelajaran"],
 		"orang_tua_staged":       stagedCounts["orang_tua"],
 		"ekstrakurikuler_staged": stagedCounts["ekstrakurikuler"],
 	}, nil)
+}
+
+// reconcileClassrooms auto-places imported students into academic-service
+// classrooms per each Data Siswa row's "Kelas"/"Tahun Akademik" cells,
+// pulling Tingkat (grade_level) and Wali Kelas from the matching Data Kelas
+// row by classroom name. Best-effort and run after the DB transaction above
+// already committed (this is a cross-service call, can't share that tx) —
+// returns human-readable errors instead of failing the import; the
+// students/guru/school data is already safely saved either way.
+func (a *App) reconcileClassrooms(pi *parsedImport, schoolID, defaultYearLabel string, guruUserIDByEmail, siswaUserIDByEmail map[string]string) []string {
+	var errs []string
+
+	type kelasMeta struct{ tingkat, waliKelas string }
+	kelasByName := map[string]kelasMeta{}
+	for _, row := range pi.staged["kelas"] {
+		name := strings.TrimSpace(row["kelas"])
+		if name == "" {
+			continue
+		}
+		kelasByName[normalizeKelasName(name)] = kelasMeta{tingkat: row["tingkat"], waliKelas: row["wali kelas"]}
+	}
+
+	yearIDByLabel := map[string]string{}
+	resolveYear := func(label string) (string, error) {
+		if label == "" {
+			label = defaultYearLabel
+		}
+		if id, ok := yearIDByLabel[label]; ok {
+			return id, nil
+		}
+		tx, err := a.DB.Begin()
+		if err != nil {
+			return "", err
+		}
+		id, err := findOrCreateAcademicYear(tx, schoolID, label)
+		if err != nil {
+			tx.Rollback()
+			return "", err
+		}
+		if err := tx.Commit(); err != nil {
+			return "", err
+		}
+		yearIDByLabel[label] = id
+		return id, nil
+	}
+
+	// A wali kelas named on Data Kelas may be someone created in this same
+	// import batch (Data Guru) or an existing teacher already at this
+	// school (existing-school mode) — check the batch first, fall back to
+	// a school-scoped name lookup.
+	waliKelasUserID := func(name string) *string {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return nil
+		}
+		if email, ok := pi.guruEmailByName[strings.ToLower(name)]; ok {
+			if id, ok := guruUserIDByEmail[email]; ok {
+				return &id
+			}
+		}
+		var id string
+		err := a.DB.QueryRow(`SELECT u.id FROM users u JOIN user_school_roles usr ON u.id = usr.user_id
+			WHERE usr.school_id = $1 AND usr.role = 'guru' AND lower(u.name) = lower($2) LIMIT 1`, schoolID, name).Scan(&id)
+		if err != nil {
+			return nil
+		}
+		return &id
+	}
+
+	type classroomKey struct{ yearID, name string }
+	classroomIDByKey := map[classroomKey]string{}
+	resolveClassroom := func(yearID, name string) (string, error) {
+		key := classroomKey{yearID, normalizeKelasName(name)}
+		if id, ok := classroomIDByKey[key]; ok {
+			return id, nil
+		}
+		meta := kelasByName[normalizeKelasName(name)]
+		var gradeLevel *string
+		if meta.tingkat != "" {
+			gradeLevel = &meta.tingkat
+		}
+		id, err := a.Academic.FindOrCreateClassroom(schoolID, yearID, name, gradeLevel, waliKelasUserID(meta.waliKelas))
+		if err != nil {
+			return "", err
+		}
+		classroomIDByKey[key] = id
+		return id, nil
+	}
+
+	for _, s := range pi.siswa {
+		kelasName := strings.TrimSpace(s["kelas"])
+		if kelasName == "" {
+			continue
+		}
+		studentUserID, ok := siswaUserIDByEmail[s["email"]]
+		if !ok {
+			continue
+		}
+		yearID, err := resolveYear(strings.TrimSpace(s["tahun_akademik"]))
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: gagal resolve tahun akademik: %s", s["name"], err.Error()))
+			continue
+		}
+		classroomID, err := resolveClassroom(yearID, kelasName)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: gagal membuat/menemukan kelas %q: %s", s["name"], kelasName, err.Error()))
+			continue
+		}
+		if err := a.Academic.EnrollStudent(schoolID, classroomID, studentUserID); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: gagal mendaftarkan ke kelas %q: %s", s["name"], kelasName, err.Error()))
+		}
+	}
+	return errs
+}
+
+func normalizeKelasName(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
+// findOrCreateAcademicYear upserts by the (school_id, label) unique
+// constraint — reusing the existing row (and its id) rather than erroring or
+// duplicating when the label already exists for this school.
+func findOrCreateAcademicYear(tx *sql.Tx, schoolID, label string) (string, error) {
+	var id string
+	err := tx.QueryRow(`INSERT INTO academic_years (school_id, label, is_current) VALUES ($1,$2,true)
+		ON CONFLICT (school_id, label) WHERE deleted_at IS NULL DO UPDATE SET label = EXCLUDED.label
+		RETURNING id`, schoolID, label).Scan(&id)
+	return id, err
 }
 
 // extraJSON marshals the non-empty entries of m into a JSON object for
@@ -526,7 +696,10 @@ func (a *App) readImportUpload(r *http.Request) (*parsedImport, error) {
 	}
 	defer f.Close()
 	schoolNameOverride := strings.TrimSpace(r.FormValue("school_name")) // the "Buat sekolah" field
-	return parseImportFile(f, schoolNameOverride), nil
+	existingSchoolID := strings.TrimSpace(r.FormValue("school_id"))     // "Buat Sekolah" set to an already-registered school instead
+	pi := parseImportFile(f, schoolNameOverride, existingSchoolID != "")
+	pi.existingSchoolID = existingSchoolID
+	return pi, nil
 }
 
 func (a *App) checkExistingEmails(pi *parsedImport) {
@@ -623,8 +796,8 @@ func (a *App) DownloadTemplate(w http.ResponseWriter, r *http.Request) {
 			example: []string{"Budi Santoso", "budi.santoso@gmail.com", "081298765432", "Jl. Mangga No. 3, Jakarta Pusat"},
 		}},
 		{sheetKelas, sheetDef{
-			headers: []string{"Kelas", "Sub Kelas", "Wali Kelas"},
-			example: []string{"X", "A", "Siti Rahmawati, S.Pd"},
+			headers: []string{"Kelas", "Tingkat", "Wali Kelas"},
+			example: []string{"X AK 1", "10", "Siti Rahmawati, S.Pd"},
 		}},
 		{sheetSiswa, sheetDef{
 			headers:   []string{"Nama", "NISN", "Kelas", "Tahun Akademik", "Tanggal Lahir", "Tempat Lahir", "Alamat", "No Telepon", "Email", "Asal Sekolah", "Agama", "Nama Orang Tua"},

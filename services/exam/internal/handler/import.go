@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/base64"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -96,8 +97,9 @@ func (h *Handler) ImportQuestions(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	var records [][]string
+	var rowImages map[int]string
 	if strings.HasSuffix(strings.ToLower(header.Filename), ".xlsx") {
-		records, err = parseXLSX(file)
+		records, rowImages, err = parseXLSX(file)
 	} else {
 		records, err = parseCSV(file)
 	}
@@ -140,7 +142,7 @@ func (h *Handler) ImportQuestions(w http.ResponseWriter, r *http.Request) {
 
 	var created []*model.Question
 	for rowNum, row := range records[1:] {
-		req, msg := rowToQuestionReq(qType, row, idx, exam.AcademicYearID)
+		req, msg := rowToQuestionReq(qType, row, idx, exam.AcademicYearID, rowImages[rowNum+1])
 		if msg != "" {
 			common.WriteError(w, http.StatusBadRequest, fmt.Sprintf("row %d: %s", rowNum+2, msg))
 			return
@@ -187,20 +189,60 @@ func parseCSV(r io.Reader) ([][]string, error) {
 	return cr.ReadAll()
 }
 
-func parseXLSX(r io.Reader) ([][]string, error) {
+func parseXLSX(r io.Reader) ([][]string, map[int]string, error) {
 	f, err := excelize.OpenReader(r)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer f.Close()
 	sheets := f.GetSheetList()
 	if len(sheets) == 0 {
-		return nil, fmt.Errorf("no sheets found")
+		return nil, nil, fmt.Errorf("no sheets found")
 	}
-	return f.GetRows(sheets[0])
+	sheet := sheets[0]
+	rows, err := f.GetRows(sheet)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Teachers sometimes paste a screenshot (Snipping Tool -> Excel can't
+	// paste as cell text) as a floating image anchored somewhere in the
+	// question's row -- there's no other way to get a math diagram/matrix
+	// into the sheet. excelize.GetRows only reads cell text and silently
+	// drops these, which is why such questions imported with no image at
+	// all. Map each floating image to its row here so it becomes the
+	// question's image_url: this app has no object storage, and
+	// questions.image_url is already a plain TEXT column the frontend
+	// renders directly via <img :src>, so a data: URI needs no new infra.
+	rowImages := map[int]string{}
+	if cells, err := f.GetPictureCells(sheet); err == nil {
+		for _, cell := range cells {
+			_, rowNum, err := excelize.CellNameToCoordinates(cell)
+			if err != nil {
+				continue
+			}
+			rowIdx := rowNum - 1 // header is Excel row 1 -> records[0]; row N -> records[N-1]
+			if rowIdx < 0 {
+				continue
+			}
+			if _, exists := rowImages[rowIdx]; exists {
+				continue // one image per question row is enough
+			}
+			pics, err := f.GetPictures(sheet, cell)
+			if err != nil || len(pics) == 0 {
+				continue
+			}
+			ext := strings.ToLower(strings.TrimPrefix(pics[0].Extension, "."))
+			if ext == "jpg" {
+				ext = "jpeg"
+			}
+			rowImages[rowIdx] = fmt.Sprintf("data:image/%s;base64,%s", ext, base64.StdEncoding.EncodeToString(pics[0].File))
+		}
+	}
+	return rows, rowImages, nil
 }
 
-func rowToQuestionReq(qType string, row []string, idx map[string]int, academicYearID string) (questionReq, string) {
+func rowToQuestionReq(qType string, row []string, idx map[string]int, academicYearID string, rowImage string) (questionReq, string) {
 	get := func(col string) string {
 		i, ok := idx[col]
 		if !ok || i >= len(row) {
@@ -248,6 +290,11 @@ func rowToQuestionReq(qType string, row []string, idx map[string]int, academicYe
 	case "tebak_gambar":
 		req.ImageURL = strPtr(get("image_url"))
 		req.EssayOptions = splitOpsi(get("opsi_jawaban"))
+	}
+	// A pasted/floating image in the row wins only where no explicit
+	// image_url column already supplied one (tebak_gambar).
+	if req.ImageURL == nil && rowImage != "" {
+		req.ImageURL = strPtr(rowImage)
 	}
 	return req, ""
 }

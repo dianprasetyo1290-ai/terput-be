@@ -14,6 +14,7 @@ type createSubjectRequest struct {
 	Name         string  `json:"name"`
 	Description  *string `json:"description"`
 	SubjectGroup *string `json:"subject_group"`
+	Kelompok     *string `json:"kelompok"`
 }
 
 // CreateSubject: POST /subjects
@@ -32,6 +33,7 @@ func (h *Handler) CreateSubject(w http.ResponseWriter, r *http.Request) {
 		Name:         req.Name,
 		Description:  req.Description,
 		SubjectGroup: req.SubjectGroup,
+		Kelompok:     req.Kelompok,
 	})
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -77,6 +79,7 @@ type updateSubjectRequest struct {
 	Name         *string `json:"name"`
 	Description  *string `json:"description"`
 	SubjectGroup *string `json:"subject_group"`
+	Kelompok     *string `json:"kelompok"`
 }
 
 // UpdateSubject: PUT /subjects/{id}
@@ -90,7 +93,7 @@ func (h *Handler) UpdateSubject(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	sub, err := h.Store.UpdateSubject(r.Context(), schoolID, chi.URLParam(r, "id"), req.Name, req.Description, req.SubjectGroup)
+	sub, err := h.Store.UpdateSubject(r.Context(), schoolID, chi.URLParam(r, "id"), req.Name, req.Description, req.SubjectGroup, req.Kelompok)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, err.Error())
 		return

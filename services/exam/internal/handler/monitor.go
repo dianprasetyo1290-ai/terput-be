@@ -39,7 +39,7 @@ type rosterRow struct {
 // exam yet still shows up as "belum_mulai" instead of being invisible.
 func (h *Handler) Monitor(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin", "guru") {
+	if !requireRole(w, c, "admin", "superadmin", "guru", "pengawas") {
 		return
 	}
 	examID := chi.URLParam(r, "id")
@@ -203,7 +203,7 @@ func itoaSimple(n int) string {
 // essay questions this response doubles as the correction UI payload.
 func (h *Handler) AttemptDetail(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin", "guru") {
+	if !requireRole(w, c, "admin", "superadmin", "guru", "pengawas") {
 		return
 	}
 	examID := chi.URLParam(r, "id")
@@ -284,7 +284,7 @@ type reasonReq struct {
 // LarangUjian: admin only, belum_mulai -> dilarang, required Alasan.
 func (h *Handler) LarangUjian(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin") {
+	if !requireRole(w, c, "admin", "superadmin", "pengawas") {
 		return
 	}
 	attemptID, exam, ok := h.loadAttemptForAction(w, r, c)
@@ -316,7 +316,7 @@ func (h *Handler) LarangUjian(w http.ResponseWriter, r *http.Request) {
 // by userId instead of attemptId for exactly that reason.
 func (h *Handler) LarangUjianByUser(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin") {
+	if !requireRole(w, c, "admin", "superadmin", "pengawas") {
 		return
 	}
 	examID := chi.URLParam(r, "id")
@@ -357,7 +357,7 @@ func (h *Handler) LarangUjianByUser(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) BukaLarangan(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin") {
+	if !requireRole(w, c, "admin", "superadmin", "pengawas") {
 		return
 	}
 	attemptID, _, ok := h.loadAttemptForAction(w, r, c)
@@ -373,7 +373,7 @@ func (h *Handler) BukaLarangan(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Blokir(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin", "guru") {
+	if !requireRole(w, c, "admin", "superadmin", "guru", "pengawas") {
 		return
 	}
 	attemptID, _, ok := h.loadAttemptForAction(w, r, c)
@@ -396,7 +396,7 @@ func (h *Handler) Blokir(w http.ResponseWriter, r *http.Request) {
 // BukaBlokir ("Ulangi"): resumes without resetting progress.
 func (h *Handler) BukaBlokir(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin", "guru") {
+	if !requireRole(w, c, "admin", "superadmin", "guru", "pengawas") {
 		return
 	}
 	attemptID, _, ok := h.loadAttemptForAction(w, r, c)

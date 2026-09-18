@@ -18,12 +18,35 @@ type ReportCard struct {
 	UnlockedBy       *string    `json:"unlocked_by,omitempty"`
 	ClassTeacherNote *string    `json:"class_teacher_note,omitempty"`
 
+	// SEKOCI V10 item B -- the rapor sections below "C. Muatan Lokal":
+	// "II. Kokurikuler" is one free-text Deskripsi Perkembangan Siswa,
+	// "III. Ekstrakurikuler" a variable-length activity list. ("IV.
+	// Kehadiran" reads Attendance below and "V. Tanggapan Wali Kelas"
+	// reads ClassTeacherNote above -- no new fields needed for those.)
+	// Ekstrakurikuler is never nil on the wire: the column defaults to an
+	// empty JSON array so the print view can iterate it unguarded.
+	KokurikulerNote *string  `json:"kokurikuler_note,omitempty"`
+	Ekstrakurikuler []Ekskul `json:"ekstrakurikuler"`
+
+	// Format Rapor (3).xlsx, "Form Raport Akhir Smstr(6 bln)": the akhir-
+	// semester form carries two more sections the tengah-semester one
+	// doesn't -- "IV. PRESTASI" and "VII. KENAIKAN KELAS" (printed only on
+	// a semester genap). Migration 0011. Prestasi is never nil on the wire
+	// for the same reason Ekstrakurikuler isn't.
+	Prestasi       []Prestasi `json:"prestasi"`
+	KenaikanStatus *string    `json:"kenaikan_status,omitempty"`
+	KenaikanKelas  *string    `json:"kenaikan_kelas,omitempty"`
+
 	Attendance AttendanceSummary `json:"attendance"`
 
 	// Header snapshot fetched from identity/academic-service.
 	StudentName         *string    `json:"student_name,omitempty"`
 	StudentNISN         *string    `json:"student_nisn,omitempty"`
 	ClassroomName       *string    `json:"classroom_name,omitempty"`
+	// Fase is derived from the classroom's grade_level at read time, never
+	// stored (see handler.resolveFase) -- the rapor form has always had a
+	// "Fase" line with nothing feeding it.
+	Fase                string     `json:"fase,omitempty"`
 	TermName            *string    `json:"term_name,omitempty"`
 	HomeroomTeacherName *string    `json:"homeroom_teacher_name,omitempty"`
 	PrincipalName       *string    `json:"principal_name,omitempty"`
@@ -70,6 +93,27 @@ type SchoolInfo struct {
 	City     *string `json:"city"`
 	Province *string `json:"province"`
 	Logo     *string `json:"logo"`
+	// GovernmentLogo: SEKOCI V10 item C -- the rapor letterhead's top-left
+	// logo (Logo Pemerintah); Logo above is the school's own, top-right.
+	GovernmentLogo *string `json:"government_logo"`
+}
+
+// Ekskul is one row of the rapor's "III. EKSTRAKURIKULER" table (SEKOCI
+// V10 item B): the reference template's Kegiatan Ekstra Kurikuler /
+// Predikat / Keterangan columns, with as many rows as the student actually
+// took. Stored as a JSONB array on report_cards -- see migration 0010.
+type Ekskul struct {
+	Kegiatan   string `json:"kegiatan"`
+	Predikat   string `json:"predikat"`
+	Keterangan string `json:"keterangan"`
+}
+
+// Prestasi is one row of the akhir-semester rapor's "IV. PRESTASI" table
+// (Format Rapor (3).xlsx): Jenis Prestasi / Keterangan, as many rows as
+// the student actually earned. JSONB array on report_cards, migration 0011.
+type Prestasi struct {
+	Jenis      string `json:"jenis"`
+	Keterangan string `json:"keterangan"`
 }
 
 type AttendanceSummary struct {
@@ -103,8 +147,10 @@ type ReportCardSubject struct {
 	// ComputedScore used everywhere else (leger, report card final score).
 	StsScore *float64 `json:"sts_score"`
 	SasScore *float64 `json:"sas_score"`
-	// PraktikScore: Rapot Bayangan's "Nilai Praktik" bucket (item 3) --
-	// only ever set on report_type='bayangan' subject rows.
+	// PraktikScore: "Nilai Praktik" bucket (item 3), pooled the same way on
+	// both report_type='bayangan' and 'semester' subject rows -- shown
+	// display-only on the regular semester report too (Report V5 finding),
+	// without being folded into that type's Nilai Akhir formula.
 	PraktikScore    *float64 `json:"praktik_score"`
 	SourceExamCount int      `json:"source_exam_count"`
 	GradeLabel      *string  `json:"grade_label,omitempty"`
@@ -285,6 +331,118 @@ type ReportTemplate struct {
 	FileSize    int       `json:"file_size"`
 	UploadedBy  *string   `json:"uploaded_by,omitempty"`
 	UploadedAt  time.Time `json:"uploaded_at"`
+}
+
+// ReportTemplateContent is an uploaded template's sheet read back as a
+// plain row/column grid of cell text (GetReportTemplateContent) -- what the
+// "Halaman 2" print page renders from instead of the hardcoded default
+// layout, per Bug Report SEKOCI GPM V10 (ROLE ADMIN, Fitur Generate Rapor).
+type ReportTemplateContent struct {
+	Type string     `json:"template_type"`
+	Rows [][]string `json:"rows"`
+}
+
+// MergeParameter is one {{placeholder}} an admin may write in their Word
+// template, with the plain-Indonesian description the admin screen shows.
+type MergeParameter struct {
+	Key  string `json:"key"`
+	Desc string `json:"desc"`
+}
+
+// MergeParameterGroup is one section of the reference list (scalars, or one
+// repeating block). Loop != "" means the parameters inside it only work
+// between {{#<loop>}} and {{/<loop>}}.
+type MergeParameterGroup struct {
+	Title string           `json:"title"`
+	Loop  string           `json:"loop,omitempty"`
+	Note  string           `json:"note,omitempty"`
+	Items []MergeParameter `json:"items"`
+}
+
+// MergeParameterGroups is the mail-merge reference: every placeholder
+// handler/report_docx.go's buildMergeData actually fills. Kept next to the
+// types it documents and served over the API so the admin screen and any
+// document handed to a school can't drift from the implementation.
+var MergeParameterGroups = []MergeParameterGroup{
+	{
+		Title: "Identitas Siswa & Sekolah",
+		Items: []MergeParameter{
+			{"nama_siswa", "Nama lengkap peserta didik"},
+			{"nisn", "NISN peserta didik"},
+			{"kelas", "Nama rombel, mis. XII DKV"},
+			{"fase", "Fase Kurikulum Merdeka, otomatis dari tingkat kelas (X=E, XI/XII=F)"},
+			{"semester", "Nama semester, mis. VI (Enam) / Genap"},
+			{"nama_sekolah", "Nama sekolah"},
+			{"alamat_sekolah", "Alamat sekolah"},
+			{"kota", "Kota sekolah"},
+			{"provinsi", "Provinsi sekolah"},
+			{"wali_kelas", "Nama wali kelas"},
+			{"kepala_sekolah", "Nama kepala sekolah"},
+			{"jenis_rapor", "ASESMEN SUMATIF TENGAH/AKHIR SEMESTER, mengikuti tipe rapor"},
+			{"periode", "Label periode rapot bayangan, mis. Triwulan 1 (kosong di rapor semester)"},
+			{"tanggal", "Tanggal cetak, mis. 24 Juni 2026"},
+			{"tanggal_kota", "Kota + tanggal cetak, mis. Kota Bekasi, 24 Juni 2026"},
+		},
+	},
+	{
+		Title: "Nilai, Kehadiran & Catatan",
+		Items: []MergeParameter{
+			{"jumlah_nilai", "Jumlah seluruh Nilai Akhir"},
+			{"rata_rata", "Rata-rata Nilai Akhir"},
+			{"kokurikuler", "Isi bagian Kokurikuler"},
+			{"catatan_walas", "Isi Catatan Wali Kelas"},
+			{"hadir", "Jumlah hari hadir"},
+			{"sakit", "Jumlah hari sakit"},
+			{"izin", "Jumlah hari izin"},
+			{"tanpa_keterangan", "Jumlah hari tanpa keterangan"},
+			{"kenaikan_status", "Naik / Tidak Naik"},
+			{"kenaikan_kelas", "Kelas tujuan kenaikan"},
+		},
+	},
+	{
+		Title: "Tabel Mata Pelajaran",
+		Loop:  "mapel",
+		Note: "Tulis {{#mapel}} di sel pertama baris tabel dan {{/mapel}} di sel terakhir baris yang sama; " +
+			"baris itu akan diulang satu kali per mata pelajaran. Untuk tabel terpisah per kelompok, pakai " +
+			"{{#mapel_a}} (Umum), {{#mapel_b}} (Kejuruan), {{#mapel_c}} (Muatan Lokal) -- mengikuti huruf " +
+			"Kelompok pada Data Mata Pelajaran.",
+		Items: []MergeParameter{
+			{"no", "Nomor urut baris (otomatis, mulai 1 di tiap loop)"},
+			{"no_urut", "Nomor urut menyambung lintas kelompok A/B/C"},
+			{"nama", "Nama mata pelajaran"},
+			{"kode", "Kode mata pelajaran"},
+			{"kelompok", "Nama kelompok lengkap, mis. A. Kelompok Mata Pelajaran Umum"},
+			{"nilai_akhir", "Nilai Akhir"},
+			{"formatif", "Nilai Formatif"},
+			{"praktik", "Nilai Praktik"},
+			{"pts", "Nilai PTS/STS"},
+			{"pas", "Nilai PAS/SAS"},
+			{"predikat", "Predikat dari interval nilai sekolah"},
+			{"capaian", "Deskripsi Capaian Pembelajaran"},
+			{"kemajuan", "Deskripsi Kemajuan Belajar"},
+		},
+	},
+	{
+		Title: "Tabel Ekstrakurikuler",
+		Loop:  "ekskul",
+		Note:  "Sama polanya: {{#ekskul}} di sel pertama, {{/ekskul}} di sel terakhir baris yang sama.",
+		Items: []MergeParameter{
+			{"no", "Nomor urut baris (otomatis)"},
+			{"kegiatan", "Nama kegiatan ekstrakurikuler"},
+			{"predikat", "Predikat"},
+			{"keterangan", "Keterangan"},
+		},
+	},
+	{
+		Title: "Tabel Prestasi",
+		Loop:  "prestasi",
+		Note:  "Hanya terisi pada rapor akhir semester.",
+		Items: []MergeParameter{
+			{"no", "Nomor urut baris (otomatis)"},
+			{"jenis", "Jenis prestasi"},
+			{"keterangan", "Keterangan"},
+		},
+	},
 }
 
 // ReportTemplateTypes is the fixed 3-option list the Import Template popup

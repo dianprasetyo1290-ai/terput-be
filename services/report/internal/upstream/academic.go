@@ -3,6 +3,7 @@ package upstream
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"time"
 )
 
@@ -73,6 +74,9 @@ type Subject struct {
 	// concept at all (print view falls back to a flat list, see model.go's
 	// ReportCardSubject.SubjectGroup doc comment).
 	Group *string `json:"subject_group,omitempty"`
+	// Kelompok: umum | kejuruan | muatan_lokal -- the rapor's A/B/C
+	// sections. Wins over Group for print grouping when set.
+	Kelompok *string `json:"subject_kelompok,omitempty"`
 }
 
 // GetClassroom fetches GET /classrooms/{id}.
@@ -159,16 +163,18 @@ func (ac *AcademicClient) ListClassroomSubjects(ctx context.Context, classroomID
 // response — the classroom+subject pairs a guru is assigned to teach.
 // Powers Penilaian Formatif's "pick your class/subject" picker.
 type TeachingAssignment struct {
-	ClassroomSubjectID string `json:"classroom_subject_id"`
-	ClassroomID        string `json:"classroom_id"`
-	ClassroomName      string `json:"classroom_name"`
-	SubjectID          string `json:"subject_id"`
-	SubjectName        string `json:"subject_name"`
+	ClassroomSubjectID string  `json:"classroom_subject_id"`
+	ClassroomID        string  `json:"classroom_id"`
+	ClassroomName      string  `json:"classroom_name"`
+	SubjectID          string  `json:"subject_id"`
+	SubjectName        string  `json:"subject_name"`
+	GradeLevel         *string `json:"grade_level"`
 }
 
-func (ac *AcademicClient) ListTeachingAssignments(ctx context.Context, guruID string) ([]TeachingAssignment, error) {
+// academicYearID "" = every year (callers that don't scope to one year).
+func (ac *AcademicClient) ListTeachingAssignments(ctx context.Context, guruID, academicYearID string) ([]TeachingAssignment, error) {
 	var out []TeachingAssignment
-	path := fmt.Sprintf("/teaching-assignments?guru_id=%s", guruID)
+	path := fmt.Sprintf("/teaching-assignments?guru_id=%s&academic_year_id=%s", url.QueryEscape(guruID), url.QueryEscape(academicYearID))
 	if err := ac.c.getJSON(ctx, "ListTeachingAssignments", path, &out); err != nil {
 		return nil, err
 	}

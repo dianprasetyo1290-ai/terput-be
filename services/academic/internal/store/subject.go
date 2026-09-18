@@ -9,10 +9,10 @@ import (
 
 func (s *Store) CreateSubject(ctx context.Context, sub model.Subject) (*model.Subject, error) {
 	row := s.DB.QueryRowContext(ctx, `
-		INSERT INTO subjects (school_id, name, description, subject_group)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, school_id, name, description, subject_group, created_at, updated_at
-	`, sub.SchoolID, sub.Name, sub.Description, sub.SubjectGroup)
+		INSERT INTO subjects (school_id, name, description, subject_group, kelompok)
+		VALUES ($1, $2, $3, $4, NULLIF($5::text, ''))
+		RETURNING id, school_id, name, description, subject_group, kelompok, created_at, updated_at
+	`, sub.SchoolID, sub.Name, sub.Description, sub.SubjectGroup, sub.Kelompok)
 	return scanSubject(row)
 }
 
@@ -22,7 +22,7 @@ func (s *Store) ListSubjects(ctx context.Context, schoolID string, page, perPage
 		return nil, 0, err
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT id, school_id, name, description, subject_group, created_at, updated_at
+		SELECT id, school_id, name, description, subject_group, kelompok, created_at, updated_at
 		FROM subjects WHERE school_id = $1 AND deleted_at IS NULL ORDER BY name LIMIT $2 OFFSET $3
 	`, schoolID, perPage, (page-1)*perPage)
 	if err != nil {
@@ -42,7 +42,7 @@ func (s *Store) ListSubjects(ctx context.Context, schoolID string, page, perPage
 
 func (s *Store) GetSubject(ctx context.Context, schoolID, id string) (*model.Subject, error) {
 	row := s.DB.QueryRowContext(ctx, `
-		SELECT id, school_id, name, description, subject_group, created_at, updated_at
+		SELECT id, school_id, name, description, subject_group, kelompok, created_at, updated_at
 		FROM subjects WHERE id = $1 AND school_id = $2 AND deleted_at IS NULL
 	`, id, schoolID)
 	sub, err := scanSubject(row)
@@ -52,16 +52,17 @@ func (s *Store) GetSubject(ctx context.Context, schoolID, id string) (*model.Sub
 	return sub, err
 }
 
-func (s *Store) UpdateSubject(ctx context.Context, schoolID, id string, name, description, subjectGroup *string) (*model.Subject, error) {
+func (s *Store) UpdateSubject(ctx context.Context, schoolID, id string, name, description, subjectGroup, kelompok *string) (*model.Subject, error) {
 	row := s.DB.QueryRowContext(ctx, `
 		UPDATE subjects SET
 			name = COALESCE($3, name),
 			description = COALESCE($4, description),
 			subject_group = COALESCE($5, subject_group),
+			kelompok = CASE WHEN $6::text IS NULL THEN kelompok ELSE NULLIF($6::text, '') END, -- "" clears it
 			updated_at = now()
 		WHERE id = $1 AND school_id = $2 AND deleted_at IS NULL
-		RETURNING id, school_id, name, description, subject_group, created_at, updated_at
-	`, id, schoolID, name, description, subjectGroup)
+		RETURNING id, school_id, name, description, subject_group, kelompok, created_at, updated_at
+	`, id, schoolID, name, description, subjectGroup, kelompok)
 	sub, err := scanSubject(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -76,7 +77,7 @@ func (s *Store) DeleteSubject(ctx context.Context, schoolID, id string) error {
 
 func scanSubject(row rowScanner) (*model.Subject, error) {
 	var sub model.Subject
-	if err := row.Scan(&sub.ID, &sub.SchoolID, &sub.Name, &sub.Description, &sub.SubjectGroup, &sub.CreatedAt, &sub.UpdatedAt); err != nil {
+	if err := row.Scan(&sub.ID, &sub.SchoolID, &sub.Name, &sub.Description, &sub.SubjectGroup, &sub.Kelompok, &sub.CreatedAt, &sub.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return &sub, nil

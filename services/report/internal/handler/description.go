@@ -20,10 +20,13 @@ type descriptionRow struct {
 	// achievement scores (see classifyMapping), shown next to the free-text
 	// Capaian STS/SAS notes so the narrative can be written against real
 	// data instead of just the blended running score.
-	StsScore  *float64 `json:"sts_score"`
-	SasScore  *float64 `json:"sas_score"`
-	MidNote   *string  `json:"mid_note"`
-	FinalNote *string  `json:"final_note"`
+	StsScore *float64 `json:"sts_score"`
+	SasScore *float64 `json:"sas_score"`
+	// PraktikScore: Report V5 finding -- Nilai Praktik column, alongside
+	// Formatif/PTS(sts)/PAS(sas)/Akhir, on Deskripsi Rapor's grid too.
+	PraktikScore *float64 `json:"praktik_score"`
+	MidNote      *string  `json:"mid_note"`
+	FinalNote    *string  `json:"final_note"`
 }
 
 // GetSubjectDescriptionGrid: GET /classrooms/{id}/subjects/{subject_id}/description?term_id=
@@ -90,7 +93,7 @@ func (h *Handler) GetSubjectDescriptionGrid(w http.ResponseWriter, r *http.Reque
 			rows = append(rows, descriptionRow{
 				StudentID: rc.StudentID, StudentName: name, ReportCardID: rc.ID,
 				ComputedScore: sub.ComputedScore, FormatifScore: sub.FormatifScore, OverrideScore: sub.OverrideScore, FinalScore: sub.Final(),
-				StsScore: sub.StsScore, SasScore: sub.SasScore,
+				StsScore: sub.StsScore, SasScore: sub.SasScore, PraktikScore: sub.PraktikScore,
 				MidNote: sub.MidNote, FinalNote: sub.FinalNote,
 			})
 		}

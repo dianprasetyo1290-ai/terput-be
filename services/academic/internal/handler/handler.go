@@ -76,6 +76,26 @@ func (h *Handler) requireOwnClassroomIfWaliKelas(w http.ResponseWriter, r *http.
 	return true
 }
 
+// requireAdmin guards write endpoints that only admin/superadmin should
+// reach (Bug Report SEKOCI GPM V10, ROLE WALI KELAS: "Fitur Jadwal Kelas
+// bersifat hanya melihat, tidak bisa edit" — the frontend already only
+// shows the edit UI to admin/superadmin, per academic.routes.ts's
+// role:['admin','superadmin'], but nothing enforced it server-side, so any
+// authenticated caller — wali kelas included — could hit these endpoints
+// directly). Internal sibling-service calls (no claims) are left alone,
+// same as scopeSchoolID above.
+func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
+	claims := common.FromCtx(r)
+	if claims == nil {
+		return true
+	}
+	if claims.ActiveRole == "admin" || claims.ActiveRole == common.RoleSuperadmin {
+		return true
+	}
+	common.WriteError(w, http.StatusForbidden, "forbidden: requires role admin or superadmin")
+	return false
+}
+
 // scopeAcademicYearID applies the academic-year scoping rule from
 // CONVENTIONS.md: an explicit ?academic_year_id= always wins; otherwise we
 // try to resolve the school's current year via identity-service. If that

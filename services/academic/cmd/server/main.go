@@ -192,6 +192,22 @@ func main() {
 		r.Get("/schedules/{id}", h.GetScheduleByID)
 	})
 
+	// Write access for identity-service's Import Sekoci "existing school"
+	// reconciliation (see services/identity/internal/handler/import.go
+	// reconcileClassrooms): create/find classrooms and enroll imported
+	// students via X-Internal-Key, since that's a cross-service write with
+	// no user JWT available. Deliberately a separate group from the
+	// read-only internal group above rather than folding these in, so that
+	// group's "read-only" contract stays true for report/exam/evaluation.
+	r.Group(func(r chi.Router) {
+		r.Use(common.InternalOrJWTMiddleware(jwtSecret, internalKey))
+		r.Post("/classrooms", h.CreateClassroom)
+		r.Get("/classrooms", h.ListClassrooms)
+		r.Post("/classrooms/{id}/students", h.AddStudentToClassroom)
+		// identity-service's DeleteUser cascade — see RemoveStudentEnrollments.
+		r.Delete("/students/{student_user_id}/enrollments", h.RemoveStudentEnrollments)
+	})
+
 	log.Printf("academic-service listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, r); err != nil {
 		log.Fatal(err)

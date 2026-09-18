@@ -17,7 +17,9 @@ func (h *Handler) MyTeachingAssignments(w http.ResponseWriter, r *http.Request) 
 		common.WriteError(w, http.StatusForbidden, "only guru can view their teaching assignments")
 		return
 	}
-	list, _ := h.d.Academic.ListTeachingAssignments(r.Context(), claims.UserID) // fail soft: empty list if academic-service is unreachable
+	// ?academic_year_id= scopes the picker to Data Kelas' current year --
+	// without it last year's classes show up as duplicates (SEKOCI V7).
+	list, _ := h.d.Academic.ListTeachingAssignments(r.Context(), claims.UserID, r.URL.Query().Get("academic_year_id")) // fail soft: empty list if academic-service is unreachable
 	common.WriteJSON(w, http.StatusOK, list, nil)
 }
 

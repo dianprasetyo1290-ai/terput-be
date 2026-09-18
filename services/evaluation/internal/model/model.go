@@ -15,8 +15,9 @@ type LessonPlan struct {
 	SectionC       map[string]interface{} `json:"section_c"` // C. Langkah Pembelajaran
 	// DimensiLulusan holds the 8 graduate-profile dimensions (see
 	// DimensiLulusanFields), keyed by dimension code -> guru-authored text.
-	// Populated exclusively via the Excel-template import
-	// (POST /me/lesson-plans/{id}/dimensi-lulusan-import), not a form field.
+	// A real "D. Indikator 8 Dimensi Lulusan" section on the manual create
+	// form (Bug Report SEKOCI GPM V10, ROLE GURU) as well as
+	// import/rpm-import -- both paths write it the same way.
 	DimensiLulusan map[string]interface{} `json:"dimensi_lulusan"`
 	Status         string                 `json:"status"`
 	CreatedAt      time.Time              `json:"created_at"`

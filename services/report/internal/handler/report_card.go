@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 
 	"skci/report/internal/common"
 	"skci/report/internal/model"
+	"skci/report/internal/store"
 	"skci/report/internal/upstream"
 )
 
@@ -30,12 +32,25 @@ import (
 // exam type that way, and the mid_exam/final_exam convention the legacy
 // system actually shipped. Anything else (UH, Tugas, ...) still counts
 // toward the blended computed_score but not either STS/SAS bucket.
+// PTS/UTS and PAS/UAS (the older Penilaian/Ujian Tengah|Akhir Semester
+// names many schools still use) are matched as whole words only, so e.g.
+// "pasar" never lands in SAS.
 func classifyMapping(mappingRapor string) string {
 	lower := strings.ToLower(strings.TrimSpace(mappingRapor))
+	hasWord := func(words ...string) bool {
+		for _, f := range strings.FieldsFunc(lower, func(r rune) bool { return !('a' <= r && r <= 'z') }) {
+			for _, w := range words {
+				if f == w {
+					return true
+				}
+			}
+		}
+		return false
+	}
 	switch {
-	case strings.Contains(lower, "sts") || lower == "mid_exam" || strings.Contains(lower, "tengah semester"):
+	case strings.Contains(lower, "sts") || hasWord("pts", "uts") || lower == "mid_exam" || strings.Contains(lower, "tengah semester"):
 		return "sts"
-	case strings.Contains(lower, "sas") || lower == "final_exam" || strings.Contains(lower, "akhir jenjang") || strings.Contains(lower, "akhir semester"):
+	case strings.Contains(lower, "sas") || hasWord("pas", "uas") || lower == "final_exam" || strings.Contains(lower, "akhir jenjang") || strings.Contains(lower, "akhir semester"):
 		return "sas"
 	case strings.Contains(lower, "sumatif"):
 		return "sumatif"
@@ -204,11 +219,13 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 
 	var classroomName, termName, homeroomTeacherName, principalName *string
 	var academicYearID string
+	wholeScores := false
 
 	if classroom, err := h.d.Academic.GetClassroom(ctx, classroomID); err != nil {
 		warnings["academic_classroom"] = err.Error()
 	} else if classroom != nil {
 		academicYearID = classroom.AcademicYearID
+		wholeScores = roundsToWholeScores(classroom.GradeLevel)
 		n := classroom.Name
 		classroomName = &n
 
@@ -471,6 +488,18 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 				praktikScore = b.Score
 				count += b.Count
 			}
+			// A guru-saved STS/SAS score (Penilaian Formatif's exam-linked
+			// column: pre-filled from the exam, edited, then Simpan) wins
+			// over the raw exam average -- same "saved row wins" rule
+			// ListFormativeGrades already shows the guru on screen.
+			if b, ok := buckets["sts"]; ok {
+				stsScore = b.Score
+				count += b.Count - stsCount
+			}
+			if b, ok := buckets["sas"]; ok {
+				sasScore = b.Score
+				count += b.Count - sasCount
+			}
 
 			// Item 2/3: Nilai Akhir (semester) / Nilai Sementara (bayangan)
 			// are each an admin-configurable weighted formula over the
@@ -479,6 +508,11 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 			// treated as 0 (model.WeightedAverage renormalizes over what's
 			// present), so a subject isn't unfairly dragged down just
 			// because one input hasn't arrived yet.
+			if wholeScores {
+				formatifScore, praktikScore = roundScore(formatifScore), roundScore(praktikScore)
+				stsScore, sasScore = roundScore(stsScore), roundScore(sasScore)
+			}
+
 			var computed *float64
 			if reportType == "bayangan" {
 				// Client's text literally says "kalkulasi dari nilai
@@ -501,13 +535,20 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 				)
 			}
 
+			if wholeScores {
+				computed = roundScore(computed)
+			}
+
 			name, code := subj.Name, subj.Code
 			if reportType == "bayangan" {
 				// sas_score doesn't apply to Rapot Bayangan's column set.
 				_ = h.d.Store.UpsertSubjectComputed(ctx, rc.ID, schoolID, subj.SubjectID, &name, &code, computed, formatifScore, stsScore, nil, praktikScore, count, nowPtr(), sErr)
 			} else {
-				// praktik_score doesn't apply to the semester report's column set.
-				_ = h.d.Store.UpsertSubjectComputed(ctx, rc.ID, schoolID, subj.SubjectID, &name, &code, computed, formatifScore, stsScore, sasScore, nil, count, nowPtr(), sErr)
+				// Report V5 finding: Nilai Praktik is now also shown (display-
+				// only, via Deskripsi Rapor / Detail Rapor) for the regular
+				// semester report card -- Nilai Akhir's formula above is
+				// untouched, still formatif+sts+sas only.
+				_ = h.d.Store.UpsertSubjectComputed(ctx, rc.ID, schoolID, subj.SubjectID, &name, &code, computed, formatifScore, stsScore, sasScore, praktikScore, count, nowPtr(), sErr)
 			}
 		}
 
@@ -607,6 +648,7 @@ func (h *Handler) GetReportCard(w http.ResponseWriter, r *http.Request) {
 	h.enrichSubjectGroups(r.Context(), rc.ClassroomID, rc.TermID, subjects)
 	rc.Subjects = subjects
 	rc.School = h.fetchSchoolInfo(r.Context(), rc.SchoolID)
+	rc.Fase = h.resolveFase(r.Context(), rc.ClassroomID)
 	common.WriteJSON(w, http.StatusOK, rc, nil)
 }
 
@@ -629,7 +671,103 @@ func (h *Handler) fetchSchoolInfo(ctx context.Context, schoolID string) *model.S
 		City:     school.City,
 		Province: school.Province,
 		Logo:     school.Logo,
+
+		GovernmentLogo: school.GovernmentLogo,
 	}
+}
+
+// kelompokLabels: SEKOCI V7 -- the rapor's A/B/C section headings, from
+// Data Mata Pelajaran's kelompok (the print view sorts groups by label).
+var kelompokLabels = map[string]string{
+	"umum":         "A. Kelompok Mata Pelajaran Umum",
+	"kejuruan":     "B. Kelompok Mata Pelajaran Kejuruan",
+	"muatan_lokal": "C. Muatan Lokal",
+}
+
+// roundsToWholeScores: SEKOCI V7 -- Kelas X/XI rapor scores are whole
+// numbers (85.84 -> 86, 69.5 -> 70); Kelas XII and anything unrecognized
+// keep decimals. grade_level is free text ("10", "XI", "10 mipa", ...).
+func roundsToWholeScores(gradeLevel *string) bool {
+	if gradeLevel == nil {
+		return false
+	}
+	f := strings.FieldsFunc(strings.ToUpper(*gradeLevel), func(r rune) bool {
+		return !('A' <= r && r <= 'Z' || '0' <= r && r <= '9')
+	})
+	if len(f) == 0 {
+		return false
+	}
+	switch f[0] {
+	case "10", "11", "X", "XI":
+		return true
+	}
+	return false
+}
+
+// faseOf maps a classroom's grade level to its Kurikulum Merdeka fase.
+// The rapor form has a "Fase" line but no field anywhere ever fed it (the
+// print view printed a hardcoded "-"), and a school shouldn't have to type
+// what the tingkat kelas already determines: fase is a pure function of it.
+// grade_level is free text ("10", "XI", "10 mipa", ...), parsed the same
+// way roundsToWholeScores does. Returns "" for anything unrecognized, which
+// prints as the same "-" as before.
+func faseOf(gradeLevel *string) string {
+	if gradeLevel == nil {
+		return ""
+	}
+	f := strings.FieldsFunc(strings.ToUpper(*gradeLevel), func(r rune) bool {
+		return !('A' <= r && r <= 'Z' || '0' <= r && r <= '9')
+	})
+	if len(f) == 0 {
+		return ""
+	}
+	switch f[0] {
+	case "1", "I", "2", "II":
+		return "A"
+	case "3", "III", "4", "IV":
+		return "B"
+	case "5", "V", "6", "VI":
+		return "C"
+	case "7", "VII", "8", "VIII", "9", "IX":
+		return "D"
+	case "10", "X":
+		return "E"
+	case "11", "XI", "12", "XII":
+		return "F"
+	}
+	return ""
+}
+
+// resolveFase reads the classroom live, the same way fetchSchoolInfo reads
+// the school: fase is derived, not stored, so it can never go stale against
+// a re-levelled classroom. Empty string on any lookup failure.
+//
+// Falls back to the classroom NAME when grade_level is blank. That is not
+// belt-and-braces: 60 of 132 classrooms in production have never had
+// grade_level filled in, while their names nearly all lead with the level
+// ("VII 1", "X TKJ 1", "XII AKL"). Reading grade_level alone would have
+// left Fase printing "-" for almost half the school -- the exact complaint
+// this was meant to answer. A name that leads with something else ("TKR",
+// "ips 2") still yields "", which prints as "-" as before.
+func (h *Handler) resolveFase(ctx context.Context, classroomID string) string {
+	classroom, err := h.d.Academic.GetClassroom(ctx, classroomID)
+	if err != nil || classroom == nil {
+		return ""
+	}
+	if f := faseOf(classroom.GradeLevel); f != "" {
+		return f
+	}
+	return faseOf(&classroom.Name)
+}
+
+// roundScore rounds half up; the epsilon absorbs float noise from weighted
+// averages (69.49999999 that is really 69.5). Scores are never negative.
+func roundScore(p *float64) *float64 {
+	if p == nil {
+		return nil
+	}
+	v := math.Round(*p + 1e-9)
+	return &v
 }
 
 // enrichSubjectGroups resolves each subject row's print-template grouping
@@ -645,6 +783,11 @@ func (h *Handler) enrichSubjectGroups(ctx context.Context, classroomID, termID s
 	groupBySubjectID := make(map[string]*string, len(classroomSubjects))
 	for _, cs := range classroomSubjects {
 		groupBySubjectID[cs.SubjectID] = cs.Group
+		if cs.Kelompok != nil {
+			if label, ok := kelompokLabels[*cs.Kelompok]; ok {
+				groupBySubjectID[cs.SubjectID] = &label
+			}
+		}
 	}
 	for i := range subjects {
 		if g, ok := groupBySubjectID[subjects[i].SubjectID]; ok {
@@ -714,6 +857,111 @@ type overrideBody struct {
 	OverrideScore *float64 `json:"override_score"`
 	Notes         *string  `json:"notes"`
 	Clear         bool     `json:"clear"` // if true, clears the override even though override_score is omitted/null
+}
+
+// raporExtrasBody is the write side of the rapor sections nobody computes:
+// Kokurikuler, Ekstrakurikuler, Catatan Wali Kelas, and -- akhir semester
+// only, per Format Rapor (3).xlsx -- Prestasi and Kenaikan Kelas (the
+// latter printed only on a semester genap). All are replaced wholesale --
+// the admin form always submits the full current value of each, so there is
+// no partial-update semantics to get wrong. ("IV. Kehadiran" has no entry
+// here on purpose: it is synced from attendance-service, not typed in.)
+type raporExtrasBody struct {
+	KokurikulerNote  *string          `json:"kokurikuler_note"`
+	ClassTeacherNote *string          `json:"class_teacher_note"`
+	Ekstrakurikuler  []model.Ekskul   `json:"ekstrakurikuler"`
+	Prestasi         []model.Prestasi `json:"prestasi"`
+	KenaikanStatus   *string          `json:"kenaikan_status"`
+	KenaikanKelas    *string          `json:"kenaikan_kelas"`
+}
+
+// PatchRaporExtras: PATCH /report-cards/{id}/extras. Admin/superadmin, plus
+// the classroom's own wali kelas -- "Tanggapan Wali Kelas" is by definition
+// theirs to write, and the same form carries the other two sections. Draft
+// only, same as score overrides: a finalized rapor must be unlocked first,
+// otherwise the printed document could change after it was signed off.
+func (h *Handler) PatchRaporExtras(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	id := chi.URLParam(r, "id")
+
+	rc, err := h.d.Store.GetReportCard(r.Context(), id)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to fetch report card")
+		return
+	}
+	if rc == nil {
+		common.WriteError(w, http.StatusNotFound, "report card not found")
+		return
+	}
+	if !isAdmin(claims) && !h.isWaliKelasOwner(r.Context(), claims, rc.ClassroomID) {
+		common.WriteError(w, http.StatusForbidden, "only admin/superadmin or this classroom's wali kelas can edit these sections")
+		return
+	}
+	if claims.ActiveRole != "superadmin" && rc.SchoolID != claims.SchoolID {
+		common.WriteError(w, http.StatusNotFound, "report card not found")
+		return
+	}
+	if rc.Status == "finalized" {
+		common.WriteError(w, http.StatusConflict, "report card is finalized; PUT /report-cards/{id}/unlock first")
+		return
+	}
+
+	var body raporExtrasBody
+	if r.Body != nil {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			common.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+	}
+	// Drop rows the admin left entirely blank rather than persisting empty
+	// table rows that would print as empty boxes.
+	// Blank rows are dropped rather than stored: the admin form always
+	// renders at least one empty row, and a rapor with an empty Kegiatan
+	// row printed under it looks like a data bug.
+	kept := make([]model.Ekskul, 0, len(body.Ekstrakurikuler))
+	for _, e := range body.Ekstrakurikuler {
+		e.Kegiatan = strings.TrimSpace(e.Kegiatan)
+		e.Predikat = strings.TrimSpace(e.Predikat)
+		e.Keterangan = strings.TrimSpace(e.Keterangan)
+		if e.Kegiatan == "" && e.Predikat == "" && e.Keterangan == "" {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	keptPrestasi := make([]model.Prestasi, 0, len(body.Prestasi))
+	for _, p := range body.Prestasi {
+		p.Jenis = strings.TrimSpace(p.Jenis)
+		p.Keterangan = strings.TrimSpace(p.Keterangan)
+		if p.Jenis == "" && p.Keterangan == "" {
+			continue
+		}
+		keptPrestasi = append(keptPrestasi, p)
+	}
+
+	err = h.d.Store.UpdateRaporExtras(r.Context(), id, store.RaporExtrasInput{
+		KokurikulerNote:  body.KokurikulerNote,
+		ClassTeacherNote: body.ClassTeacherNote,
+		Ekstrakurikuler:  kept,
+		Prestasi:         keptPrestasi,
+		KenaikanStatus:   body.KenaikanStatus,
+		KenaikanKelas:    body.KenaikanKelas,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		common.WriteError(w, http.StatusNotFound, "report card not found")
+		return
+	}
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to save")
+		return
+	}
+
+	full, err := h.loadReportCard(r.Context(), id)
+	if err != nil || full == nil {
+		common.WriteError(w, http.StatusInternalServerError, "saved but failed to reload report card")
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, full, nil)
 }
 
 func (h *Handler) PatchSubjectOverride(w http.ResponseWriter, r *http.Request) {

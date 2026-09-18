@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -45,7 +44,7 @@ func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.SessionDate == "" {
-		req.SessionDate = time.Now().Format("2006-01-02")
+		req.SessionDate = todayWIB()
 	}
 
 	classroomID := req.ClassroomID
@@ -196,7 +195,7 @@ func (h *Handler) CreateSubstituteRequest(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if req.SessionDate == "" {
-		req.SessionDate = time.Now().Format("2006-01-02")
+		req.SessionDate = todayWIB()
 	}
 
 	classroomID := req.ClassroomID
@@ -241,6 +240,11 @@ func (h *Handler) CreateSubstituteRequest(w http.ResponseWriter, r *http.Request
 	}
 	if classroomID == "" {
 		common.WriteError(w, http.StatusBadRequest, "classroom_id is required (could not resolve from academic-service, must be supplied)")
+		return
+	}
+
+	if pending, perr := h.Store.HasPendingSubstituteRequest(bg(r), req.ScheduleID, req.SessionDate); perr == nil && pending {
+		common.WriteError(w, http.StatusConflict, "sudah ada permintaan pergantian guru yang menunggu konfirmasi untuk jadwal ini")
 		return
 	}
 
@@ -702,7 +706,7 @@ func (h *Handler) MySessionsToday(w http.ResponseWriter, r *http.Request) {
 	if !requireRole(w, claims, "guru") {
 		return
 	}
-	today := time.Now().Format("2006-01-02")
+	today := todayWIB()
 	list, _, err := h.Store.ListSessions(r.Context(), store.ListSessionsFilter{
 		SchoolID: claims.SchoolID,
 		GuruID:   claims.UserID,

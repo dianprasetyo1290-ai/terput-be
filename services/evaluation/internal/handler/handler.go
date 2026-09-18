@@ -44,8 +44,10 @@ func pagination(r *http.Request) (page, perPage int) {
 	if page < 1 {
 		page = 1
 	}
-	if perPage < 1 || perPage > 200 {
+	if perPage < 1 {
 		perPage = 20
+	} else if perPage > 200 {
+		perPage = 200
 	}
 	return
 }

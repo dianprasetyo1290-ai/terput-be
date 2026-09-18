@@ -62,10 +62,14 @@ func validBucket(b string) bool {
 }
 
 // CreateAssessmentType: POST /settings/assessment-types
+//
+// Admin-owned again (SEKOCI V7): guru's Penilaian Formatif lost its
+// "+ Tambah Tipe Nilai" -- tipe nilai are managed from the admin's
+// Penilaian Formatif page; guru only reads them (ListAssessmentTypes).
 func (h *Handler) CreateAssessmentType(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if !isAdmin(claims) {
-		common.WriteError(w, http.StatusForbidden, "only admin/superadmin can manage assessment types")
+		common.WriteError(w, http.StatusForbidden, "admin/superadmin only")
 		return
 	}
 	var body assessmentTypeBody
@@ -92,11 +96,12 @@ func (h *Handler) CreateAssessmentType(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusCreated, t, nil)
 }
 
-// UpdateAssessmentType: PUT /settings/assessment-types/{id}
+// UpdateAssessmentType: PUT /settings/assessment-types/{id} -- admin-only,
+// see CreateAssessmentType.
 func (h *Handler) UpdateAssessmentType(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if !isAdmin(claims) {
-		common.WriteError(w, http.StatusForbidden, "only admin/superadmin can manage assessment types")
+		common.WriteError(w, http.StatusForbidden, "admin/superadmin only")
 		return
 	}
 	id := chi.URLParam(r, "id")
@@ -131,11 +136,12 @@ func (h *Handler) UpdateAssessmentType(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusOK, t, nil)
 }
 
-// DeleteAssessmentType: DELETE /settings/assessment-types/{id}
+// DeleteAssessmentType: DELETE /settings/assessment-types/{id} -- admin-only,
+// see CreateAssessmentType.
 func (h *Handler) DeleteAssessmentType(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if !isAdmin(claims) {
-		common.WriteError(w, http.StatusForbidden, "only admin/superadmin can manage assessment types")
+		common.WriteError(w, http.StatusForbidden, "admin/superadmin only")
 		return
 	}
 	id := chi.URLParam(r, "id")

@@ -63,14 +63,25 @@ func (h *Handler) IssueToken(w http.ResponseWriter, r *http.Request) {
 }
 
 type bulkIssueTokenReq struct {
-	StudentIDs []string `json:"student_ids"`
-	ValidFrom  string   `json:"valid_from"`
-	ValidUntil string   `json:"valid_until"`
+	StudentIDs  []string `json:"student_ids"`
+	AllStudents bool     `json:"all_students"`
+	ValidFrom   string   `json:"valid_from"`
+	ValidUntil  string   `json:"valid_until"`
 }
 
 // BulkIssueTokens: POST /vouchers/bulk — issues the same date-range voucher
-// for a list of students at once (e.g. a whole classroom picked in Data
-// Siswa).
+// for many students at once. Either pass an explicit student_ids list (e.g.
+// a single classroom picked in Data Siswa), or all_students:true to target
+// every siswa in the school -- the roster is then resolved server-side via
+// identity-service (h.Internal.AllStudentIDs) instead of requiring the
+// caller to page through /users and assemble the list itself. That client-
+// side loop is what "generate token dari nomer 201 gamau ke-generate"
+// traced back to: PenggunaView.vue collected the full roster into the
+// browser and posted it in one request, which for a large school did
+// hundreds of sequential per-student inserts server-side -- slow enough
+// that a dropped connection mid-loop silently left everyone after the cut
+// point without a token. Resolving the roster here keeps that entirely off
+// the client and off the network payload.
 func (h *Handler) BulkIssueTokens(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
 	if !requireRole(w, c, "admin", "superadmin") {
@@ -80,8 +91,18 @@ func (h *Handler) BulkIssueTokens(w http.ResponseWriter, r *http.Request) {
 	if !common.DecodeJSON(w, r, &req) {
 		return
 	}
-	if len(req.StudentIDs) == 0 {
-		common.WriteError(w, http.StatusBadRequest, "student_ids must be non-empty")
+	schoolID := common.EffectiveSchoolID(r, c)
+	studentIDs := req.StudentIDs
+	if req.AllStudents {
+		ids, err := h.Internal.AllStudentIDs(schoolID)
+		if err != nil {
+			common.WriteError(w, http.StatusBadGateway, "could not resolve student roster: "+err.Error())
+			return
+		}
+		studentIDs = ids
+	}
+	if len(studentIDs) == 0 {
+		common.WriteError(w, http.StatusBadRequest, "student_ids must be non-empty (or set all_students: true)")
 		return
 	}
 	from, until, msg, ok := parseVoucherDates(issueTokenReq{ValidFrom: req.ValidFrom, ValidUntil: req.ValidUntil})
@@ -89,25 +110,23 @@ func (h *Handler) BulkIssueTokens(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
-	schoolID := common.EffectiveSchoolID(r, c)
 	academicYearID := r.URL.Query().Get("academic_year_id")
-	var issued []interface{}
-	for _, sid := range req.StudentIDs {
-		tok, err := h.Store.IssueToken(r.Context(), schoolID, academicYearID, sid, c.UserID, from, until)
-		if err != nil {
-			writeStoreErr(w, err)
-			return
-		}
-		issued = append(issued, tok)
+	issued, err := h.Store.BulkIssueTokens(r.Context(), schoolID, academicYearID, studentIDs, c.UserID, from, until)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
 	}
 	common.WriteJSON(w, http.StatusCreated, issued, nil)
 }
 
 // ListTokens: GET /vouchers — every student voucher issued in the school
-// (Data Siswa's voucher column reads this).
+// (Data Siswa's voucher column reads this). Also reachable via
+// X-Internal-Key (c == nil) with ?school_id= — identity-service's Export
+// CSV joins in each student's token this way, same trusted-sibling-call
+// shape EffectiveSchoolID already documents.
 func (h *Handler) ListTokens(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin") {
+	if c != nil && !requireRole(w, c, "admin", "superadmin") {
 		return
 	}
 	list, err := h.Store.ListTokens(r.Context(), common.EffectiveSchoolID(r, c))

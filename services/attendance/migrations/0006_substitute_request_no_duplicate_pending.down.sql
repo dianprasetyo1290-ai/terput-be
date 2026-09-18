@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_substitute_requests_one_pending_per_slot;

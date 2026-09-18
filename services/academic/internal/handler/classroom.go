@@ -124,6 +124,30 @@ func (h *Handler) DeleteClassroom(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"}, nil)
 }
 
+// RemoveStudentEnrollments: DELETE /students/{student_user_id}/enrollments —
+// internal-only (X-Internal-Key + explicit ?school_id=, no unscoped
+// fallback since this deletes across every classroom/year for the student).
+// Called by identity-service's DeleteUser when the deleted account holds a
+// siswa role, so a deleted student's enrollment row stops inflating
+// DashboardCountsFor's siswa count.
+func (h *Handler) RemoveStudentEnrollments(w http.ResponseWriter, r *http.Request) {
+	if !common.IsInternal(r) {
+		common.WriteError(w, http.StatusForbidden, "internal only")
+		return
+	}
+	schoolID := r.URL.Query().Get("school_id")
+	if schoolID == "" {
+		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+		return
+	}
+	studentUserID := chi.URLParam(r, "student_user_id")
+	if err := h.Store.RemoveStudentEnrollments(r.Context(), schoolID, studentUserID); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]string{"student_user_id": studentUserID}, nil)
+}
+
 // ListWaliKelas: GET /wali-kelas?academic_year_id=
 // Auto-derived from classrooms.homeroom_teacher_user_id — not separately
 // stored, so it always reflects the latest Data Kelas edit immediately.

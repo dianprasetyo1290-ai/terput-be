@@ -74,6 +74,9 @@ type createSchedulePeriodRequest struct {
 // pelajaran". Flexible per classroom: each classroom has its own set of
 // period rows, so different classes can have different period lengths.
 func (h *Handler) CreateSchedulePeriod(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
 	schoolID, ok := scopeSchoolID(w, r)
 	if !ok {
 		return
@@ -136,6 +139,9 @@ type updateSchedulePeriodRequest struct {
 
 // UpdateSchedulePeriod: PUT /schedule-periods/{id}
 func (h *Handler) UpdateSchedulePeriod(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
 	schoolID, ok := scopeSchoolID(w, r)
 	if !ok {
 		return
@@ -159,6 +165,9 @@ func (h *Handler) UpdateSchedulePeriod(w http.ResponseWriter, r *http.Request) {
 
 // DeleteSchedulePeriod: DELETE /schedule-periods/{id}
 func (h *Handler) DeleteSchedulePeriod(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
 	schoolID, ok := scopeSchoolID(w, r)
 	if !ok {
 		return
@@ -183,6 +192,9 @@ type createScheduleRequest struct {
 // send valid options, since the "IPA classroom must not offer Ekonomi"
 // constraint is a correctness rule, not just a UI nicety.
 func (h *Handler) CreateSchedule(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
 	schoolID, ok := scopeSchoolID(w, r)
 	if !ok {
 		return
@@ -267,6 +279,9 @@ type updateScheduleRequest struct {
 
 // UpdateSchedule: PUT /schedules/{id}
 func (h *Handler) UpdateSchedule(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
 	schoolID, ok := scopeSchoolID(w, r)
 	if !ok {
 		return
@@ -313,6 +328,9 @@ func (h *Handler) UpdateSchedule(w http.ResponseWriter, r *http.Request) {
 
 // DeleteSchedule: DELETE /schedules/{id}
 func (h *Handler) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
 	schoolID, ok := scopeSchoolID(w, r)
 	if !ok {
 		return

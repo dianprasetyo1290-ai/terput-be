@@ -49,6 +49,15 @@ func scanUser(row interface{ Scan(...interface{}) error }) (model.User, error) {
 // list of guru names isn't sensitive the way siswa data or account/security
 // fields are. listUsersByRole strips default_password/phone/address/
 // birth info from the response in that case — see directoryOnly there.
+//
+// walikelas exception (Bug Report SEKOCI GPM V10, ROLE WALI KELAS: found
+// live via browser testing 2026-08-19 -- Kenaikan Kelas and Matriks
+// Pelajaran both name-lookup their own classroom's roster against
+// listUsersByRole('siswa'), which 403'd for active_role=="walikelas" since
+// only guru had this carve-out, leaving both pages permanently stuck on
+// "Gagal memuat data..."). Same directoryOnly tradeoff as guru above --
+// a walikelas already gets the full siswa roster of the school via any
+// enrollment/promotion endpoint anyway, this only adds names.
 func (a *App) ListUsers(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	role := r.URL.Query().Get("role")
@@ -65,7 +74,8 @@ func (a *App) ListUsers(w http.ResponseWriter, r *http.Request) {
 			common.WriteError(w, http.StatusUnauthorized, "missing token")
 			return
 		}
-		if role != common.RoleGuru {
+		directoryAllowed := role == common.RoleGuru || (role == common.RoleSiswa && claims.ActiveRole == common.RoleWalikelas)
+		if !directoryAllowed {
 			common.WriteError(w, http.StatusForbidden, "forbidden: requires role admin")
 			return
 		}
@@ -89,11 +99,23 @@ func (a *App) ListStudents(w http.ResponseWriter, r *http.Request) {
 	a.listUsersByRole(w, r, common.RoleSiswa, !privileged)
 }
 
+// ListTeachers mirrors ListStudents' admin-or-guru pattern (Bug Report
+// SEKOCI GPM, ROLE GURU "Assign Pengganti"): a guru picking a substitute
+// needs this same list, so it can't stay admin-only. Previously hard-gated
+// to RoleAdmin — every guru's own JWT got 403'd here, the frontend's
+// unhandled promise left the substitute-teacher dropdown permanently
+// empty, and the "Assign Pengganti" button (disabled while empty) looked
+// like a dead click with no popup. Non-admin callers get directoryOnly=true
+// same as ListStudents, so guru still can't see other teachers' default
+// password / phone / address / etc.
 func (a *App) ListTeachers(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	claims := common.FromCtx(r)
+	privileged := claims != nil && (claims.ActiveRole == common.RoleAdmin || claims.ActiveRole == common.RoleSuperadmin)
+	if !privileged && (claims == nil || claims.ActiveRole != common.RoleGuru) {
+		common.WriteError(w, http.StatusForbidden, "forbidden: requires role admin")
 		return
 	}
-	a.listUsersByRole(w, r, common.RoleGuru, false)
+	a.listUsersByRole(w, r, common.RoleGuru, !privileged)
 }
 
 // listUsersByRole executes the shared Data Pengguna/Siswa/Guru query.
@@ -136,11 +158,35 @@ func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role strin
 	// server-side -- fixes the row-number-vs-page mismatch and "students beyond page 1
 	// invisible" bugs a purely client-side post-filter over one page had (GPM School bug
 	// report 2026-08-28: siswa order scrambled across classroom-filter switches).
-	if idsParam := strings.TrimSpace(r.URL.Query().Get("ids")); idsParam != "" {
+	//
+	// A "Belum ada kelas"/roster-exclude id set is the union of every classroom's roster
+	// for the year, so it scales with enrolled-student count rather than one classroom's
+	// -- a 220-siswa school already produced an 8KB comma list, and nginx's request-line
+	// limit rejects it with 414 before this handler ever runs, surfacing as a blank Data
+	// Siswa table / "Gagal memuat data pengguna." (and the same call from Detail Kelas's
+	// siswa-picker as "Gagal memuat data kelas."). POST carries the same ids/exclude_ids
+	// as a JSON body instead of a query string, off the URL entirely.
+	idsParam := strings.TrimSpace(r.URL.Query().Get("ids"))
+	excludeParam := strings.TrimSpace(r.URL.Query().Get("exclude_ids"))
+	if r.Method == http.MethodPost {
+		var body struct {
+			IDs        string `json:"ids"`
+			ExcludeIDs string `json:"exclude_ids"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+			if body.IDs != "" {
+				idsParam = body.IDs
+			}
+			if body.ExcludeIDs != "" {
+				excludeParam = body.ExcludeIDs
+			}
+		}
+	}
+	if idsParam != "" {
 		args = append(args, pqStringArray(strings.Split(idsParam, ",")))
 		where += ` AND u.id = ANY($` + placeholder(len(args)) + `::uuid[])`
 	}
-	if excludeParam := strings.TrimSpace(r.URL.Query().Get("exclude_ids")); excludeParam != "" {
+	if excludeParam != "" {
 		args = append(args, pqStringArray(strings.Split(excludeParam, ",")))
 		where += ` AND u.id != ALL($` + placeholder(len(args)) + `::uuid[])`
 	}
@@ -153,7 +199,15 @@ func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role strin
 
 	page, perPage := common.ParsePage(r)
 	args2 := append(append([]interface{}{}, args...), perPage, (page-1)*perPage)
-	query := `SELECT ` + userCols + ` FROM users u WHERE ` + where + ` ORDER BY u.name LIMIT $` + placeholder(len(args2)-1) + ` OFFSET $` + placeholder(len(args2))
+	// ORDER BY u.name alone ties non-deterministically across separate query
+	// executions whenever two users share a name (common with Indonesian
+	// names) -- OFFSET pagination then silently skips or repeats rows across
+	// the page boundary depending on which order Postgres happens to return
+	// tied rows in that run. Root-caused via "generate token dari nomer 201
+	// gamau ke-generate": bulk-issue tokens pages through this endpoint
+	// assuming it gets every student exactly once. u.id is unique, so it's a
+	// safe deterministic tiebreaker.
+	query := `SELECT ` + userCols + ` FROM users u WHERE ` + where + ` ORDER BY u.name, u.id LIMIT $` + placeholder(len(args2)-1) + ` OFFSET $` + placeholder(len(args2))
 
 	rows, err := a.DB.Query(query, args2...)
 	if err != nil {
@@ -220,6 +274,19 @@ type createUserRequest struct {
 	SchoolID string  `json:"school_id"` // forced to caller's school unless superadmin
 }
 
+// adminAssignable lists the roles a plain admin may hand out. Every role
+// here is non-escalating: none can create users or grant roles, so an admin
+// cannot reach admin/superadmin through them. Pengawas (V11, panitia ujian)
+// qualifies -- it only touches exam scheduling, the live monitor and a
+// read-only bank soal.
+func adminAssignable(role string) bool {
+	switch role {
+	case common.RoleGuru, common.RoleSiswa, common.RolePengawas:
+		return true
+	}
+	return false
+}
+
 func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 	if !requireRole(w, r, common.RoleAdmin) {
 		return
@@ -239,8 +306,8 @@ func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 	// superadmin. The frontend already hides those options from the role
 	// picker when active_role=admin, but that's UI-only; enforce it
 	// server-side too since this is a real escalation path otherwise.
-	if claims.ActiveRole == common.RoleAdmin && req.Role != common.RoleGuru && req.Role != common.RoleSiswa {
-		common.WriteError(w, http.StatusForbidden, "admin may only create guru or siswa accounts")
+	if claims.ActiveRole == common.RoleAdmin && !adminAssignable(req.Role) {
+		common.WriteError(w, http.StatusForbidden, "admin may only create guru, siswa or pengawas accounts")
 		return
 	}
 	schoolID := claims.SchoolID
@@ -369,11 +436,28 @@ func (a *App) UpdateUser(w http.ResponseWriter, r *http.Request) {
 // DeleteUser: soft-delete (mirrors DeleteSchool's pattern in schools.go) —
 // sets deleted_at rather than removing the row, so history (e.g. exam
 // attempts, evaluation records) referencing this user_id stays intact.
+//
+// If the deleted account holds a siswa role, also tells academic-service to
+// drop their class_enrollments rows (RemoveStudentEnrollments) — otherwise
+// that row survives untouched (no FK from users into class_enrollments,
+// cross-service) and keeps inflating DashboardCountsFor's siswa count even
+// though Data Siswa now shows the student gone. See Report sekoci V3.docx.
 func (a *App) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	if !requireRole(w, r, common.RoleAdmin) {
 		return
 	}
 	id := chi.URLParam(r, "id")
+	var siswaSchoolIDs []string
+	roleRows, err := a.DB.Query(`SELECT school_id FROM user_school_roles WHERE user_id = $1 AND role = 'siswa' AND school_id IS NOT NULL`, id)
+	if err == nil {
+		for roleRows.Next() {
+			var schoolID string
+			if roleRows.Scan(&schoolID) == nil {
+				siswaSchoolIDs = append(siswaSchoolIDs, schoolID)
+			}
+		}
+		roleRows.Close()
+	}
 	res, err := a.DB.Exec(`UPDATE users SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to delete user")
@@ -382,6 +466,9 @@ func (a *App) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	if n, _ := res.RowsAffected(); n == 0 {
 		common.WriteError(w, http.StatusNotFound, "user not found")
 		return
+	}
+	for _, schoolID := range siswaSchoolIDs {
+		_ = a.Academic.RemoveStudentEnrollments(schoolID, id)
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"id": id}, nil)
 }
@@ -440,13 +527,29 @@ func (a *App) AssignUserRole(w http.ResponseWriter, r *http.Request) {
 	}
 	// Same privilege-escalation guard as CreateUser: an admin can't grant
 	// themselves/anyone the admin or superadmin role via this endpoint either.
-	if claims.ActiveRole == common.RoleAdmin && req.Role != common.RoleGuru && req.Role != common.RoleSiswa {
-		common.WriteError(w, http.StatusForbidden, "admin may only assign guru or siswa roles")
+	if claims.ActiveRole == common.RoleAdmin && !adminAssignable(req.Role) {
+		common.WriteError(w, http.StatusForbidden, "admin may only assign guru, siswa or pengawas roles")
 		return
 	}
 	schoolID := claims.SchoolID
 	if claims.ActiveRole == common.RoleSuperadmin && req.SchoolID != "" {
 		schoolID = req.SchoolID
+	}
+	// Superadmin's own JWT carries no school_id, and the "Tambah Peran" UI
+	// (add a role to an existing user from the edit-user modal) never sends
+	// one either -- it's adding a role to an account that already belongs to
+	// a school, not creating a new tenancy link from scratch. Falling back to
+	// that existing school (rather than silently inserting school_id=NULL,
+	// which is what happened before this fix -- confirmed in prod: several
+	// admin accounts stuck with no school, dashboard blank, everything
+	// scoped by school_id coming back empty) keeps the new role in the same
+	// tenant the account is already in.
+	if schoolID == "" && req.Role != common.RoleSuperadmin {
+		_ = a.DB.QueryRow(`SELECT school_id FROM user_school_roles WHERE user_id=$1 AND school_id IS NOT NULL ORDER BY created_at LIMIT 1`, id).Scan(&schoolID)
+	}
+	if schoolID == "" && req.Role != common.RoleSuperadmin {
+		common.WriteError(w, http.StatusBadRequest, "school_id is required for non-superadmin roles")
+		return
 	}
 	var schoolIDArg interface{}
 	if schoolID != "" {
@@ -528,6 +631,10 @@ func (a *App) ExportUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	schoolID, filtered := resolveSchoolScope(r)
 	role := r.URL.Query().Get("role")
+	// Sekoci revamp report (Mas Isal, 2026-09-07): "Export Token Ujian"
+	// mode narrows the CSV to just NISN/Nama/Email/Password/Token; anything
+	// else (including the empty default) is the existing full export.
+	tokenOnly := r.URL.Query().Get("mode") == "token"
 
 	where := `u.deleted_at IS NULL`
 	args := []interface{}{}
@@ -543,6 +650,19 @@ func (a *App) ExportUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		where += `)`
 	}
+	// Same "Filter Kelas" id-set support as listUsersByRole — the report's
+	// other complaint was that exporting after filtering by class still
+	// dumped every student because this WHERE never looked at ids/exclude_ids.
+	idsParam := strings.TrimSpace(r.URL.Query().Get("ids"))
+	excludeParam := strings.TrimSpace(r.URL.Query().Get("exclude_ids"))
+	if idsParam != "" {
+		args = append(args, pqStringArray(strings.Split(idsParam, ",")))
+		where += ` AND u.id = ANY($` + placeholder(len(args)) + `::uuid[])`
+	}
+	if excludeParam != "" {
+		args = append(args, pqStringArray(strings.Split(excludeParam, ",")))
+		where += ` AND u.id != ALL($` + placeholder(len(args)) + `::uuid[])`
+	}
 	rows, err := a.DB.Query(`SELECT `+userCols+` FROM users u WHERE `+where+` ORDER BY u.name`, args...)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to export users")
@@ -550,20 +670,48 @@ func (a *App) ExportUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
+	// Token Ujian only makes sense scoped to one school — an unfiltered
+	// superadmin export spanning every school leaves this column blank
+	// rather than guessing a school (filtered implies schoolID != "").
+	tokensByUser := map[string]string{}
+	if filtered {
+		tokensByUser = a.Exam.TokensBySchool(schoolID)
+	}
+
 	w.Header().Set("Content-Type", "text/csv")
-	w.Header().Set("Content-Disposition", "attachment; filename=users.csv")
+	filename := "users.csv"
+	if tokenOnly {
+		filename = "token_ujian.csv"
+	}
+	w.Header().Set("Content-Disposition", "attachment; filename="+filename)
 	cw := csv.NewWriter(w)
-	cw.Write([]string{"id", "name", "email", "phone", "password_changed", "is_superadmin", "created_at"})
+	if tokenOnly {
+		cw.Write([]string{"NISN", "Nama Siswa", "Email", "Password", "Token Ujian"})
+	} else {
+		cw.Write([]string{"ID", "Nama", "Email", "No. Telepon", "Password", "Token Ujian", "Sudah Ganti Password", "Superadmin", "Tanggal Dibuat"})
+	}
 	for rows.Next() {
 		u, err := scanUser(rows)
 		if err != nil {
 			break
 		}
+		password := ""
+		if u.DefaultPassword != nil {
+			password = *u.DefaultPassword
+		}
+		if tokenOnly {
+			nisn := ""
+			if u.NISN != nil {
+				nisn = *u.NISN
+			}
+			cw.Write([]string{nisn, u.Name, u.Email, password, tokensByUser[u.ID]})
+			continue
+		}
 		phone := ""
 		if u.Phone != nil {
 			phone = *u.Phone
 		}
-		cw.Write([]string{u.ID, u.Name, u.Email, phone, boolStr(u.PasswordChanged), boolStr(u.IsSuperadmin), u.CreatedAt.Format("2006-01-02T15:04:05Z07:00")})
+		cw.Write([]string{u.ID, u.Name, u.Email, phone, password, tokensByUser[u.ID], boolStr(u.PasswordChanged), boolStr(u.IsSuperadmin), u.CreatedAt.Format("2006-01-02T15:04:05Z07:00")})
 	}
 	cw.Flush()
 }
@@ -670,7 +818,11 @@ func (a *App) ImportUsers(w http.ResponseWriter, r *http.Request) {
 		userID, _, err := createImportedUser(tx, name, email, phone, "", "", "", "", nil)
 		if err != nil {
 			tx.Rollback()
-			report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: fmt.Sprintf("gagal membuat pengguna (email %q mungkin sudah digunakan)", email)})
+			issue := fmt.Sprintf("gagal membuat pengguna: %v", err)
+			if isUniqueViolation(err) {
+				issue = fmt.Sprintf("email %q sudah digunakan", email)
+			}
+			report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: issue})
 			continue
 		}
 		var schoolIDArg interface{}

@@ -21,8 +21,8 @@ import (
 const protaSheet = "TEMPLATE_PROTA"
 
 var protaHeaders = []string{
-	"No", "Semester", "Elemen / Kode Bab", "Kompetensi Dasar / Tujuan Pembelajaran (TP)",
-	"Alokasi Waktu (JP)", "Keterangan / Target Asesmen",
+	"No", "Semester", "Elemen/Kode Bab", "Kompetensi Dasar/Tujuan Pembelajaran (TP)",
+	"Alokasi Waktu (JP)", "Keterangan/Target Asesmen",
 }
 
 // DownloadProtaTemplate serves a blank .xlsx with the TEMPLATE_PROTA header

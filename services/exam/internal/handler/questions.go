@@ -208,6 +208,14 @@ func (h *Handler) UpdateQuestion(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteQuestion(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
+	// This gate was missing entirely (found while adding the V11 Pengawas
+	// role): the only check below is the guru-owns-it one, which every
+	// non-guru falls straight through -- so any authenticated account,
+	// siswa included, could delete another school's soal. Every sibling
+	// write in this file gates first; so does this one now.
+	if !requireRole(w, c, "admin", "superadmin", "guru") {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	existing, err := h.Store.GetQuestion(r.Context(), id, common.EffectiveSchoolID(r, c))
 	if err != nil {

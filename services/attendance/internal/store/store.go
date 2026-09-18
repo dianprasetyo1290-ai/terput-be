@@ -181,6 +181,22 @@ func (s *Store) CreateSubstituteRequest(ctx context.Context, in CreateSubstitute
 	return scanSubstituteRequest(row)
 }
 
+// HasPendingSubstituteRequest: Bug Report SEKOCI GPM V10, ROLE GURU --
+// "Guru A tidak dapat mengassign ulang guru lain untuk jadwal yang sama
+// selama status masih pending." Checked before CreateSubstituteRequest;
+// the partial unique index in migration 0006 is the DB-level backstop for
+// the same rule under a concurrent double-submit.
+func (s *Store) HasPendingSubstituteRequest(ctx context.Context, scheduleID, sessionDate string) (bool, error) {
+	var exists bool
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM substitute_requests
+			WHERE schedule_id = $1 AND session_date = $2 AND status = 'pending'
+		)
+	`, scheduleID, sessionDate).Scan(&exists)
+	return exists, err
+}
+
 func (s *Store) GetSubstituteRequest(ctx context.Context, id string) (*model.SubstituteRequest, error) {
 	row := s.DB.QueryRowContext(ctx, `SELECT `+substituteRequestColumns+` FROM substitute_requests WHERE id = $1`, id)
 	return scanSubstituteRequest(row)
