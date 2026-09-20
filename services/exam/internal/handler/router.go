@@ -72,6 +72,8 @@ func NewRouter(h *Handler, jwtSecret, internalKey string, corsOrigins []string, 
 		// Buat Ujian Baru
 		pr.Route("/exams", func(rt chi.Router) {
 			rt.Post("/", h.CreateExam)
+			// Before /{id}: chi would otherwise match "move-folder" as an id.
+			rt.Post("/move-folder", h.MoveExams)
 			rt.Get("/{id}", h.GetExam)
 			rt.Put("/{id}", h.UpdateExam)
 			rt.Delete("/{id}", h.DeleteExam)
@@ -80,6 +82,7 @@ func NewRouter(h *Handler, jwtSecret, internalKey string, corsOrigins []string, 
 			rt.Delete("/{id}/questions/{eqId}", h.RemoveExamQuestion)
 			rt.Patch("/{id}/questions/{eqId}/points", h.UpdateExamQuestionPoints)
 			rt.Post("/{id}/questions/import", h.ImportQuestions)
+			rt.Get("/{id}/questions/export", h.ExportQuestions)
 			rt.Post("/{id}/normalize-points", h.NormalizeDraftPoints)
 			rt.Post("/{id}/publish", h.PublishExam)
 			rt.Post("/{id}/unpublish", h.UnpublishExam)

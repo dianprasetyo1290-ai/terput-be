@@ -243,3 +243,116 @@ func TestListExams_FolderNone(t *testing.T) {
 		t.Errorf("no folder filter must return both")
 	}
 }
+
+// TestMoveExamsToFolder is the runnable check for the admin's "pindahkan
+// dari Tanpa Folder ke folder STS" request. The scoping matters as much as
+// the move: another school's exam and another guru's exam must be untouched
+// even when their ids are passed in, since the ids travel in the request
+// body where a caller controls them.
+func TestMoveExamsToFolder(t *testing.T) {
+	dsn := os.Getenv("EXAM_TEST_DATABASE_URL")
+	if dsn == "" {
+		dsn = "postgres://sekoci:change-me@localhost:5480/skci_exam?sslmode=disable"
+	}
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Skipf("skipping: could not open %s: %v", dsn, err)
+	}
+	if err := db.Ping(); err != nil {
+		t.Skipf("skipping: dev postgres not reachable at %s: %v", dsn, err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	ctx := context.Background()
+	newID := func() string {
+		var id string
+		if err := db.QueryRowContext(ctx, "SELECT gen_random_uuid()").Scan(&id); err != nil {
+			t.Fatalf("gen_random_uuid: %v", err)
+		}
+		return id
+	}
+	schoolID, otherSchoolID := newID(), newID()
+	academicYearID, termID := newID(), newID()
+	classroomID, subjectID := newID(), newID()
+	guruA, guruB := newID(), newID()
+
+	var examTypeID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO exam_types (school_id, academic_year_id, name, mapping_rapor, created_by)
+		VALUES ($1,$2,'move type','sumatif',$3) RETURNING id`, schoolID, academicYearID, guruA).Scan(&examTypeID); err != nil {
+		t.Fatalf("insert exam_type: %v", err)
+	}
+	t.Cleanup(func() { db.ExecContext(ctx, `DELETE FROM exam_types WHERE id=$1`, examTypeID) })
+
+	var stsFolderID string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO question_folders (school_id, academic_year_id, name, created_by)
+		VALUES ($1,$2,'STS',$3) RETURNING id`, schoolID, academicYearID, guruA).Scan(&stsFolderID); err != nil {
+		t.Fatalf("insert question_folder: %v", err)
+	}
+	t.Cleanup(func() { db.ExecContext(ctx, `DELETE FROM question_folders WHERE id=$1`, stsFolderID) })
+
+	insertExam := func(title, school, author string) string {
+		now := time.Now()
+		var id string
+		err := db.QueryRowContext(ctx, `
+			INSERT INTO exams (school_id, academic_year_id, term_id, exam_type_id, title, classroom_id, subject_id,
+				teacher_id, start_at, end_at, is_published, created_by, folder_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,false,$11,NULL) RETURNING id`,
+			school, academicYearID, termID, examTypeID, title, classroomID, subjectID, author,
+			now, now.Add(time.Hour), author).Scan(&id)
+		if err != nil {
+			t.Fatalf("insert exam %s: %v", title, err)
+		}
+		t.Cleanup(func() { db.ExecContext(ctx, `DELETE FROM exams WHERE id=$1`, id) })
+		return id
+	}
+	mine := insertExam("punya guru A", schoolID, guruA)
+	theirs := insertExam("punya guru B", schoolID, guruB)
+	foreign := insertExam("sekolah lain", otherSchoolID, guruA)
+
+	s := New(db)
+	folderOf := func(id string) string {
+		var f sql.NullString
+		if err := db.QueryRowContext(ctx, `SELECT folder_id FROM exams WHERE id=$1`, id).Scan(&f); err != nil {
+			t.Fatalf("read folder_id: %v", err)
+		}
+		return f.String
+	}
+
+	// A guru moves only what they authored, even when handed other ids.
+	moved, err := s.MoveExamsToFolder(ctx, []string{mine, theirs, foreign}, stsFolderID, schoolID, guruA)
+	if err != nil {
+		t.Fatalf("MoveExamsToFolder(guru): %v", err)
+	}
+	if moved != 1 {
+		t.Errorf("guru moved %d exams, want 1 (own only)", moved)
+	}
+	if folderOf(mine) != stsFolderID {
+		t.Errorf("guru's own exam was not moved")
+	}
+	if folderOf(theirs) != "" || folderOf(foreign) != "" {
+		t.Errorf("guru moved an exam they do not own: theirs=%q foreign=%q", folderOf(theirs), folderOf(foreign))
+	}
+
+	// An admin (no author restriction) moves any exam in their own school,
+	// but still never another school's.
+	moved, err = s.MoveExamsToFolder(ctx, []string{theirs, foreign}, stsFolderID, schoolID, "")
+	if err != nil {
+		t.Fatalf("MoveExamsToFolder(admin): %v", err)
+	}
+	if moved != 1 || folderOf(theirs) != stsFolderID {
+		t.Errorf("admin moved %d exams, want 1 (theirs); theirs folder=%q", moved, folderOf(theirs))
+	}
+	if folderOf(foreign) != "" {
+		t.Errorf("admin reached across schools")
+	}
+
+	// Empty folder id moves back out -- the undo for a wrong move.
+	if _, err := s.MoveExamsToFolder(ctx, []string{mine}, "", schoolID, ""); err != nil {
+		t.Fatalf("MoveExamsToFolder(unfile): %v", err)
+	}
+	if folderOf(mine) != "" {
+		t.Errorf("exam was not moved back out of the folder")
+	}
+}

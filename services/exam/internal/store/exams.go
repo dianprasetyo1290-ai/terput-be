@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"skci/exam/internal/model"
 )
@@ -823,4 +824,41 @@ func (s *Store) DuplicateExam(ctx context.Context, id, schoolID, actorUserID str
 	e.QuestionCount = src.QuestionCount
 	e.TotalPoints = src.TotalPoints
 	return e, nil
+}
+
+// MoveExamsToFolder re-files exams into a Bank Soal folder (or out of one
+// when folderID is empty). UpdateExam deliberately never touches folder_id
+// -- editing an exam must not silently re-file it -- so this is the only
+// way an exam's folder changes after creation, which is what SMK GPM's
+// admin asked for after the "Tanpa Folder" listing made stray exams
+// visible: they belong in the STS folder, retyping them is not an option.
+//
+// onlyCreatedBy scopes the update to one author (guru moving their own);
+// empty means no author restriction (admin). Returns rows actually moved,
+// so a caller passing an id from another school gets a count, not a lie.
+func (s *Store) MoveExamsToFolder(ctx context.Context, examIDs []string, folderID, schoolID, onlyCreatedBy string) (int64, error) {
+	if len(examIDs) == 0 {
+		return 0, nil
+	}
+	var folder interface{}
+	if folderID != "" {
+		folder = folderID
+	}
+	args := []interface{}{folder, schoolID}
+	ph := make([]string, 0, len(examIDs))
+	for _, id := range examIDs {
+		args = append(args, id)
+		ph = append(ph, fmt.Sprintf("$%d", len(args)))
+	}
+	q := fmt.Sprintf(`UPDATE exams SET folder_id=$1, updated_at=now()
+		WHERE school_id=$2 AND deleted_at IS NULL AND id::text IN (%s)`, strings.Join(ph, ","))
+	if onlyCreatedBy != "" {
+		args = append(args, onlyCreatedBy)
+		q += fmt.Sprintf(" AND created_by=$%d", len(args))
+	}
+	res, err := s.DB.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
