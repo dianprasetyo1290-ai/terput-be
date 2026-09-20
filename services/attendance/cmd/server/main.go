@@ -59,6 +59,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to open db: %v", err)
 	}
+	// Cap the pool: database/sql defaults to unlimited, so under load this
+	// service alone could exhaust Postgres max_connections and break every
+	// other service with it. Matches identity/exam/report/academic.
+	db.SetMaxOpenConns(20)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(30 * time.Minute)
 	defer db.Close()
 	if err := db.Ping(); err != nil {
 		log.Fatalf("failed to connect to db: %v", err)
