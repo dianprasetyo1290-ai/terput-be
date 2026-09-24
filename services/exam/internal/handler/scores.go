@@ -11,6 +11,10 @@ import (
 // ExamScores: GET /exams/{id}/scores — report-service pulls final scores
 // from here for e-raport. Includes the exam_type's mapping_rapor so
 // report-service knows which score bucket each row feeds.
+//
+// Yadika13 item 6: the score reported here is COALESCE(final_score, score) —
+// once a guru has ACC'd a sitting, that is the score the rapor sees, and
+// later ujian susulan do not move it until the guru ACCs again.
 func (h *Handler) ExamScores(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
 	examID := chi.URLParam(r, "id")

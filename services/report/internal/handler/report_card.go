@@ -77,57 +77,6 @@ func classifyExamType(mappingRapor, name string) string {
 	return classifyMapping(name)
 }
 
-// resolveExamBucketScore (item 5): finds one student's exam-based score
-// for a subject+bucket ("sts"/"sas") within a classroom+term, for the
-// Penilaian Formatif dropdown's STS/SAS auto-populate. Deliberately reuses
-// the same ListExams/ListExamTypes/GetScores calls (and classifyExamType
-// bucketing) GenerateReportCards already relies on instead of adding a new
-// exam-service endpoint -- exam-service's existing GET /exams/{id}/scores
-// (all students for one exam) already carries everything needed; this
-// just filters client-side for the one student being asked about. A
-// small classroom makes the extra round-trips cheap; this is a
-// single-teacher-loading-a-screen path, not a hot loop.
-func (h *Handler) resolveExamBucketScore(ctx context.Context, classroomID, termID, academicYearID, subjectID, studentID, bucket string) *float64 {
-	exams, err := h.d.Exam.ListExams(ctx, classroomID, termID)
-	if err != nil {
-		return nil
-	}
-	examTypes, err := h.d.Exam.ListExamTypes(ctx, academicYearID)
-	if err != nil {
-		return nil
-	}
-	mappingByType := map[string]string{}
-	nameByType := map[string]string{}
-	for _, et := range examTypes {
-		mappingByType[et.ID] = et.MappingRapor
-		nameByType[et.ID] = et.Name
-	}
-	sum, count := 0.0, 0
-	for _, e := range exams {
-		if e.SubjectID != subjectID {
-			continue
-		}
-		m := mappingByType[e.ExamTypeID]
-		if m == "" || classifyExamType(m, nameByType[e.ExamTypeID]) != bucket {
-			continue
-		}
-		scores, err := h.d.Exam.GetScores(ctx, e.ID)
-		if err != nil {
-			continue
-		}
-		for _, sc := range scores {
-			if sc.StudentID == studentID && sc.Score != nil {
-				sum += *sc.Score
-				count++
-			}
-		}
-	}
-	if count == 0 {
-		return nil
-	}
-	avg := sum / float64(count)
-	return &avg
-}
 
 func isAdmin(c *common.Claims) bool {
 	return c != nil && (c.ActiveRole == "admin" || c.ActiveRole == "superadmin")
@@ -501,39 +450,14 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 				count += b.Count - sasCount
 			}
 
-			// Item 2/3: Nilai Akhir (semester) / Nilai Sementara (bayangan)
-			// are each an admin-configurable weighted formula over the
-			// buckets above -- see report_weight_settings (item 4). A
-			// missing bucket (e.g. no STS exam yet) is excluded rather than
-			// treated as 0 (model.WeightedAverage renormalizes over what's
-			// present), so a subject isn't unfairly dragged down just
-			// because one input hasn't arrived yet.
+			// Item 2/3: Nilai Akhir / Nilai Sementara -- see
+			// computeSubjectScore, which is shared with refreshExamScores.
 			if wholeScores {
 				formatifScore, praktikScore = roundScore(formatifScore), roundScore(praktikScore)
 				stsScore, sasScore = roundScore(stsScore), roundScore(sasScore)
 			}
 
-			var computed *float64
-			if reportType == "bayangan" {
-				// Client's text literally says "kalkulasi dari nilai
-				// formatif dan sts" but the weight list right next to it
-				// gives three components (formatif 30/praktik 40/sts 30) --
-				// using all three since that's what the weights describe;
-				// the two-component sentence appears to be the source
-				// text's own inconsistency, not a deliberate exclusion of
-				// Nilai Praktik (which the client lists as its own column).
-				computed = model.WeightedAverage(
-					model.WeightedPair{Value: formatifScore, Weight: weights.SementaraFormatifWeight},
-					model.WeightedPair{Value: praktikScore, Weight: weights.SementaraPraktikWeight},
-					model.WeightedPair{Value: stsScore, Weight: weights.SementaraStsWeight},
-				)
-			} else {
-				computed = model.WeightedAverage(
-					model.WeightedPair{Value: formatifScore, Weight: weights.AkhirFormatifWeight},
-					model.WeightedPair{Value: stsScore, Weight: weights.AkhirStsWeight},
-					model.WeightedPair{Value: sasScore, Weight: weights.AkhirSasWeight},
-				)
-			}
+			computed := computeSubjectScore(reportType, weights, formatifScore, praktikScore, stsScore, sasScore)
 
 			if wholeScores {
 				computed = roundScore(computed)
@@ -684,24 +608,14 @@ var kelompokLabels = map[string]string{
 	"muatan_lokal": "C. Muatan Lokal",
 }
 
-// roundsToWholeScores: SEKOCI V7 -- Kelas X/XI rapor scores are whole
-// numbers (85.84 -> 86, 69.5 -> 70); Kelas XII and anything unrecognized
-// keep decimals. grade_level is free text ("10", "XI", "10 mipa", ...).
+// roundsToWholeScores: SEKOCI V7 made Kelas X/XI rapor scores whole numbers
+// (85.84 -> 86, 69.5 -> 70) and left Kelas XII on decimals. BUG SEKOCI
+// 2026-09-24 item B: guru want whole numbers on every tingkat ("88.90 -> 89,
+// 83.35 -> 83"), so the grade gate is gone. Kept as a function rather than
+// inlined so the two call sites stay honest about what they are deciding,
+// and so a per-tingkat rule can come back in one place if it ever has to.
 func roundsToWholeScores(gradeLevel *string) bool {
-	if gradeLevel == nil {
-		return false
-	}
-	f := strings.FieldsFunc(strings.ToUpper(*gradeLevel), func(r rune) bool {
-		return !('A' <= r && r <= 'Z' || '0' <= r && r <= '9')
-	})
-	if len(f) == 0 {
-		return false
-	}
-	switch f[0] {
-	case "10", "11", "X", "XI":
-		return true
-	}
-	return false
+	return true
 }
 
 // faseOf maps a classroom's grade level to its Kurikulum Merdeka fase.
@@ -758,6 +672,39 @@ func (h *Handler) resolveFase(ctx context.Context, classroomID string) string {
 		return f
 	}
 	return faseOf(&classroom.Name)
+}
+
+// computeSubjectScore is Nilai Akhir (semester) / Nilai Sementara (bayangan):
+// an admin-configurable weighted formula over the buckets (see
+// report_weight_settings). A missing bucket (e.g. no STS exam yet) is
+// excluded rather than treated as 0 -- model.WeightedAverage renormalizes
+// over what's present -- so a subject isn't unfairly dragged down just
+// because one input hasn't arrived yet.
+//
+// Extracted from GenerateReportCards so refreshExamScores (Yadika13 items 4
+// & 5) recomputes it exactly the same way; two copies of this formula would
+// drift, and a rapor whose Nilai Akhir disagrees with its own columns is
+// worse than a stale one.
+func computeSubjectScore(reportType string, weights model.WeightSettings, formatif, praktik, sts, sas *float64) *float64 {
+	if reportType == "bayangan" {
+		// Client's text literally says "kalkulasi dari nilai formatif dan
+		// sts" but the weight list right next to it gives three components
+		// (formatif 30/praktik 40/sts 30) -- using all three since that's
+		// what the weights describe; the two-component sentence appears to
+		// be the source text's own inconsistency, not a deliberate
+		// exclusion of Nilai Praktik (which the client lists as its own
+		// column).
+		return model.WeightedAverage(
+			model.WeightedPair{Value: formatif, Weight: weights.SementaraFormatifWeight},
+			model.WeightedPair{Value: praktik, Weight: weights.SementaraPraktikWeight},
+			model.WeightedPair{Value: sts, Weight: weights.SementaraStsWeight},
+		)
+	}
+	return model.WeightedAverage(
+		model.WeightedPair{Value: formatif, Weight: weights.AkhirFormatifWeight},
+		model.WeightedPair{Value: sts, Weight: weights.AkhirStsWeight},
+		model.WeightedPair{Value: sas, Weight: weights.AkhirSasWeight},
+	)
 }
 
 // roundScore rounds half up; the epsilon absorbs float noise from weighted
@@ -880,6 +827,98 @@ type raporExtrasBody struct {
 // theirs to write, and the same form carries the other two sections. Draft
 // only, same as score overrides: a finalized rapor must be unlocked first,
 // otherwise the printed document could change after it was signed off.
+type attendanceBody struct {
+	Sakit           *int  `json:"sakit"`
+	Izin            *int  `json:"izin"`
+	TanpaKeterangan *int  `json:"tanpa_keterangan"`
+	Manual          *bool `json:"manual"`
+}
+
+// PatchAttendance: PUT /report-cards/{id}/attendance -- a wali kelas types
+// the Ketidakhadiran figures in by hand (GPM & Yadika, 2026-09-24: both
+// schools started using Sekoci in September, so absensi-siswa has no
+// history to summarise and every rapor printed 0/0/0).
+//
+// `manual: false` hands the block back to the automatic sync instead.
+func (h *Handler) PatchAttendance(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	id := chi.URLParam(r, "id")
+
+	rc, err := h.d.Store.GetReportCard(r.Context(), id)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to fetch report card")
+		return
+	}
+	if rc == nil {
+		common.WriteError(w, http.StatusNotFound, "report card not found")
+		return
+	}
+	if !isAdmin(claims) && !h.isWaliKelasOwner(r.Context(), claims, rc.ClassroomID) {
+		common.WriteError(w, http.StatusForbidden, "only admin/superadmin or this classroom's wali kelas can edit ketidakhadiran")
+		return
+	}
+	if claims.ActiveRole != "superadmin" && rc.SchoolID != claims.SchoolID {
+		common.WriteError(w, http.StatusNotFound, "report card not found")
+		return
+	}
+	if rc.Status == "finalized" {
+		common.WriteError(w, http.StatusConflict, "report card is finalized; PUT /report-cards/{id}/unlock first")
+		return
+	}
+
+	var body attendanceBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if body.Manual != nil && !*body.Manual {
+		if err := h.d.Store.ClearAttendanceManual(r.Context(), id); err != nil {
+			common.WriteError(w, http.StatusInternalServerError, "failed to clear manual attendance")
+			return
+		}
+		h.writeReloadedCard(w, r, id)
+		return
+	}
+	if msg, ok := validAttendanceCounts(body); !ok {
+		common.WriteError(w, http.StatusBadRequest, msg)
+		return
+	}
+	if err := h.d.Store.SetAttendanceManual(r.Context(), id, body.Sakit, body.Izin, body.TanpaKeterangan); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to save attendance")
+		return
+	}
+	h.writeReloadedCard(w, r, id)
+}
+
+// writeReloadedCard replies with the freshly re-read card, so the caller
+// renders what was actually stored rather than what it hoped it sent.
+func (h *Handler) writeReloadedCard(w http.ResponseWriter, r *http.Request, id string) {
+	full, err := h.loadReportCard(r.Context(), id)
+	if err != nil || full == nil {
+		common.WriteError(w, http.StatusInternalServerError, "saved but failed to reload report card")
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, full, nil)
+}
+
+// validAttendanceCounts rejects a negative jumlah hari -- that is a typo,
+// not a number of days, and it would print on the rapor as-is. nil is fine
+// and means "kosongkan": the rapor prints "-", same as an unsynced card.
+//
+// Checked in a fixed order so the message names the same field every time
+// (ranging a map would pick a random one when two fields are both wrong).
+func validAttendanceCounts(b attendanceBody) (string, bool) {
+	for _, f := range []struct {
+		name string
+		v    *int
+	}{{"sakit", b.Sakit}, {"izin", b.Izin}, {"tanpa keterangan", b.TanpaKeterangan}} {
+		if f.v != nil && *f.v < 0 {
+			return "jumlah " + f.name + " tidak boleh negatif", false
+		}
+	}
+	return "", true
+}
+
 func (h *Handler) PatchRaporExtras(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	id := chi.URLParam(r, "id")

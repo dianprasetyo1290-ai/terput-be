@@ -84,6 +84,16 @@ func (h *Handler) ListFormativeGrades(w http.ResponseWriter, r *http.Request) {
 		subjectID = r.URL.Query().Get("subject_id")
 	}
 
+	// Batched once for the whole class instead of once per student --
+	// the old per-student helper re-fetched the exam list, the exam types
+	// and every score sheet inside this loop (Yadika13 item 4 made this path
+	// hot enough to matter: it is now the screen a guru refreshes to see a
+	// koreksi land).
+	var freshExamScores map[string]map[string]float64
+	if examBucket != "" && academicYearID != "" && subjectID != "" {
+		freshExamScores = h.examBucketScores(r.Context(), classroomID, termID, academicYearID, subjectID)
+	}
+
 	out := make([]formativeRowOut, 0, len(roster))
 	for _, stu := range roster {
 		name := stu.StudentUserID
@@ -93,11 +103,10 @@ func (h *Handler) ListFormativeGrades(w http.ResponseWriter, r *http.Request) {
 		row := formativeRowOut{StudentID: stu.StudentUserID, StudentName: name}
 		if v, ok := scores[stu.StudentUserID]; ok {
 			row.Score = &v
-		} else if examBucket != "" && academicYearID != "" && subjectID != "" {
-			if v := h.resolveExamBucketScore(r.Context(), classroomID, termID, academicYearID, subjectID, stu.StudentUserID, examBucket); v != nil {
-				row.Score = v
-				row.AutoFilled = true
-			}
+		} else if v, ok := freshExamScores[examBucket][stu.StudentUserID]; ok {
+			score := v
+			row.Score = &score
+			row.AutoFilled = true
 		}
 		out = append(out, row)
 	}

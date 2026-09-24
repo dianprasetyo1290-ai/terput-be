@@ -58,6 +58,17 @@ func validateQuestionShape(req questionReq) (string, bool) {
 		if len(req.EssayOptions) < 1 {
 			return "essay requires at least 1 essay_options entry (Opsi jawaban)", false
 		}
+		// Yadika13 item 1 originally capped essay poin at 10; the cap was
+		// lifted 2026-09-24 on request (soal KK kelas XII needed a wider
+		// spread so partial credit has room -- see resolveAwardedPoints,
+		// whose max is this poin). Only the floor is left: a 0-poin essay
+		// would give manual grading nothing to award. Poin here is the raw
+		// weight; publish still rescales the exam to total 100 (see
+		// NormalizeDraftPoints), so the absolute number never reaches a
+		// rapor -- only its ratio to the other soal does.
+		if req.Poin < 1 {
+			return "poin soal essay minimal 1", false
+		}
 	case "tebak_gambar":
 		if len(req.EssayOptions) < 1 {
 			return "tebak_gambar requires at least 1 essay_options entry (Opsi jawaban)", false

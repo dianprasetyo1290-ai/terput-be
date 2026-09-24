@@ -52,6 +52,7 @@ func NewRouter(d *Deps, jwtSecret string, corsOrigins []string, respCache *cache
 		// SEKOCI V10 item B: Kokurikuler / Ekstrakurikuler / Tanggapan Wali
 		// Kelas -- the hand-entered rapor sections below C. Muatan Lokal.
 		pr.Patch("/report-cards/{id}/extras", h.PatchRaporExtras)
+		pr.Put("/report-cards/{id}/attendance", h.PatchAttendance)
 		// Mail merge: render this rapor through the school's own uploaded
 		// .docx template (handler/report_docx.go). Runs alongside the
 		// built-in print view, which stays the default.

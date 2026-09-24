@@ -96,6 +96,12 @@ func NewRouter(h *Handler, jwtSecret, internalKey string, corsOrigins []string, 
 			rt.Post("/{id}/attempts/{attemptId}/buka-larangan", h.BukaLarangan)
 			rt.Post("/{id}/attempts/{attemptId}/blokir", h.Blokir)
 			rt.Post("/{id}/attempts/{attemptId}/buka-blokir", h.BukaBlokir)
+			// Yadika13 item 3 (bulk) and item 9 (reset).
+			rt.Post("/{id}/attempts/blokir-massal", h.BlokirMassal)
+			rt.Post("/{id}/attempts/buka-blokir-massal", h.BukaBlokirMassal)
+			rt.Post("/{id}/attempts/{attemptId}/reset", h.ResetUjian)
+			// Yadika13 item 6.
+			rt.Post("/{id}/attempts/{attemptId}/acc", h.AccNilai)
 			rt.Patch("/{id}/attempts/{attemptId}/answers/{answerId}", h.OverrideAnswer)
 
 			// Student-facing

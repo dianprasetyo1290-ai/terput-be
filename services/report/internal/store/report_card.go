@@ -25,7 +25,7 @@ func (s *Store) GetOrCreateReportCard(ctx context.Context, schoolID, academicYea
 			finalized_at, finalized_by, unlocked_at, unlocked_by, class_teacher_note,
 			kokurikuler_note, ekstrakurikuler, prestasi, kenaikan_status, kenaikan_kelas,
 			attendance_hadir, attendance_sakit, attendance_izin, attendance_tanpa_keterangan,
-			attendance_synced_at, attendance_sync_error,
+			attendance_manual, attendance_synced_at, attendance_sync_error,
 			student_name, student_nisn, classroom_name, term_name,
 			homeroom_teacher_name, principal_name, header_synced_at,
 			report_type, period_label,
@@ -139,7 +139,7 @@ func scanReportCard(row *sql.Row) (*model.ReportCard, bool, error) {
 		&finalizedAt, &finalizedBy, &unlockedAt, &unlockedBy, &classTeacherNote,
 		&extras.kokurikulerNote, &extras.ekskulJSON, &extras.prestasiJSON, &extras.kenaikanStatus, &extras.kenaikanKelas,
 		&hadir, &sakit, &izin, &tanpa,
-		&attendanceSyncedAt, &attendanceSyncErr,
+		&rc.Attendance.Manual, &attendanceSyncedAt, &attendanceSyncErr,
 		&studentName, &studentNISN, &classroomName, &termName,
 		&homeroomTeacherName, &principalName, &headerSyncedAt,
 		&rc.ReportType, &rc.PeriodLabel,
@@ -222,7 +222,7 @@ const reportCardSelectCols = `id, school_id, academic_year_id, term_id, classroo
 	finalized_at, finalized_by, unlocked_at, unlocked_by, class_teacher_note,
 	kokurikuler_note, ekstrakurikuler, prestasi, kenaikan_status, kenaikan_kelas,
 	attendance_hadir, attendance_sakit, attendance_izin, attendance_tanpa_keterangan,
-	attendance_synced_at, attendance_sync_error,
+	attendance_manual, attendance_synced_at, attendance_sync_error,
 	student_name, student_nisn, classroom_name, term_name,
 	homeroom_teacher_name, principal_name, header_synced_at,
 	report_type, period_label,
@@ -288,7 +288,7 @@ func scanReportCardRows(rows *sql.Rows) ([]model.ReportCard, error) {
 			&finalizedAt, &finalizedBy, &unlockedAt, &unlockedBy, &classTeacherNote,
 			&extras.kokurikulerNote, &extras.ekskulJSON, &extras.prestasiJSON, &extras.kenaikanStatus, &extras.kenaikanKelas,
 			&hadir, &sakit, &izin, &tanpa,
-			&attendanceSyncedAt, &attendanceSyncErr,
+			&rc.Attendance.Manual, &attendanceSyncedAt, &attendanceSyncErr,
 			&studentName, &studentNISN, &classroomName, &termName,
 			&homeroomTeacherName, &principalName, &headerSyncedAt,
 			&rc.ReportType, &rc.PeriodLabel,
@@ -374,13 +374,55 @@ func (s *Store) UpdateHeaderSnapshot(ctx context.Context, id string, studentName
 	return err
 }
 
+// UpdateAttendance writes the figures synced from attendance-service. The
+// `AND attendance_manual = false` guard is the whole point of migration
+// 0012: a regenerate must not wipe figures a wali kelas typed in, the same
+// way UpsertSubjectComputed never touches override_score.
 func (s *Store) UpdateAttendance(ctx context.Context, id string, hadir, sakit, izin, tanpa *int, syncedAt *time.Time, syncErr *string) error {
 	_, err := s.DB.ExecContext(ctx, `
 		UPDATE report_cards SET attendance_hadir = $1, attendance_sakit = $2, attendance_izin = $3,
 			attendance_tanpa_keterangan = $4, attendance_synced_at = $5, attendance_sync_error = $6, updated_at = now()
-		WHERE id = $7`,
+		WHERE id = $7 AND attendance_manual = false`,
 		hadir, sakit, izin, tanpa, syncedAt, syncErr, id)
 	return err
+}
+
+// SetAttendanceManual stores figures a wali kelas typed in and pins them
+// against the next regenerate. sync_error is cleared: a manual figure is
+// not "failed to sync", and leaving the old error would keep the red
+// "Data kehadiran belum tersinkron" banner under numbers that are correct.
+//
+// No hadir: the rapor prints Sakit/Izin/Tanpa Keterangan only (client,
+// 2026-09-24), so there is nothing for a wali kelas to type. The synced
+// attendance_hadir column is left untouched rather than zeroed.
+func (s *Store) SetAttendanceManual(ctx context.Context, id string, sakit, izin, tanpa *int) error {
+	res, err := s.DB.ExecContext(ctx, `
+		UPDATE report_cards SET attendance_sakit = $1, attendance_izin = $2,
+			attendance_tanpa_keterangan = $3, attendance_manual = true,
+			attendance_synced_at = now(), attendance_sync_error = NULL, updated_at = now()
+		WHERE id = $4`,
+		sakit, izin, tanpa, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// ClearAttendanceManual hands the block back to the automatic sync. The
+// figures are left as-is until the next generate overwrites them.
+func (s *Store) ClearAttendanceManual(ctx context.Context, id string) error {
+	res, err := s.DB.ExecContext(ctx, `
+		UPDATE report_cards SET attendance_manual = false, updated_at = now() WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // UpsertSubjectComputed writes/refreshes the computed_score for one

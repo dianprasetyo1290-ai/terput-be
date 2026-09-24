@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -235,6 +236,51 @@ func (h *Handler) GetExam(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusOK, map[string]interface{}{"exam": e, "questions": questions, "has_attempts": hasAttempts}, nil)
 }
 
+// changedBesidesSchedule names the non-schedule fields an update would alter,
+// so a published-exam edit can be refused with the reason instead of a bare
+// "not editable" (Yadika13 item 2). Empty result = schedule-only edit.
+// Description is treated as schedule-adjacent: it carries no state a running
+// attempt depends on, and guru use it to note the new time.
+func changedBesidesSchedule(existing *model.Exam, req examReq) string {
+	var changed []string
+	cmp := func(name, was, now string) {
+		if now != "" && now != was {
+			changed = append(changed, name)
+		}
+	}
+	cmp("Judul", existing.Title, req.Title)
+	cmp("Semester/Term", existing.TermID, req.TermID)
+	cmp("Tipe Ujian", existing.ExamTypeID, req.ExamTypeID)
+	cmp("Mata Pelajaran", existing.SubjectID, req.SubjectID)
+	cmp("Guru", existing.TeacherID, req.TeacherID)
+	if req.IsShuffled != existing.IsShuffled {
+		changed = append(changed, "Acak Soal")
+	}
+	// Kelas: compare as sets — the request may send the same classrooms in a
+	// different order, which is not a change.
+	want := req.ClassroomIDs
+	if len(want) == 0 && req.ClassroomID != "" {
+		want = []string{req.ClassroomID}
+	}
+	if len(want) > 0 {
+		have := map[string]bool{}
+		for _, id := range existing.ClassroomIDs {
+			have[id] = true
+		}
+		if len(want) != len(existing.ClassroomIDs) {
+			changed = append(changed, "Kelas")
+		} else {
+			for _, id := range want {
+				if !have[id] {
+					changed = append(changed, "Kelas")
+					break
+				}
+			}
+		}
+	}
+	return strings.Join(changed, ", ")
+}
+
 func (h *Handler) UpdateExam(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
 	if !requireRole(w, c, "admin", "superadmin", "guru", "pengawas") {
@@ -266,6 +312,29 @@ func (h *Handler) UpdateExam(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
+	// Yadika13 item 2: a published exam -- including one running right now --
+	// stays editable, but only its schedule. Everything else is frozen
+	// because students may already hold a shuffled question_order built from
+	// the current question set and class list. Say so explicitly rather than
+	// silently dropping the other fields, so the guru knows what was saved.
+	if existing.IsPublished {
+		if changed := changedBesidesSchedule(existing, req); changed != "" {
+			common.WriteError(w, http.StatusConflict,
+				"ujian sudah diterbitkan: hanya Tanggal Mulai/Selesai yang bisa diubah (perubahan ditolak pada: "+changed+")")
+			return
+		}
+		if err := h.Store.UpdateExamSchedule(r.Context(), id, existing.SchoolID, start, end); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				common.WriteError(w, http.StatusNotFound, "exam not found")
+				return
+			}
+			writeStoreErr(w, err)
+			return
+		}
+		common.WriteJSON(w, http.StatusOK, map[string]string{"id": id}, nil)
+		return
+	}
+
 	e := &model.Exam{
 		ID: id, SchoolID: existing.SchoolID,
 		TermID: req.TermID, ExamTypeID: req.ExamTypeID, Title: req.Title, Description: req.Description,

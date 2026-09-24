@@ -148,8 +148,31 @@ type ExamAttempt struct {
 	Score            *float64   `json:"score,omitempty"`
 	CorrectCount     *int       `json:"correct_count,omitempty"`
 	GradedAt         *time.Time `json:"graded_at,omitempty"`
+	// FinalScore (Yadika13 item 6): the score a guru approved ("ACC").
+	// Once set it is what counts, however many ujian susulan follow, until
+	// the guru ACCs again. NULL = never approved, so Score wins.
+	FinalScore       *float64   `json:"final_score,omitempty"`
+	FinalAccAt       *time.Time `json:"final_acc_at,omitempty"`
+	FinalAccBy       *string    `json:"final_acc_by,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
+}
+
+// AttemptSitting is one archived ujian-susulan sitting (Yadika13 item 6:
+// "Simpan history ujian susulan"). Written by ResetAttempt, read-only after.
+type AttemptSitting struct {
+	ID           string     `json:"id"`
+	ExamID       string     `json:"exam_id"`
+	UserID       string     `json:"user_id"`
+	AttemptID    string     `json:"attempt_id"`
+	Sitting      int        `json:"sitting"`
+	Status       string     `json:"status"`
+	Score        *float64   `json:"score,omitempty"`
+	CorrectCount *int       `json:"correct_count,omitempty"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	SubmittedAt  *time.Time `json:"submitted_at,omitempty"`
+	ResetBy      *string    `json:"reset_by,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
 }
 
 type ExamAttemptAnswer struct {

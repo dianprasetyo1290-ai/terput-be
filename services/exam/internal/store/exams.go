@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"skci/exam/internal/model"
 )
@@ -266,6 +267,31 @@ func (s *Store) UpdateExam(ctx context.Context, e *model.Exam) error {
 
 var ErrNotEditable = fmt.Errorf("exam is not editable (published or not found)")
 var ErrHasAttempts = fmt.Errorf("exam already has student attempts and cannot be deleted")
+
+// UpdateExamSchedule moves a PUBLISHED exam's window (Yadika13 item 2: "Guru
+// harus bisa mengedit durasi/waktu ujian meskipun ujian sedang berjalan").
+// UpdateExam deliberately refuses to touch a published row -- students
+// already hold a per-attempt shuffled question_order, so changing the
+// question set or the class under them would corrupt in-flight attempts.
+// Times carry no such risk, so they get their own narrow statement rather
+// than a relaxed guard on the wide one.
+//
+// Students pick the change up on their own: the dashboard's "today" bucket
+// filters on end_at >= now(), and ExamRunnerView re-reads the attempt every
+// 10s, so no push channel is needed.
+func (s *Store) UpdateExamSchedule(ctx context.Context, id, schoolID string, start, end time.Time) error {
+	res, err := s.DB.ExecContext(ctx, `
+		UPDATE exams SET start_at=$1, end_at=$2, updated_at=now()
+		WHERE id=$3 AND school_id=$4 AND deleted_at IS NULL`,
+		start, end, id, schoolID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
 
 // DeleteExam allows deleting a draft exam freely, and a published exam too as
 // long as no student has started it yet (e.g. published by mistake before

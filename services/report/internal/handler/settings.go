@@ -26,7 +26,8 @@ func isPgErrorCode(err error, code string) bool {
 // admin config surface (assessment types + weight formulas) the rest of
 // report-service's generate/formative logic reads instead of hardcoding.
 // GET is staff (admin/superadmin/guru) since the guru dropdown (item 5)
-// needs the type list too; mutations are admin-only.
+// needs the type list too; mutations are admin-only, except Create which
+// guru may also call (Yadika13 item 8).
 
 // ListAssessmentTypes: GET /settings/assessment-types
 func (h *Handler) ListAssessmentTypes(w http.ResponseWriter, r *http.Request) {
@@ -63,19 +64,32 @@ func validBucket(b string) bool {
 
 // CreateAssessmentType: POST /settings/assessment-types
 //
-// Admin-owned again (SEKOCI V7): guru's Penilaian Formatif lost its
-// "+ Tambah Tipe Nilai" -- tipe nilai are managed from the admin's
-// Penilaian Formatif page; guru only reads them (ListAssessmentTypes).
+// Was admin-owned (SEKOCI V7 removed guru's "+ Tambah Tipe Nilai"); Yadika13
+// item 8 brings it back for guru, narrowed to a plain formatif column --
+// see the role branch below.
 func (h *Handler) CreateAssessmentType(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if !isAdmin(claims) {
-		common.WriteError(w, http.StatusForbidden, "admin/superadmin only")
+	// Yadika13 item 8: guru mapel may now create a tipe penilaian too
+	// ("Formatif 4", "Tugas", "Kuis"), which used to be admin-only. Update
+	// and Delete stay admin-only: adding a column is additive, editing or
+	// removing one reaches into every other guru's grid.
+	if !isStaff(claims) {
+		common.WriteError(w, http.StatusForbidden, "admin/superadmin/guru only")
 		return
 	}
 	var body assessmentTypeBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
+	}
+	if !isAdmin(claims) {
+		// A guru gets exactly one shape: a plain extra formatif column.
+		// bucket sts/sas would divert scores into the rapor's exam-linked
+		// buckets, and weight_percent/exam_linked are rapor-formula
+		// concerns that stay with admin.
+		body.Bucket = "formatif"
+		body.WeightPercent = 0
+		body.ExamLinked = false
 	}
 	body.Code = strings.TrimSpace(body.Code)
 	body.Name = strings.TrimSpace(body.Name)

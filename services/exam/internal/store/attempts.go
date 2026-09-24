@@ -45,7 +45,7 @@ func scanAttempt(row interface {
 	err := row.Scan(&a.ID, &a.SchoolID, &a.AcademicYearID, &a.ExamID, &a.UserID, &a.ClassroomID, &a.TokenID, &a.Status,
 		&qOrderJSON, &a.CurrentPosition, &a.FocusLostCount, &a.StartedAt, &a.SubmittedAt,
 		&a.BlockedAt, &a.BlockedReason, &a.BlockedBy, &a.BannedAt, &a.BannedReason, &a.BannedBy,
-		&a.Score, &a.CorrectCount, &a.GradedAt, &a.CreatedAt, &a.UpdatedAt)
+		&a.Score, &a.CorrectCount, &a.GradedAt, &a.FinalScore, &a.FinalAccAt, &a.FinalAccBy, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -58,14 +58,14 @@ func scanAttempt(row interface {
 const attemptCols = `id, school_id, academic_year_id, exam_id, user_id, classroom_id, token_id, status,
 	question_order, current_position, focus_lost_count, started_at, submitted_at,
 	blocked_at, blocked_reason, blocked_by, banned_at, banned_reason, banned_by,
-	score, correct_count, graded_at, created_at, updated_at`
+	score, correct_count, graded_at, final_score, final_acc_at, final_acc_by, created_at, updated_at`
 
 // attemptColsQualified is attemptCols prefixed with "ea." for use in JOIN
 // queries against other tables that share column names (id, created_at, ...).
 const attemptColsQualified = `ea.id, ea.school_id, ea.academic_year_id, ea.exam_id, ea.user_id, ea.classroom_id, ea.token_id, ea.status,
 	ea.question_order, ea.current_position, ea.focus_lost_count, ea.started_at, ea.submitted_at,
 	ea.blocked_at, ea.blocked_reason, ea.blocked_by, ea.banned_at, ea.banned_reason, ea.banned_by,
-	ea.score, ea.correct_count, ea.graded_at, ea.created_at, ea.updated_at`
+	ea.score, ea.correct_count, ea.graded_at, ea.final_score, ea.final_acc_at, ea.final_acc_by, ea.created_at, ea.updated_at`
 
 func (s *Store) GetAttempt(ctx context.Context, examID, userID string) (*model.ExamAttempt, error) {
 	row := s.DB.QueryRowContext(ctx, `SELECT `+attemptCols+` FROM exam_attempts WHERE exam_id=$1 AND user_id=$2`, examID, userID)
@@ -661,7 +661,8 @@ type ScoreRow struct {
 
 func (s *Store) ExamScores(ctx context.Context, examID string) ([]ScoreRow, error) {
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT user_id, status, score, correct_count FROM exam_attempts WHERE exam_id=$1 ORDER BY created_at`, examID)
+		SELECT user_id, status, COALESCE(final_score, score), correct_count
+		FROM exam_attempts WHERE exam_id=$1 ORDER BY created_at`, examID)
 	if err != nil {
 		return nil, err
 	}
@@ -675,4 +676,173 @@ func (s *Store) ExamScores(ctx context.Context, examID string) ([]ScoreRow, erro
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// BlokirBulk / BukaBlokirBulk back Yadika13 item 3 ("Generate Blokir /
+// Blokir Massal ... sediakan opsi unblock massal juga"). Selection is done
+// server-side by (exam, optional classroom) rather than by a list of attempt
+// ids: the monitor panel already filters by Kelas, a whole class is the unit
+// the guru actually thinks in, and it keeps this to one statement instead of
+// one round-trip per student -- a 36-student class after a mass focus-loss
+// was the reported pain.
+//
+// Both reuse the single-attempt transitions' guards verbatim (aktif->blokir,
+// blokir->aktif), so a row in the wrong state is skipped, not forced. They
+// return the number of rows actually moved; 0 is a legitimate result (nothing
+// was in the source state), NOT ErrInvalidTransition.
+func (s *Store) BlokirBulk(ctx context.Context, examID, classroomID, byUserID string, reason *string) (int64, error) {
+	return s.bulkAttemptStatus(ctx, `
+		UPDATE exam_attempts SET status='blokir', blocked_at=now(), blocked_reason=$1, blocked_by=$2, updated_at=now()
+		WHERE exam_id=$3 AND status='aktif'`, classroomID, reason, byUserID, examID)
+}
+
+func (s *Store) BukaBlokirBulk(ctx context.Context, examID, classroomID string) (int64, error) {
+	return s.bulkAttemptStatus(ctx, `
+		UPDATE exam_attempts SET status='aktif', blocked_at=NULL, blocked_reason=NULL, blocked_by=NULL, updated_at=now()
+		WHERE exam_id=$1 AND status='blokir'`, classroomID, examID)
+}
+
+// bulkAttemptStatus appends the optional Kelas narrowing to a statement whose
+// last placeholder is exam_id, so both callers share one code path.
+func (s *Store) bulkAttemptStatus(ctx context.Context, q, classroomID string, args ...interface{}) (int64, error) {
+	q, args = withClassroomFilter(q, classroomID, args)
+	res, err := s.DB.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// ResetAttempt backs Yadika13 item 9 ("Pengulangan Ujian untuk Siswa yang
+// Selesai Cepat"): put one student's attempt back to belum_mulai so they can
+// sit the exam again (an "ujian susulan").
+//
+// The completed sitting is archived into exam_attempt_sittings first, not
+// thrown away -- item 6 asks for the history, and without it a guru who
+// resets by mistake has destroyed a real result. The live answer rows still
+// have to go: score/correct_count are recomputed from exam_attempt_answers
+// on submit, so a leftover row would be counted into the re-sit's score.
+//
+// The row is reset rather than deleted: exam_attempts has a (exam_id,
+// user_id) unique key that EnterExam's upsert relies on, and keeping the row
+// keeps token_id/classroom_id/final_score intact -- the student re-enters
+// with the SAME voucher, and an already-ACC'd score survives the re-sit
+// (item 6). question_order is cleared because EnterExam rebuilds (and
+// re-shuffles) it on the belum_mulai branch; leaving a stale order would pin
+// the re-sit to the first sitting's question set.
+func (s *Store) ResetAttempt(ctx context.Context, attemptID, byUserID string) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Archive first: this SELECT is also the guard, so a 'dilarang' or
+	// never-started attempt never reaches the UPDATE below. A 'dilarang'
+	// attempt is deliberately excluded -- resetting it would silently lift
+	// the ban, and Buka Larangan is the action for that.
+	var sittingID string
+	err = tx.QueryRowContext(ctx, `
+		INSERT INTO exam_attempt_sittings
+			(school_id, exam_id, user_id, attempt_id, sitting, status, score, correct_count,
+			 started_at, submitted_at, answers, reset_by)
+		SELECT ea.school_id, ea.exam_id, ea.user_id, ea.id,
+		       1 + (SELECT count(*) FROM exam_attempt_sittings s WHERE s.attempt_id = ea.id),
+		       ea.status, ea.score, ea.correct_count, ea.started_at, ea.submitted_at,
+		       COALESCE((SELECT jsonb_agg(to_jsonb(aa)) FROM exam_attempt_answers aa WHERE aa.attempt_id = ea.id), '[]'::jsonb),
+		       $2
+		FROM exam_attempts ea
+		WHERE ea.id = $1 AND ea.status IN ('aktif','blokir','selesai')
+		RETURNING id`, attemptID, byUserID).Scan(&sittingID)
+	if err == sql.ErrNoRows {
+		return ErrInvalidTransition
+	}
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM exam_attempt_answers WHERE attempt_id=$1`, attemptID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE exam_attempts SET status='belum_mulai', question_order=NULL, current_position=0,
+			started_at=NULL, submitted_at=NULL, score=NULL, correct_count=NULL, graded_at=NULL,
+			blocked_at=NULL, blocked_reason=NULL, blocked_by=NULL, updated_at=now()
+		WHERE id=$1`, attemptID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// AccAttemptScore freezes the attempt's current score as the one that counts
+// (Yadika13 item 6: "Tandai nilai pertama yang di-ACC sebagai nilai final ...
+// ujian susulan berikutnya tidak mengubah nilai final kecuali di-ACC ulang").
+// Calling it again overwrites with whatever the latest sitting scored -- that
+// IS the "di-ACC ulang" escape hatch, so it is not guarded against.
+func (s *Store) AccAttemptScore(ctx context.Context, attemptID, byUserID string) error {
+	res, err := s.DB.ExecContext(ctx, `
+		UPDATE exam_attempts SET final_score=score, final_acc_at=now(), final_acc_by=$2, updated_at=now()
+		WHERE id=$1 AND score IS NOT NULL`, attemptID, byUserID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrInvalidTransition
+	}
+	return nil
+}
+
+// ListAttemptSittings returns a student's archived sittings, oldest first.
+func (s *Store) ListAttemptSittings(ctx context.Context, attemptID string) ([]model.AttemptSitting, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT id, exam_id, user_id, attempt_id, sitting, status, score, correct_count,
+		       started_at, submitted_at, reset_by, created_at
+		FROM exam_attempt_sittings WHERE attempt_id=$1 ORDER BY sitting`, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.AttemptSitting{}
+	for rows.Next() {
+		var h model.AttemptSitting
+		if err := rows.Scan(&h.ID, &h.ExamID, &h.UserID, &h.AttemptID, &h.Sitting, &h.Status,
+			&h.Score, &h.CorrectCount, &h.StartedAt, &h.SubmittedAt, &h.ResetBy, &h.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}
+
+// SittingCountsByExam: how many archived sittings each student of an exam
+// has, i.e. who is on an ujian susulan (Yadika13 item 7's "Susulan" status).
+func (s *Store) SittingCountsByExam(ctx context.Context, examID string) (map[string]int, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT user_id, count(*) FROM exam_attempt_sittings WHERE exam_id=$1 GROUP BY user_id`, examID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var userID string
+		var n int
+		if err := rows.Scan(&userID, &n); err != nil {
+			return nil, err
+		}
+		out[userID] = n
+	}
+	return out, rows.Err()
+}
+
+// withClassroomFilter is split out of bulkAttemptStatus purely so the
+// placeholder numbering can be tested without a database — the two callers
+// pass a different number of args, so an off-by-one here would silently
+// compare classroom_id against the wrong value.
+func withClassroomFilter(q, classroomID string, args []interface{}) (string, []interface{}) {
+	if classroomID == "" {
+		return q, args
+	}
+	args = append(args, classroomID)
+	return q + fmt.Sprintf(" AND classroom_id=$%d", len(args)), args
 }

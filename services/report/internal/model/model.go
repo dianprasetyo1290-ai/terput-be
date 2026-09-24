@@ -116,11 +116,16 @@ type Prestasi struct {
 	Keterangan string `json:"keterangan"`
 }
 
+// AttendanceSummary is the rapor's "III. KETIDAKHADIRAN" block. Normally
+// synced from attendance-service on every generate; Manual means a wali
+// kelas typed the figures in and the sync must leave them alone (migration
+// 0012 -- GPM/Yadika started mid-year with no absensi history).
 type AttendanceSummary struct {
 	Hadir           *int       `json:"hadir"`
 	Sakit           *int       `json:"sakit"`
 	Izin            *int       `json:"izin"`
 	TanpaKeterangan *int       `json:"tanpa_keterangan"`
+	Manual          bool       `json:"manual"`
 	SyncedAt        *time.Time `json:"synced_at,omitempty"`
 	SyncError       *string    `json:"sync_error,omitempty"`
 }

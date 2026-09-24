@@ -42,7 +42,7 @@ func (s *Store) ListFormativeScoresForType(ctx context.Context, termID, classroo
 // replace-all semantics with a single-cell save matching the new
 // dropdown-per-type UX: guru picks a tipe penilaian, enters/edits one
 // student's score, saves. This is also how an exam-service auto-populated
-// STS/SAS suggestion (see handler.resolveExamBucketScore) becomes a
+// STS/SAS suggestion (see handler.examBucketScores) becomes a
 // guru-owned, editable value once saved -- the deliberate "raise a low
 // score" business rule from item 5.
 func (s *Store) UpsertFormativeScore(ctx context.Context, schoolID, termID, classroomSubjectID, studentID, assessmentTypeID string, score float64, createdBy string) error {

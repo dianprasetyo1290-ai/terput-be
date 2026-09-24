@@ -36,18 +36,15 @@ func tanggalID(t time.Time) string {
 	return fmt.Sprintf("%d %s %d", t.Day(), monthsID[int(t.Month())-1], t.Year())
 }
 
-// fmtScore prints a score the way a rapor does: whole numbers bare, others
-// to two decimals. Empty string for a missing score, so a blank cell prints
-// blank rather than "0" -- a zero is a real grade and must not be invented.
+// fmtScore prints a score the way a rapor does: a whole number, rounded
+// half up (BUG SEKOCI 2026-09-24 item B -- 88.90 -> 89, 83.35 -> 83).
+// Empty string for a missing score, so a blank cell prints blank rather
+// than "0" -- a zero is a real grade and must not be invented.
 func fmtScore(v *float64) string {
 	if v == nil {
 		return ""
 	}
-	r := math.Round(*v*100) / 100
-	if r == math.Trunc(r) {
-		return strconv.FormatInt(int64(r), 10)
-	}
-	return strconv.FormatFloat(r, 'f', 2, 64)
+	return strconv.FormatInt(int64(math.Round(*v+1e-9)), 10)
 }
 
 func fmtCount(v *int) string {

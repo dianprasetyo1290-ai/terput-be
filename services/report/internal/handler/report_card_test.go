@@ -27,19 +27,22 @@ func TestClassifyMapping(t *testing.T) {
 }
 
 func TestRoundsToWholeScores(t *testing.T) {
-	for in, want := range map[string]bool{
-		"10": true, "11": true, "X": true, "xi": true, "10 mipa": true, "XI-2": true,
-		"12": false, "XII": false, "KELAS 1": false, "LULUS": false, "": false, "1": false,
-	} {
+	// BUG SEKOCI 2026-09-24 item B: no tingkat keeps decimals any more,
+	// Kelas XII included (it used to be the only one that did).
+	for _, in := range []string{"10", "11", "X", "xi", "10 mipa", "XI-2", "12", "XII", "LULUS", ""} {
 		v := in
-		if got := roundsToWholeScores(&v); got != want {
-			t.Errorf("roundsToWholeScores(%q) = %v, want %v", in, got, want)
+		if !roundsToWholeScores(&v) {
+			t.Errorf("roundsToWholeScores(%q) = false, want true", in)
 		}
 	}
-	if roundsToWholeScores(nil) {
-		t.Error("nil grade_level must keep decimals")
+	if !roundsToWholeScores(nil) {
+		t.Error("an unknown grade_level must still round")
 	}
-	for in, want := range map[float64]float64{85.84: 86, 43.5: 44, 69.5: 70, 69.49: 69, 100: 100, (69.0*0.3 + 70*0.7) / 1: 70} {
+	// Worked examples straight out of the bug report, plus the half-up
+	// boundary it implies (>= .50 up, < .50 down).
+	for in, want := range map[float64]float64{
+		88.90: 89, 92.90: 93, 83.35: 83, 60.80: 61, 88: 88, 63.80: 64, 76.80: 77, 75.30: 75,
+		85.84: 86, 43.5: 44, 69.5: 70, 69.49: 69, 100: 100, (69.0*0.3 + 70*0.7) / 1: 70} {
 		v := in
 		if got := *roundScore(&v); got != want {
 			t.Errorf("roundScore(%v) = %v, want %v", in, got, want)

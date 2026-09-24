@@ -63,6 +63,15 @@ func (h *Handler) GetSubjectDescriptionGrid(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Yadika13 items 4 & 5: the stored Nilai STS/SAS are a snapshot taken at
+	// Generate Rapor time, so a koreksi made afterwards never showed up
+	// here. Re-read them from exam-service first and write back whatever
+	// moved; the loop below then serves the fresh numbers. Best-effort --
+	// a failure just leaves the snapshot as it was.
+	if len(cards) > 0 {
+		h.refreshExamScores(ctx, cards[0].SchoolID, classroomID, termID, subjectID, cards)
+	}
+
 	rows := make([]descriptionRow, 0, len(cards))
 	for _, rc := range cards {
 		subjects, err := h.d.Store.ListSubjects(ctx, rc.ID)
