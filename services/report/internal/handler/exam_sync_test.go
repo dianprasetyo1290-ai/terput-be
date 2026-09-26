@@ -1,9 +1,16 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"skci/report/internal/model"
+	"skci/report/internal/upstream"
 )
 
 func f(v float64) *float64 { return &v }
@@ -70,5 +77,62 @@ func TestMaybeRound(t *testing.T) {
 	}
 	if got := maybeRound(79.5, false); got == nil || *got != 79.5 {
 		t.Errorf("other grades keep the decimal: want 79.5, got %v", got)
+	}
+}
+
+// BUG SEKOCI 2026-09-27: Penilaian Formatif showed a lower number than
+// Pantau Ujian Langsung because examBucketScores averaged every exam that
+// shared a subject + bucket. Real prod data from XI.ANM / Matematika: a
+// "penjas" exam left tagged as Matematika (Alfito 30) got blended with the
+// real STS (78) into 54 -- exactly what the guru screenshotted.
+//
+// Exams are served newest-first, the way exam-service's ORDER BY
+// created_at DESC does, so the newest sitting must be the one that wins.
+func TestExamBucketScoresTakesNewestExamNotAverage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		write := func(v any) { b, _ := json.Marshal(v); w.Write([]byte(`{"data":` + string(b) + `}`)) }
+
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/exam-types"):
+			write([]upstream.ExamType{{ID: "t-sts", Name: "STS I", MappingRapor: "sts"}})
+		case r.URL.Path == "/exams":
+			// Newest first, as exam-service orders them.
+			write([]upstream.Exam{
+				{ID: "susulan", SubjectID: "mtk", ExamTypeID: "t-sts"},
+				{ID: "psts", SubjectID: "mtk", ExamTypeID: "t-sts"},
+				{ID: "penjas", SubjectID: "mtk", ExamTypeID: "t-sts"},
+				{ID: "ipa", SubjectID: "ipa", ExamTypeID: "t-sts"},
+			})
+		case strings.HasSuffix(r.URL.Path, "/scores"):
+			id := strings.Split(strings.Trim(r.URL.Path, "/"), "/")[1]
+			n := func(f float64) *float64 { return &f }
+			scores := map[string][]upstream.Score{
+				"penjas":  {{StudentID: "alfito", Score: n(30)}, {StudentID: "dewi", Score: n(45)}},
+				"psts":    {{StudentID: "alfito", Score: n(78)}, {StudentID: "dewi", Score: n(49)}},
+				"susulan": {{StudentID: "dewi", Score: n(60)}},
+				"ipa":     {{StudentID: "alfito", Score: n(99)}},
+			}[id]
+			b, _ := json.Marshal(scores)
+			w.Write([]byte(`{"data":{"scores":` + string(b) + `}}`))
+		default:
+			t.Errorf("unexpected request %s", r.URL)
+		}
+	}))
+	defer srv.Close()
+
+	h := New(&Deps{Exam: upstream.NewExamClient(srv.URL, "k", 5*time.Second)})
+	got := h.examBucketScores(context.Background(), "c1", "term1", "ay1", "mtk")
+
+	for student, want := range map[string]float64{
+		"alfito": 78, // NOT (30+78)/2 = 54, the number in the bug report
+		"dewi":   60, // the susulan supersedes both earlier sittings
+	} {
+		if v, ok := got["sts"][student]; !ok || v != want {
+			t.Errorf("%s: got %v (present=%v), want %v -- scores are being blended again", student, v, ok, want)
+		}
+	}
+	if _, ok := got["sts"]["alfito"]; ok && got["sts"]["alfito"] == 99 {
+		t.Error("another subject's exam leaked into this subject's bucket")
 	}
 }

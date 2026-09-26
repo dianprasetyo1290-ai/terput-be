@@ -77,7 +77,6 @@ func classifyExamType(mappingRapor, name string) string {
 	return classifyMapping(name)
 }
 
-
 func isAdmin(c *common.Claims) bool {
 	return c != nil && (c.ActiveRole == "admin" || c.ActiveRole == "superadmin")
 }
@@ -386,10 +385,18 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 				sErr = &e
 			}
 
-			// Nilai STS / Nilai SAS: averaged over this subject's exams
-			// whose ExamType.mapping_rapor classifies as that bucket (same
-			// classifyExamType used everywhere else in this handler).
-			stsSum, sasSum := 0.0, 0.0
+			// Nilai STS / Nilai SAS: the NEWEST exam in that bucket this
+			// student actually sat, whose ExamType.mapping_rapor classifies
+			// as that bucket (same classifyExamType used everywhere else in
+			// this handler). examIDs keeps ListExams' ORDER BY created_at
+			// DESC, so the first hit is the newest one.
+			//
+			// Newest wins, not an average -- same rule and same reason as
+			// examBucketScores in exam_sync.go (BUG SEKOCI 2026-09-27); see
+			// its doc comment. This loop is the Generate Rapor twin of it,
+			// and had to change with it or a regenerate would put the old
+			// blended average straight back into report_card_subjects.
+			var stsScore, sasScore *float64
 			stsCount, sasCount := 0, 0
 			for _, eid := range examIDs {
 				scoresForExam, ok := scoresByExam[eid]
@@ -402,21 +409,16 @@ func (h *Handler) GenerateReportCards(w http.ResponseWriter, r *http.Request) {
 				}
 				switch examCategory[eid] {
 				case "sts":
-					stsSum += *sc
-					stsCount++
+					if stsScore == nil {
+						v := *sc
+						stsScore, stsCount = &v, 1
+					}
 				case "sas":
-					sasSum += *sc
-					sasCount++
+					if sasScore == nil {
+						v := *sc
+						sasScore, sasCount = &v, 1
+					}
 				}
-			}
-			var stsScore, sasScore *float64
-			if stsCount > 0 {
-				avg := stsSum / float64(stsCount)
-				stsScore = &avg
-			}
-			if sasCount > 0 {
-				avg := sasSum / float64(sasCount)
-				sasScore = &avg
 			}
 
 			// Nilai Formatif / Nilai Praktik: item 5's dropdown-entered

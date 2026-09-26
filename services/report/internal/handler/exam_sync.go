@@ -19,7 +19,20 @@ import (
 // pass per classroom+subject+term, writing back only what actually changed.
 
 // examBucketScores maps bucket ("sts"/"sas") -> student id -> exam-derived
-// score for one classroom+subject+term, averaged over that bucket's exams.
+// score for one classroom+subject+term: the score from the NEWEST exam in
+// that bucket the student actually sat.
+//
+// Newest wins, not an average (BUG SEKOCI 2026-09-27). Averaging was silently
+// blending every exam that shared a subject+bucket, so Penilaian Formatif
+// showed a number the guru had never seen: Alfito's real STS Matematika 78
+// got averaged with a 30 from a "penjas" exam left tagged as Matematika ->
+// 54, while Pantau Ujian Langsung kept showing 78. The "dari hasil ujian"
+// label promises one exam's result, so hand back one exam's result. It also
+// makes an ujian susulan behave the way a make-up exam should -- superseding
+// the original sitting rather than being averaged into it.
+//
+// ListExams already returns ORDER BY created_at DESC, so the first exam that
+// has a score for a student IS the newest one; nothing needs re-sorting.
 //
 // Batched on purpose: this replaces a per-student resolveExamBucketScore
 // for ONE student and was being called inside a per-student loop, which
@@ -41,11 +54,7 @@ func (h *Handler) examBucketScores(ctx context.Context, classroomID, termID, aca
 		nameByType[et.ID] = et.Name
 	}
 
-	type acc struct {
-		sum   float64
-		count int
-	}
-	totals := map[string]map[string]*acc{}
+	out := map[string]map[string]float64{}
 	for _, e := range exams {
 		if e.SubjectID != subjectID {
 			continue
@@ -66,24 +75,13 @@ func (h *Handler) examBucketScores(ctx context.Context, classroomID, termID, aca
 			if sc.Score == nil {
 				continue
 			}
-			if totals[bucket] == nil {
-				totals[bucket] = map[string]*acc{}
+			if out[bucket] == nil {
+				out[bucket] = map[string]float64{}
 			}
-			a := totals[bucket][sc.StudentID]
-			if a == nil {
-				a = &acc{}
-				totals[bucket][sc.StudentID] = a
+			// First hit wins: exams arrive newest-first.
+			if _, seen := out[bucket][sc.StudentID]; !seen {
+				out[bucket][sc.StudentID] = *sc.Score
 			}
-			a.sum += *sc.Score
-			a.count++
-		}
-	}
-
-	out := map[string]map[string]float64{}
-	for bucket, byStudent := range totals {
-		out[bucket] = make(map[string]float64, len(byStudent))
-		for studentID, a := range byStudent {
-			out[bucket][studentID] = a.sum / float64(a.count)
 		}
 	}
 	return out
