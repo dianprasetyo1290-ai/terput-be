@@ -467,7 +467,8 @@ func (s *Store) ListSubjects(ctx context.Context, reportCardID string) ([]model.
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, report_card_id, school_id, subject_id, subject_name, subject_code, computed_score,
 			formatif_score, sts_score, sas_score, praktik_score,
-			override_score, source_exam_count, grade_label, notes, mid_note, final_note, overridden_by, overridden_at,
+			override_score, source_exam_count, grade_label, notes, mid_note, final_note, mid_note2, final_note2,
+			overridden_by, overridden_at,
 			last_synced_at, sync_error, created_at, updated_at
 		FROM report_card_subjects WHERE report_card_id = $1 ORDER BY subject_name NULLS LAST, created_at`, reportCardID)
 	if err != nil {
@@ -479,13 +480,15 @@ func (s *Store) ListSubjects(ctx context.Context, reportCardID string) ([]model.
 	for rows.Next() {
 		var sub model.ReportCardSubject
 		var subjectName, subjectCode, gradeLabel, notes, midNote, finalNote, overriddenBy, syncError sql.NullString
+		var midNote2, finalNote2 sql.NullString
 		var computedScore, formatifScore, stsScore, sasScore, praktikScore, overrideScore sql.NullFloat64
 		var overriddenAt, lastSyncedAt sql.NullTime
 
 		if err := rows.Scan(
 			&sub.ID, &sub.ReportCardID, &sub.SchoolID, &sub.SubjectID, &subjectName, &subjectCode, &computedScore,
 			&formatifScore, &stsScore, &sasScore, &praktikScore,
-			&overrideScore, &sub.SourceExamCount, &gradeLabel, &notes, &midNote, &finalNote, &overriddenBy, &overriddenAt,
+			&overrideScore, &sub.SourceExamCount, &gradeLabel, &notes, &midNote, &finalNote, &midNote2, &finalNote2,
+			&overriddenBy, &overriddenAt,
 			&lastSyncedAt, &syncError, &sub.CreatedAt, &sub.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -507,6 +510,12 @@ func (s *Store) ListSubjects(ctx context.Context, reportCardID string) ([]model.
 		}
 		if finalNote.Valid {
 			sub.FinalNote = &finalNote.String
+		}
+		if midNote2.Valid {
+			sub.MidNote2 = &midNote2.String
+		}
+		if finalNote2.Valid {
+			sub.FinalNote2 = &finalNote2.String
 		}
 		if subjectName.Valid {
 			sub.SubjectName = &subjectName.String
@@ -586,14 +595,16 @@ func (s *Store) PatchSubjectOverride(ctx context.Context, reportCardID, subjectI
 // for a subject row. Unlike PatchSubjectOverride, a nil value here means
 // "leave unchanged", not "clear" — the two note fields are independent
 // (guru may set one without touching the other).
-func (s *Store) PatchSubjectNotes(ctx context.Context, reportCardID, subjectID string, midNote, finalNote *string) error {
+func (s *Store) PatchSubjectNotes(ctx context.Context, reportCardID, subjectID string, midNote, finalNote, midNote2, finalNote2 *string) error {
 	res, err := s.DB.ExecContext(ctx, `
 		UPDATE report_card_subjects SET
 			mid_note = COALESCE($1, mid_note),
 			final_note = COALESCE($2, final_note),
+			mid_note2 = COALESCE($3, mid_note2),
+			final_note2 = COALESCE($4, final_note2),
 			updated_at = now()
-		WHERE report_card_id = $3 AND subject_id = $4`,
-		midNote, finalNote, reportCardID, subjectID)
+		WHERE report_card_id = $5 AND subject_id = $6`,
+		midNote, finalNote, midNote2, finalNote2, reportCardID, subjectID)
 	if err != nil {
 		return err
 	}

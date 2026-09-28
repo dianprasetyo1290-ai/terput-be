@@ -52,6 +52,11 @@ func (h *Handler) SetNoteTemplate(w http.ResponseWriter, r *http.Request) {
 type subjectNotesBody struct {
 	MidNote   *string `json:"mid_note"`
 	FinalNote *string `json:"final_note"`
+	// Capaian kolom 2 (Report Sekoci V15 item 1). nil still means "leave
+	// unchanged", same rule as the first pair -- each textarea saves on its
+	// own blur and must not wipe its neighbour.
+	MidNote2   *string `json:"mid_note2"`
+	FinalNote2 *string `json:"final_note2"`
 }
 
 // PatchSubjectNotes: PATCH /report-cards/{id}/subjects/{subject_id}/notes —
@@ -90,7 +95,7 @@ func (h *Handler) PatchSubjectNotes(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if err := h.d.Store.PatchSubjectNotes(r.Context(), id, subjectID, body.MidNote, body.FinalNote); err != nil {
+	if err := h.d.Store.PatchSubjectNotes(r.Context(), id, subjectID, body.MidNote, body.FinalNote, body.MidNote2, body.FinalNote2); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			common.WriteError(w, http.StatusNotFound, "subject not found on this report card")
 			return

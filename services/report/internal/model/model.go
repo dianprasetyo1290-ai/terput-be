@@ -40,9 +40,9 @@ type ReportCard struct {
 	Attendance AttendanceSummary `json:"attendance"`
 
 	// Header snapshot fetched from identity/academic-service.
-	StudentName         *string    `json:"student_name,omitempty"`
-	StudentNISN         *string    `json:"student_nisn,omitempty"`
-	ClassroomName       *string    `json:"classroom_name,omitempty"`
+	StudentName   *string `json:"student_name,omitempty"`
+	StudentNISN   *string `json:"student_nisn,omitempty"`
+	ClassroomName *string `json:"classroom_name,omitempty"`
 	// Fase is derived from the classroom's grade_level at read time, never
 	// stored (see handler.resolveFase) -- the rapor form has always had a
 	// "Fase" line with nothing feeding it.
@@ -173,10 +173,15 @@ type ReportCardSubject struct {
 	// couldn't be reached or the school hasn't set a group for this
 	// subject; the print view falls back to a flat ungrouped list in that
 	// case rather than assuming every school groups its subjects this way.
-	SubjectGroup *string    `json:"subject_group,omitempty"`
-	Notes        *string    `json:"notes,omitempty"`
-	MidNote      *string    `json:"mid_note,omitempty"`   // Deskripsi Rapor: Capaian STS
-	FinalNote    *string    `json:"final_note,omitempty"` // Deskripsi Rapor: Capaian SAS
+	SubjectGroup *string `json:"subject_group,omitempty"`
+	Notes        *string `json:"notes,omitempty"`
+	MidNote      *string `json:"mid_note,omitempty"`   // Deskripsi Rapor: Capaian STS (kolom 1)
+	FinalNote    *string `json:"final_note,omitempty"` // Deskripsi Rapor: Capaian SAS (kolom 1)
+	// Capaian kolom 2 (Report Sekoci V15 item 1). Separate columns rather
+	// than a single array: the rapor template merges each box into its own
+	// placeholder, and every stored rapor already has exactly one of each.
+	MidNote2     *string    `json:"mid_note2,omitempty"`
+	FinalNote2   *string    `json:"final_note2,omitempty"`
 	OverriddenBy *string    `json:"overridden_by,omitempty"`
 	OverriddenAt *time.Time `json:"overridden_at,omitempty"`
 	LastSyncedAt *time.Time `json:"last_synced_at,omitempty"`
@@ -423,8 +428,10 @@ var MergeParameterGroups = []MergeParameterGroup{
 			{"pts", "Nilai PTS/STS"},
 			{"pas", "Nilai PAS/SAS"},
 			{"predikat", "Predikat dari interval nilai sekolah"},
-			{"capaian", "Deskripsi Capaian Pembelajaran"},
-			{"kemajuan", "Deskripsi Kemajuan Belajar"},
+			{"capaian", "Deskripsi Capaian Pembelajaran (Capaian SAS kolom 1)"},
+			{"kemajuan", "Deskripsi Kemajuan Belajar (Capaian STS kolom 1)"},
+			{"capaian2", "Capaian SAS kolom 2"},
+			{"kemajuan2", "Capaian STS kolom 2"},
 		},
 	},
 	{

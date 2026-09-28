@@ -169,6 +169,10 @@ func buildMergeData(rc *model.ReportCard) docx.Data {
 			"predikat":    str(s.GradeLabel),
 			"capaian":     str(s.FinalNote),
 			"kemajuan":    str(s.MidNote),
+			// Capaian kolom 2 (Report Sekoci V15 item 1): a second box per
+			// bucket, its own placeholder so a template can print both.
+			"capaian2":  str(s.FinalNote2),
+			"kemajuan2": str(s.MidNote2),
 		}
 		loops["mapel"] = append(loops["mapel"], item)
 		if l := groupLetter(s.SubjectGroup); l != "" {
@@ -204,6 +208,45 @@ func templateTypeFor(rc *model.ReportCard) string {
 	return "akhir_semester"
 }
 
+// templateSlotLabel names an Import Template slot the way Generate Rapor >
+// Import Template labels it, so a "template belum diunggah" error can point
+// at the row the admin has to fill.
+//
+// Report Sekoci V15 item 2: a guru downloading from Deskripsi Rapor always
+// got "belum ada template untuk tipe rapor ini" while the admin could see a
+// template sitting right there on Generate Rapor -- so it read as the system
+// failing to see its own upload. It was a different slot. Deskripsi Rapor
+// lists report_type "semester" cards only (GetSubjectDescriptionGrid), which
+// need the akhir_semester slot, and every school that had uploaded anything
+// had filled tengah_semester instead. Naming the slot is the whole fix; the
+// slots are deliberately separate documents and must not fall back to each
+// other.
+func templateSlotLabel(templateType string) string {
+	switch templateType {
+	case "tengah_semester":
+		return "Rapor tengah semester (3 bulan)"
+	case "akhir_semester":
+		return "Rapor akhir semester (6 bulan)"
+	case "akhir_semester_hal2":
+		return "Rapor akhir semester (6 bulan) Halaman 2"
+	}
+	return templateType
+}
+
+// usableDocx: an Import Template slot only helps if it actually holds a Word
+// file -- the Halaman 2 slot commonly holds an .xlsx.
+func usableDocx(t *model.ReportTemplate) bool {
+	return t != nil && strings.HasSuffix(strings.ToLower(t.FileName), ".docx")
+}
+
+// missingTemplateMsg explains which slot is empty and, crucially, that a
+// template in another slot is not a substitute.
+func missingTemplateMsg(rc *model.ReportCard) string {
+	return fmt.Sprintf(
+		"Sekolah belum mengunggah template Word (.docx) untuk slot %q, dan tidak ada template Word di slot lain yang bisa dipakai. Unggah lewat Generate Rapor > Import Template.",
+		templateSlotLabel(templateTypeFor(rc)))
+}
+
 // renderCardDocx loads a card in full (subjects, groups, school) and merges
 // it through the school's uploaded .docx. Returns a nil body with no error
 // when the school has no .docx for that slot -- the caller decides whether
@@ -213,7 +256,25 @@ func (h *Handler) renderCardDocx(r *http.Request, rc *model.ReportCard) ([]byte,
 	if err != nil {
 		return nil, "", err
 	}
-	if t == nil || !strings.HasSuffix(strings.ToLower(t.FileName), ".docx") {
+	if !usableDocx(t) {
+		// Report Sekoci V15 item 2: the school HAS a Word rapor template, just
+		// in the other slot, and a guru clicking Unduh Word got a dead end that
+		// read like the system ignoring the admin's upload. Every slot holds
+		// the same merge fields, so falling back to whichever .docx the school
+		// did upload produces a usable rapor instead of nothing. The error
+		// below still fires when there is genuinely no .docx anywhere.
+		for _, alt := range model.ReportTemplateTypes {
+			if alt == templateTypeFor(rc) {
+				continue
+			}
+			at, araw, aerr := h.d.Store.GetReportTemplateFile(r.Context(), rc.SchoolID, alt)
+			if aerr == nil && usableDocx(at) {
+				t, raw = at, araw
+				break
+			}
+		}
+	}
+	if !usableDocx(t) {
 		return nil, "", nil
 	}
 	subjects, err := h.d.Store.ListSubjects(r.Context(), rc.ID)
@@ -274,8 +335,7 @@ func (h *Handler) DownloadReportCardDocx(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if out == nil {
-		common.WriteError(w, http.StatusNotFound,
-			"belum ada template .docx untuk tipe rapor ini -- unggah lewat Generate Rapor > Import Template")
+		common.WriteError(w, http.StatusNotFound, missingTemplateMsg(rc))
 		return
 	}
 	name := safeFileName(str(rc.StudentName)) + " - Rapor.docx"

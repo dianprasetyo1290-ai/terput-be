@@ -27,6 +27,9 @@ type descriptionRow struct {
 	PraktikScore *float64 `json:"praktik_score"`
 	MidNote      *string  `json:"mid_note"`
 	FinalNote    *string  `json:"final_note"`
+	// Capaian kolom 2 (Report Sekoci V15 item 1).
+	MidNote2   *string `json:"mid_note2"`
+	FinalNote2 *string `json:"final_note2"`
 }
 
 // GetSubjectDescriptionGrid: GET /classrooms/{id}/subjects/{subject_id}/description?term_id=
@@ -104,6 +107,7 @@ func (h *Handler) GetSubjectDescriptionGrid(w http.ResponseWriter, r *http.Reque
 				ComputedScore: sub.ComputedScore, FormatifScore: sub.FormatifScore, OverrideScore: sub.OverrideScore, FinalScore: sub.Final(),
 				StsScore: sub.StsScore, SasScore: sub.SasScore, PraktikScore: sub.PraktikScore,
 				MidNote: sub.MidNote, FinalNote: sub.FinalNote,
+				MidNote2: sub.MidNote2, FinalNote2: sub.FinalNote2,
 			})
 		}
 	}

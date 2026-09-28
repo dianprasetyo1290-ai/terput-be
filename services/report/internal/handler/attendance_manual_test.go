@@ -9,7 +9,7 @@ func ip(v int) *int { return &v }
 // legal document, not a cosmetic bug.
 func TestValidAttendanceCounts(t *testing.T) {
 	ok := []attendanceBody{
-		{},                                                // all blank -> rapor prints "-"
+		{}, // all blank -> rapor prints "-"
 		{Sakit: ip(0), Izin: ip(0), TanpaKeterangan: ip(0)}, // a perfect attendance record
 		{Sakit: ip(3), Izin: ip(1), TanpaKeterangan: ip(12)},
 		{Sakit: ip(2)}, // partial fill is fine

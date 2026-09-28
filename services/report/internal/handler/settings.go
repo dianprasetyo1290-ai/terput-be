@@ -82,15 +82,11 @@ func (h *Handler) CreateAssessmentType(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if !isAdmin(claims) {
-		// A guru gets exactly one shape: a plain extra formatif column.
-		// bucket sts/sas would divert scores into the rapor's exam-linked
-		// buckets, and weight_percent/exam_linked are rapor-formula
-		// concerns that stay with admin.
-		body.Bucket = "formatif"
-		body.WeightPercent = 0
-		body.ExamLinked = false
-	}
+	// Report Sekoci V15 item 3 lifts the guru pinning that used to force
+	// bucket=formatif, weight=0, exam_linked=false here: a guru now picks
+	// kode, bucket, bobot and "terhubung ujian" from the same form admin has,
+	// because a tipe with no bobot never reached the rapor formula and the
+	// guru could not see why. Update/Delete stay admin-only.
 	body.Code = strings.TrimSpace(body.Code)
 	body.Name = strings.TrimSpace(body.Name)
 	if body.Code == "" || body.Name == "" || !validBucket(body.Bucket) {
