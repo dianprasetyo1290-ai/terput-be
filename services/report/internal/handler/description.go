@@ -55,8 +55,20 @@ func (h *Handler) GetSubjectDescriptionGrid(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Jenis Ujian drives WHICH rapor the capaian is written on: STS is the
+	// tengah-semester rapor ("bayangan"/Nilai Sementara), SAS the full
+	// semester one. This used to be hardcoded to "semester", so a guru
+	// filling Capaian STS was editing the akhir-semester rapor and their
+	// Unduh Rapor asked for the akhir_semester template -- the slot most
+	// schools had left empty while their tengah_semester template sat
+	// unused.
+	reportType := r.URL.Query().Get("report_type")
+	if reportType != "bayangan" {
+		reportType = "semester"
+	}
+
 	ctx := r.Context()
-	cards, err := h.d.Store.ListReportCardsByClassroomTerm(ctx, classroomID, termID, "semester", "")
+	cards, err := h.d.Store.ListReportCardsByClassroomTerm(ctx, classroomID, termID, reportType, "")
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to fetch report cards")
 		return

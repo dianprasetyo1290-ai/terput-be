@@ -22,3 +22,22 @@ func TestMissingTemplateMsgNamesTheSlot(t *testing.T) {
 		}
 	}
 }
+
+// Kolom 2 must reach the printed rapor: no school's uploaded .docx mentions
+// capaian2, so both boxes have to merge into the one placeholder they do have.
+func TestJoinNotesMergesBothCapaianBoxes(t *testing.T) {
+	p := func(s string) *string { return &s }
+	for _, tc := range []struct {
+		a, b *string
+		want string
+	}{
+		{p("Sudah mampu membaca."), p("Perlu latihan menulis."), "Sudah mampu membaca. Perlu latihan menulis."},
+		{p("Hanya kolom 1."), nil, "Hanya kolom 1."},
+		{nil, p("Hanya kolom 2."), "Hanya kolom 2."},
+		{p("  "), nil, ""},
+	} {
+		if got := joinNotes(tc.a, tc.b); got != tc.want {
+			t.Errorf("joinNotes = %q, want %q", got, tc.want)
+		}
+	}
+}
