@@ -167,15 +167,13 @@ func buildMergeData(rc *model.ReportCard) docx.Data {
 			"pts":         fmtScore(s.StsScore),
 			"pas":         fmtScore(s.SasScore),
 			"predikat":    str(s.GradeLabel),
-			// Both capaian boxes land in the one placeholder schools already
-			// have in their template. Kolom 2 was being saved and then never
-			// printed, because no uploaded .docx mentions capaian2 -- the
-			// column existed only in the guru's screen. Templates that DO
-			// split them can still use capaian2/kemajuan2 below.
-			"capaian":     joinNotes(s.FinalNote, s.FinalNote2),
-			"kemajuan":    joinNotes(s.MidNote, s.MidNote2),
-			// Capaian kolom 2 (Report Sekoci V15 item 1): a second box per
-			// bucket, its own placeholder so a template can print both.
+			// One placeholder per box, never merged: V21 reports a template
+			// carrying BOTH {{kemajuan}} and {{kemajuan2}}, where filling the
+			// first with kolom 1 + kolom 2 printed kolom 2 twice. A school
+			// whose template omits capaian2/kemajuan2 simply does not print
+			// kolom 2 -- that is the template's choice, not ours to merge.
+			"capaian":   str(s.FinalNote),
+			"kemajuan":  str(s.MidNote),
 			"capaian2":  str(s.FinalNote2),
 			"kemajuan2": str(s.MidNote2),
 		}
@@ -236,18 +234,6 @@ func templateSlotLabel(templateType string) string {
 		return "Rapor akhir semester (6 bulan) Halaman 2"
 	}
 	return templateType
-}
-
-// joinNotes runs the two capaian boxes of one bucket together as a single
-// paragraph, skipping whichever is empty.
-func joinNotes(a, b *string) string {
-	parts := []string{}
-	for _, p := range []*string{a, b} {
-		if p != nil && strings.TrimSpace(*p) != "" {
-			parts = append(parts, strings.TrimSpace(*p))
-		}
-	}
-	return strings.Join(parts, " ")
 }
 
 // usableDocx: an Import Template slot only helps if it actually holds a Word

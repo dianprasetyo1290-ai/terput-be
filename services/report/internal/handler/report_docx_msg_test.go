@@ -24,20 +24,22 @@ func TestMissingTemplateMsgNamesTheSlot(t *testing.T) {
 }
 
 // Kolom 2 must reach the printed rapor: no school's uploaded .docx mentions
-// capaian2, so both boxes have to merge into the one placeholder they do have.
-func TestJoinNotesMergesBothCapaianBoxes(t *testing.T) {
+// V21: a school template may carry BOTH {{kemajuan}} and {{kemajuan2}}, so
+// each capaian placeholder must hold only its own box -- merging kolom 1+2
+// into the first one printed kolom 2 twice.
+func TestMergeDataKeepsCapaianBoxesApart(t *testing.T) {
 	p := func(s string) *string { return &s }
-	for _, tc := range []struct {
-		a, b *string
-		want string
-	}{
-		{p("Sudah mampu membaca."), p("Perlu latihan menulis."), "Sudah mampu membaca. Perlu latihan menulis."},
-		{p("Hanya kolom 1."), nil, "Hanya kolom 1."},
-		{nil, p("Hanya kolom 2."), "Hanya kolom 2."},
-		{p("  "), nil, ""},
+	rc := &model.ReportCard{Subjects: []model.ReportCardSubject{{
+		MidNote: p("STS kolom 1"), MidNote2: p("STS kolom 2"),
+		FinalNote: p("SAS kolom 1"), FinalNote2: p("SAS kolom 2"),
+	}}}
+	item := buildMergeData(rc).Loops["mapel"][0]
+	for field, want := range map[string]string{
+		"kemajuan": "STS kolom 1", "kemajuan2": "STS kolom 2",
+		"capaian": "SAS kolom 1", "capaian2": "SAS kolom 2",
 	} {
-		if got := joinNotes(tc.a, tc.b); got != tc.want {
-			t.Errorf("joinNotes = %q, want %q", got, tc.want)
+		if item[field] != want {
+			t.Errorf("%s = %q, want %q", field, item[field], want)
 		}
 	}
 }
