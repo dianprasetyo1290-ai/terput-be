@@ -576,7 +576,7 @@ func (s *Store) LarangUjianPreEntry(ctx context.Context, examID, userID, byUserI
 	return attemptID, nil
 }
 
-// LarangUjian (admin only, belum_mulai -> dilarang). Alasan is required.
+// LarangUjian (belum_mulai -> dilarang). Alasan is required.
 func (s *Store) LarangUjian(ctx context.Context, attemptID, byUserID, reason string) error {
 	res, err := s.DB.ExecContext(ctx, `
 		UPDATE exam_attempts SET status='dilarang', banned_at=now(), banned_reason=$1, banned_by=$2, updated_at=now()

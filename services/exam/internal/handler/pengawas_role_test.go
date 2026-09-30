@@ -78,6 +78,15 @@ func handlerRoles(t *testing.T) map[string][]string {
 // /GetFolder/ListQuestions/GetQuestion carry no requireRole at all, so they
 // are reachable; every write does and must exclude pengawas), and it must
 // never touch a soal, a poin or a nilai.
+func has(list []string, role string) bool {
+	for _, r := range list {
+		if r == role {
+			return true
+		}
+	}
+	return false
+}
+
 func TestPengawasRoleBoundary(t *testing.T) {
 	roles := handlerRoles(t)
 
@@ -95,14 +104,6 @@ func TestPengawasRoleBoundary(t *testing.T) {
 		"BulkIssueTokens", "IssueToken", "RegenerateToken",
 	}
 
-	has := func(list []string, role string) bool {
-		for _, r := range list {
-			if r == role {
-				return true
-			}
-		}
-		return false
-	}
 	for _, name := range mustAllow {
 		got, ok := roles[name]
 		if !ok {
@@ -124,6 +125,27 @@ func TestPengawasRoleBoundary(t *testing.T) {
 		}
 		if has(got, "siswa") {
 			t.Errorf("%s: siswa must never be allowed, got %v", name, got)
+		}
+	}
+}
+
+// TestGuruMayActOnOwnExamMonitor pins V23: Pantau Ujian Langsung shows
+// "Larang Ujian" and "Buka Larangan" to a guru with no role gating in the
+// template, but the handlers excluded guru -- every click came back 403 and
+// the UI rendered it as "Gagal memproses aksi. Cek status siswa saat ini".
+// Guru belongs here: it already has Blokir/BukaBlokir/Reset/AccNilai, which
+// are heavier, and loadAttemptForAction/loadExamForAction pin a guru to
+// their own exam.
+func TestGuruMayActOnOwnExamMonitor(t *testing.T) {
+	roles := handlerRoles(t)
+	for _, name := range []string{"LarangUjian", "LarangUjianByUser", "BukaLarangan"} {
+		got, ok := roles[name]
+		if !ok {
+			t.Errorf("%s: no requireRole found -- handler renamed or gate dropped", name)
+			continue
+		}
+		if !has(got, "guru") {
+			t.Errorf("%s: guru not allowed, got %v -- the V23 403 is back", name, got)
 		}
 	}
 }

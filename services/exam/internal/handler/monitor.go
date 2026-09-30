@@ -311,10 +311,12 @@ type reasonReq struct {
 	Alasan string `json:"alasan"`
 }
 
-// LarangUjian: admin only, belum_mulai -> dilarang, required Alasan.
+// LarangUjian: belum_mulai -> dilarang, required Alasan. Guru included
+// (V23): the guru running the exam already has Blokir/Reset/ACC, and
+// loadAttemptForAction below pins a guru to their own exam.
 func (h *Handler) LarangUjian(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin", "pengawas") {
+	if !requireRole(w, c, "admin", "superadmin", "guru", "pengawas") {
 		return
 	}
 	attemptID, exam, ok := h.loadAttemptForAction(w, r, c)
@@ -346,7 +348,7 @@ func (h *Handler) LarangUjian(w http.ResponseWriter, r *http.Request) {
 // by userId instead of attemptId for exactly that reason.
 func (h *Handler) LarangUjianByUser(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin", "pengawas") {
+	if !requireRole(w, c, "admin", "superadmin", "guru", "pengawas") {
 		return
 	}
 	examID := chi.URLParam(r, "id")
@@ -387,7 +389,7 @@ func (h *Handler) LarangUjianByUser(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) BukaLarangan(w http.ResponseWriter, r *http.Request) {
 	c := common.FromCtx(r)
-	if !requireRole(w, c, "admin", "superadmin", "pengawas") {
+	if !requireRole(w, c, "admin", "superadmin", "guru", "pengawas") {
 		return
 	}
 	attemptID, _, ok := h.loadAttemptForAction(w, r, c)
