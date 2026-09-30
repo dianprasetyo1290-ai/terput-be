@@ -139,6 +139,25 @@ func (h *Handler) UpsertFormativeGrades(w http.ResponseWriter, r *http.Request) 
 		common.WriteError(w, http.StatusBadRequest, "term_id, classroom_subject_id, student_id and assessment_type_id are required")
 		return
 	}
+
+	// Verify that the guru is assigned to teach this classroom_subject
+	if h.d != nil && h.d.Academic != nil {
+		assignments, err := h.d.Academic.ListTeachingAssignments(r.Context(), claims.UserID, "")
+		if err == nil && len(assignments) > 0 {
+			assigned := false
+			for _, a := range assignments {
+				if a.ClassroomSubjectID == body.ClassroomSubjectID {
+					assigned = true
+					break
+				}
+			}
+			if !assigned {
+				common.WriteError(w, http.StatusForbidden, "guru is not assigned to this classroom subject")
+				return
+			}
+		}
+	}
+
 	if err := h.d.Store.UpsertFormativeScore(r.Context(), claims.SchoolID, body.TermID, body.ClassroomSubjectID, body.StudentID, body.AssessmentTypeID, body.Score, claims.UserID); err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to save formative grade")
 		return
