@@ -222,6 +222,48 @@ services:
       EXAM_SERVICE_URL: http://exam:${EXAM_PORT}
     ports: ["${REPORT_PORT}:${REPORT_PORT}"]
 
+  # ---------- accounting ----------
+  # Laravel, served under /accounting/ by `web` (see web/nginx.conf). No
+  # accounting-migrate sidecar: its entrypoint migrates only the shared `public`
+  # infrastructure tables, and each school's own schema is created by
+  # `docker compose exec accounting php artisan accounting:provision <school_id>`
+  # run deliberately per school -- NOT automatic on first SSO, because it seeds
+  # baseline data. Until it runs, /sso answers 403 for that school.
+  accounting:
+    build: ./services/accounting
+    restart: unless-stopped
+    depends_on:
+      # /sso verifies the Sekoci JWT and then asks identity whether this school
+      # has the accounting feature switched on.
+      identity:
+        condition: service_started
+    environment:
+      APP_NAME: "${ACCOUNTING_APP_NAME:-Sekoci Accounting}"
+      APP_ENV: "${ACCOUNTING_APP_ENV:-production}"
+      APP_KEY: "${ACCOUNTING_APP_KEY:-change-me}"
+      APP_DEBUG: "${ACCOUNTING_APP_DEBUG:-false}"
+      APP_URL: "${ACCOUNTING_APP_URL:-https://app.sekoci.id/accounting}"
+      DB_CONNECTION: pgsql
+      DB_HOST: ${POSTGRES_HOST}
+      DB_PORT: ${POSTGRES_PORT}
+      DB_DATABASE: ${ACCOUNTING_DB_NAME:-skci_accounting}
+      DB_USERNAME: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      SESSION_DRIVER: database
+      SESSION_PATH: /
+      CACHE_STORE: database
+      LOG_CHANNEL: stack
+      LOG_LEVEL: info
+      # Served from a sub-path, so every asset()/url() must carry it.
+      ASSET_URL: "${ACCOUNTING_ASSET_URL:-/accounting}"
+      # SSO: verifies the Sekoci JWT (same secret as the 6 Go services) and
+      # then asks identity, with the shared internal key, whether this school
+      # may use accounting at all.
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      IDENTITY_SERVICE_URL: http://identity:${IDENTITY_PORT}
+    ports: ["${ACCOUNTING_PORT:-8087}:80"]
+
   # ---------- web (frontend, nginx reverse-proxying /api/<service>/) ----------
   web:
     build:
@@ -236,4 +278,5 @@ services:
       - exam
       - evaluation
       - report
+      - accounting
     ports: ["80:80"]

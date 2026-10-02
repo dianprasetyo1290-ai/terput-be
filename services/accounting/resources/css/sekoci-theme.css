@@ -1,0 +1,779 @@
+/* ============================================================================
+   Sekoci theme for the Laravel accounting app.
+
+   Maps the Bootstrap 4 / limitless markup actually used in
+   resources/views/** onto the Sekoci design tokens from web/src/style.css, so
+   the iframe content (and the standalone page) reads as part of Sekoci.
+
+   Loaded AFTER public/limitless/**.css (head.blade.php) and after
+   resources/css/app.css, so plain selectors already win the cascade;
+   `!important` is used only where limitless/Blade uses it too, and every
+   occurrence says why.
+
+   Font note: DESIGN.md says "Inter", but the real Sekoci SPA
+   (web/src/style.css) ships Fira Sans Condensed. Matching the running app
+   wins here, with Inter kept as the first fallback.
+   ========================================================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Fira+Sans+Condensed:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --sekoci-navy: #1a56db;
+  --sekoci-navy-soft: rgba(26, 86, 219, 0.08);
+  --sekoci-teal: #377dff;
+  --sekoci-teal-soft: #eef2ff;
+  --sekoci-white: #ffffff;
+  --sekoci-text: #101828;
+  --sekoci-text-muted: #667085;
+  --sekoci-border: #e4e7ec;
+  --sekoci-bg: #f7f9fc;
+  --sekoci-danger: #dc2626;
+  --sekoci-success: #16a34a;
+  --sekoci-warning: #d97706;
+
+  --sekoci-font: 'Fira Sans Condensed', Inter, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', sans-serif;
+  --sekoci-radius: 8px;
+  --sekoci-radius-lg: 12px;
+}
+
+/* --- base ---------------------------------------------------------------- */
+
+body {
+  font-family: var(--sekoci-font);
+  background: var(--sekoci-bg);
+  color: var(--sekoci-text);
+  font-size: 0.9rem;
+}
+
+/* limitless/bootstrap set font-family per component, not inherited */
+.btn,
+.form-control,
+.custom-select,
+.table,
+.card,
+.navbar,
+.sidebar,
+.modal,
+.dropdown-menu,
+.badge,
+.nav,
+.breadcrumb,
+.alert,
+.select2-container {
+  font-family: var(--sekoci-font);
+}
+
+a {
+  color: var(--sekoci-navy);
+}
+
+.page-content,
+.content-wrapper {
+  background: var(--sekoci-bg);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--sekoci-text);
+}
+
+.text-muted {
+  color: var(--sekoci-text-muted);
+}
+
+/* --- page header / breadcrumb ------------------------------------------- */
+
+.page-header.page-header-light {
+  background: transparent;
+  border-bottom: 0;
+}
+.page-header .page-title h4 {
+  font-size: 1.4rem;
+  color: var(--sekoci-navy);
+  margin: 0;
+}
+/* the back-arrow glyph in page-header.blade.php is decorative noise next to
+   Sekoci's plain h1 */
+.page-header .page-title h4 > .icon-arrow-left52 {
+  display: none;
+}
+.page-header .breadcrumb-line {
+  background: transparent;
+  border-top: 0;
+  border-bottom: 0;
+}
+.page-header .breadcrumb {
+  padding-left: 0;
+  font-size: 0.8rem;
+  color: var(--sekoci-text-muted);
+}
+.page-header .breadcrumb-item,
+.page-header .breadcrumb-item > a {
+  color: var(--sekoci-text-muted);
+}
+.page-header .breadcrumb-item > a:hover {
+  color: var(--sekoci-navy);
+}
+
+/* --- buttons ------------------------------------------------------------ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1rem;
+  border-radius: var(--sekoci-radius);
+  border: 1px solid transparent;
+  font-weight: 600;
+  font-size: 0.9rem;
+  line-height: 1.2;
+  box-shadow: none;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+.btn:hover {
+  opacity: 0.88;
+  box-shadow: none;
+}
+.btn:focus,
+.btn.focus {
+  box-shadow: 0 0 0 3px var(--sekoci-navy-soft);
+}
+.btn:disabled,
+.btn.disabled {
+  opacity: 0.45;
+}
+.btn-sm,
+.btn-group-sm > .btn {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.8rem;
+}
+.btn-lg,
+.btn-group-lg > .btn {
+  padding: 0.65rem 1.25rem;
+  font-size: 0.95rem;
+}
+
+.btn-primary,
+.btn-primary:not(:disabled):not(.disabled):active,
+.btn-primary:focus {
+  background: var(--sekoci-navy);
+  border-color: var(--sekoci-navy);
+  color: var(--sekoci-white);
+}
+.btn-primary:hover {
+  background: var(--sekoci-navy);
+  border-color: var(--sekoci-navy);
+  color: var(--sekoci-white);
+}
+
+.btn-danger,
+.btn-danger:hover,
+.btn-danger:focus,
+.btn-danger:not(:disabled):not(.disabled):active {
+  background: var(--sekoci-danger);
+  border-color: var(--sekoci-danger);
+  color: var(--sekoci-white);
+}
+
+.btn-success,
+.btn-success:hover,
+.btn-success:focus,
+.btn-success:not(:disabled):not(.disabled):active {
+  background: var(--sekoci-success);
+  border-color: var(--sekoci-success);
+  color: var(--sekoci-white);
+}
+
+/* Sekoci has no filled "secondary" — its second-rank button is .btn-outline.
+   .btn-light / .btn-secondary / .alpha-indigo (limitless' dropdown trigger
+   used all over the list toolbars) and the disabled .bg-slate-600 spinner
+   buttons all map onto that one look. */
+.btn-secondary,
+.btn-light,
+.btn.alpha-indigo,
+a.btn.alpha-indigo {
+  background: var(--sekoci-white);
+  border: 1px solid var(--sekoci-border);
+  color: var(--sekoci-text);
+}
+.btn-secondary:hover,
+.btn-light:hover,
+.btn.alpha-indigo:hover {
+  background: var(--sekoci-bg);
+  border-color: var(--sekoci-border);
+  color: var(--sekoci-navy);
+}
+.btn.bg-slate-600 {
+  /* limitless' bg-* helpers in colors.css are !important */
+  background-color: var(--sekoci-bg) !important;
+  color: var(--sekoci-text-muted) !important;
+  border-color: var(--sekoci-border);
+}
+.btn-outline-info {
+  background: transparent;
+  border-color: var(--sekoci-border);
+  color: var(--sekoci-navy);
+}
+.btn-outline-info:hover {
+  background: var(--sekoci-teal-soft);
+  border-color: var(--sekoci-teal-soft);
+  color: var(--sekoci-navy);
+}
+
+.btn-group > .btn:not(:first-child),
+.btn-group > .btn:not(:last-child) {
+  border-radius: var(--sekoci-radius);
+}
+
+/* --- cards -------------------------------------------------------------- */
+
+.content-wrapper .card,
+.content .card {
+  background: var(--sekoci-white);
+  border: 1px solid var(--sekoci-border);
+  border-radius: var(--sekoci-radius-lg);
+  box-shadow: none;
+  margin-bottom: 1rem;
+}
+.content-wrapper .card-header,
+.content .card-header {
+  background: var(--sekoci-white);
+  border-bottom: 1px solid var(--sekoci-border);
+  padding: 1rem 1.25rem;
+}
+/* list pages put the search/sort toolbar in a second .card-header mid-card */
+.content-wrapper .card-body + .card-header,
+.content-wrapper .card-header + .card-header {
+  border-top: 1px solid var(--sekoci-border);
+}
+.content-wrapper .card-title,
+.content .card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--sekoci-text);
+  margin: 0;
+}
+.content-wrapper .card-body,
+.content .card-body {
+  padding: 1.25rem;
+}
+.content-wrapper .card-footer,
+.content .card-footer {
+  background: var(--sekoci-white);
+  border-top: 1px solid var(--sekoci-border);
+  padding: 0.75rem 1.25rem;
+}
+.card fieldset > legend {
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--sekoci-text-muted);
+  border-bottom: 1px solid var(--sekoci-border);
+  padding-bottom: 0.5rem;
+}
+
+/* --- tables ------------------------------------------------------------- */
+
+.table {
+  color: var(--sekoci-text);
+  margin-bottom: 0;
+}
+.table thead th {
+  text-align: left;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--sekoci-text-muted);
+  background: var(--sekoci-white);
+  border-top: 0;
+  border-bottom: 2px solid var(--sekoci-border);
+  padding: 0.6rem 0.75rem;
+  white-space: nowrap;
+}
+.table td {
+  font-size: 0.9rem;
+  padding: 0.6rem 0.75rem;
+  border-top: 0;
+  border-bottom: 1px solid var(--sekoci-border);
+  vertical-align: middle;
+}
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.table tfoot th,
+.table tfoot td {
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: var(--sekoci-bg);
+  border-top: 2px solid var(--sekoci-border);
+  padding: 0.6rem 0.75rem;
+}
+.table-hover tbody tr:hover {
+  background: var(--sekoci-navy-soft);
+}
+.table-striped tbody tr:nth-of-type(odd) {
+  background: rgba(247, 249, 252, 0.7);
+}
+.table-bordered,
+.table-bordered th,
+.table-bordered td {
+  border-color: var(--sekoci-border);
+}
+/* the wrapper every list page puts around .table */
+.datatable-scroll {
+  border: 1px solid var(--sekoci-border);
+  border-radius: var(--sekoci-radius-lg);
+  overflow-x: auto;
+}
+/* limitless/datatables markup leaks .odd / .sorting_1 greys */
+.table tbody tr.odd,
+.table tbody tr.even,
+.table td.sorting_1 {
+  background: transparent;
+}
+.dataTables_filter label {
+  margin-bottom: 0;
+}
+
+/* --- forms -------------------------------------------------------------- */
+
+.form-control,
+.custom-select {
+  height: auto;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.9rem;
+  color: var(--sekoci-text);
+  background-color: var(--sekoci-white);
+  border: 1px solid var(--sekoci-border);
+  border-radius: var(--sekoci-radius);
+  box-shadow: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.form-control::placeholder {
+  color: var(--sekoci-text-muted);
+}
+.form-control:focus,
+.custom-select:focus {
+  border-color: var(--sekoci-navy);
+  box-shadow: 0 0 0 3px var(--sekoci-navy-soft);
+}
+.form-control-sm {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.82rem;
+}
+/* .form-control-lg is used on the select2 selects only — keep the same box as
+   everything else so a form doesn't mix two input heights */
+.form-control-lg {
+  padding: 0.55rem 0.7rem;
+  font-size: 0.9rem;
+  border-radius: var(--sekoci-radius);
+}
+.form-control[readonly],
+.form-control:disabled,
+.form-control.bg-light {
+  background-color: var(--sekoci-bg) !important; /* .bg-light in colors.css is !important */
+  color: var(--sekoci-text-muted);
+}
+.form-control.is-invalid,
+.form-control.is-invalid:focus {
+  border-color: var(--sekoci-danger);
+}
+.form-control.is-invalid:focus {
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+}
+.invalid-feedback,
+.form-text.text-danger,
+.text-danger {
+  color: var(--sekoci-danger);
+  font-size: 0.78rem;
+}
+.col-form-label,
+.form-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--sekoci-text-muted);
+}
+.form-text {
+  font-size: 0.78rem;
+  color: var(--sekoci-text-muted);
+}
+.input-group > .form-control {
+  border-radius: var(--sekoci-radius);
+}
+.input-group-prepend > .input-group-text,
+.input-group-append > .input-group-text {
+  background: var(--sekoci-bg);
+  border: 1px solid var(--sekoci-border);
+  color: var(--sekoci-text-muted);
+  font-size: 0.85rem;
+  border-radius: var(--sekoci-radius);
+}
+.input-group > .input-group-prepend > .input-group-text,
+.input-group > .input-group-prepend > .btn {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.input-group > .input-group-prepend ~ .form-control {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.input-group > .input-group-append > .input-group-text,
+.input-group > .input-group-append > .btn {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.input-group > .form-control:not(:last-child) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.input-group .form-control:focus {
+  z-index: 3;
+}
+
+/* select2 (footer-scripts.blade.php replaces .select-search* selects with it) */
+.select2-container--default .select2-selection--single {
+  height: auto;
+  min-height: calc(0.55rem * 2 + 1.35rem + 2px);
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--sekoci-border);
+  border-radius: var(--sekoci-radius);
+}
+.select2-container--default .select2-selection--single .select2-selection__rendered {
+  padding-left: 0;
+  line-height: 1.35rem;
+  color: var(--sekoci-text);
+  font-size: 0.9rem;
+}
+.select2-container--default .select2-selection--single .select2-selection__arrow {
+  height: 100%;
+  color: var(--sekoci-text-muted);
+}
+.select2-container--default.select2-container--focus .select2-selection--single,
+.select2-container--default.select2-container--open .select2-selection--single {
+  border-color: var(--sekoci-navy);
+  box-shadow: 0 0 0 3px var(--sekoci-navy-soft);
+}
+.select2-dropdown {
+  border: 1px solid var(--sekoci-border);
+  border-radius: var(--sekoci-radius);
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.1);
+}
+.select2-results__option {
+  font-size: 0.9rem;
+  padding: 0.5rem 0.7rem;
+}
+.select2-container--default .select2-results__option--highlighted[aria-selected] {
+  background: var(--sekoci-teal-soft);
+  color: var(--sekoci-navy);
+}
+.select2-container--default .select2-search--dropdown .select2-search__field {
+  border: 1px solid var(--sekoci-border);
+  border-radius: var(--sekoci-radius);
+  padding: 0.45rem 0.6rem;
+}
+
+/* --- badges ------------------------------------------------------------- */
+
+.badge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--sekoci-teal-soft);
+  color: var(--sekoci-navy);
+}
+/* limitless' .badge-* / .bg-* colors come from colors.css with !important */
+.badge-success,
+.badge.bg-success {
+  background-color: rgba(22, 163, 74, 0.1) !important;
+  color: var(--sekoci-success) !important;
+}
+.badge-warning {
+  background-color: rgba(217, 119, 6, 0.1) !important;
+  color: var(--sekoci-warning) !important;
+}
+.badge-danger {
+  background-color: rgba(220, 38, 38, 0.1) !important;
+  color: var(--sekoci-danger) !important;
+}
+.badge-secondary,
+.badge-light {
+  background-color: var(--sekoci-bg) !important;
+  color: var(--sekoci-text-muted) !important;
+}
+
+/* --- tabs --------------------------------------------------------------- */
+
+.nav-tabs {
+  border-bottom: 1px solid var(--sekoci-border);
+}
+.nav-tabs .nav-link {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--sekoci-text-muted);
+  background: transparent;
+}
+.nav-tabs .nav-link:hover {
+  color: var(--sekoci-navy);
+  background: transparent;
+}
+.nav-tabs .nav-link.active,
+.nav-tabs .nav-item.show .nav-link {
+  color: var(--sekoci-navy);
+  background: transparent;
+  border-bottom-color: var(--sekoci-navy);
+}
+.nav-tabs-highlight .nav-link.active {
+  border-top: 0;
+}
+
+/* --- dropdowns ---------------------------------------------------------- */
+
+.dropdown-menu {
+  border: 1px solid var(--sekoci-border);
+  border-radius: var(--sekoci-radius);
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.1);
+  padding: 0.3rem;
+  font-size: 0.875rem;
+}
+.dropdown-item {
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+  color: var(--sekoci-text);
+}
+.dropdown-item:hover,
+.dropdown-item:focus {
+  background: var(--sekoci-teal-soft);
+  color: var(--sekoci-navy);
+}
+.dropdown-divider {
+  border-top-color: var(--sekoci-border);
+}
+.list-icons-item {
+  color: var(--sekoci-text-muted);
+}
+.list-icons-item:hover {
+  color: var(--sekoci-navy);
+}
+
+/* --- modals ------------------------------------------------------------- */
+
+.modal-content {
+  border: 0;
+  border-radius: var(--sekoci-radius-lg);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+}
+.modal-header {
+  background: var(--sekoci-white);
+  border-bottom: 1px solid var(--sekoci-border);
+  padding: 1rem 1.25rem;
+}
+.modal-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--sekoci-navy);
+}
+.modal-body {
+  padding: 1.25rem;
+}
+.modal-footer {
+  background: var(--sekoci-white);
+  border-top: 1px solid var(--sekoci-border);
+  padding: 0.75rem 1.25rem;
+}
+.modal-backdrop.show {
+  background: rgba(16, 24, 40, 0.45);
+  opacity: 1;
+}
+
+/* --- alerts ------------------------------------------------------------- */
+
+.alert {
+  border: 1px solid var(--sekoci-border);
+  border-radius: var(--sekoci-radius);
+  padding: 0.75rem 1rem;
+  font-size: 0.88rem;
+  box-shadow: none;
+}
+.alert-success {
+  background: rgba(22, 163, 74, 0.08);
+  border-color: rgba(22, 163, 74, 0.25);
+  color: #14532d;
+}
+.alert-danger {
+  background: rgba(220, 38, 38, 0.08);
+  border-color: rgba(220, 38, 38, 0.25);
+  color: #7f1d1d;
+}
+.alert-warning {
+  background: rgba(217, 119, 6, 0.08);
+  border-color: rgba(217, 119, 6, 0.25);
+  color: #78350f;
+}
+.alert-info,
+.alert-primary {
+  background: var(--sekoci-teal-soft);
+  border-color: rgba(26, 86, 219, 0.2);
+  color: var(--sekoci-navy);
+}
+
+/* --- pagination --------------------------------------------------------- */
+
+/* Bootstrap pagination (reports, any ->links() switched to bootstrap views) */
+.page-link {
+  border: 1px solid var(--sekoci-border);
+  border-radius: var(--sekoci-radius);
+  margin: 0 0.1rem;
+  color: var(--sekoci-text);
+  font-size: 0.85rem;
+}
+.page-link:hover {
+  background: var(--sekoci-teal-soft);
+  color: var(--sekoci-navy);
+}
+.page-item.active .page-link {
+  background: var(--sekoci-navy);
+  border-color: var(--sekoci-navy);
+  color: var(--sekoci-white);
+}
+.page-item.disabled .page-link {
+  color: var(--sekoci-text-muted);
+}
+/* Livewire 3 renders ->links() with its Tailwind view (no Paginator::useBootstrap
+   in this app), so the current page is indigo utility classes. Two-class
+   selectors beat Tailwind's single-class utilities whatever the load order. */
+nav .bg-indigo-50 {
+  background-color: var(--sekoci-teal-soft);
+}
+nav .border-indigo-500 {
+  border-color: var(--sekoci-navy);
+}
+nav .text-indigo-600 {
+  color: var(--sekoci-navy);
+}
+
+/* --- topbar (non-embed only; hidden inside the Sekoci shell) ------------- */
+
+.navbar.navbar-dark {
+  background: var(--sekoci-white);
+  border-bottom: 1px solid var(--sekoci-border);
+  box-shadow: none;
+  padding: 0;
+}
+/* header.blade.php hardcodes color:#ffffff inline on the brand text and
+   rgba(147,197,253,.8) on the sidebar role label — unreadable on white, and
+   inline styles can only be beaten with !important. */
+.navbar.navbar-dark .navbar-brand span {
+  color: var(--sekoci-navy) !important;
+}
+.navbar.navbar-dark .navbar-brand {
+  border-right: 1px solid var(--sekoci-border);
+}
+.navbar.navbar-dark .navbar-nav-link,
+.navbar.navbar-dark .navbar-text,
+.navbar.navbar-dark .navbar-toggler {
+  color: var(--sekoci-text-muted);
+}
+.navbar.navbar-dark .navbar-nav-link:hover,
+.navbar.navbar-dark .navbar-nav-link:focus {
+  background: var(--sekoci-teal-soft);
+  color: var(--sekoci-navy);
+}
+.navbar.navbar-dark .dropdown-user .navbar-nav-link span {
+  color: var(--sekoci-text);
+  font-weight: 500;
+}
+.navbar.navbar-dark .dropdown-user img {
+  border-color: var(--sekoci-border) !important; /* inline border on the avatar */
+}
+/* footer bar at the bottom of mainlayout */
+.content-wrapper > .navbar-light {
+  background: transparent;
+  border-top: 1px solid var(--sekoci-border);
+  color: var(--sekoci-text-muted);
+  font-size: 0.8rem;
+}
+
+/* --- sidebar (non-embed only) ------------------------------------------- */
+
+/* Sekoci's sidebar is white with navy-soft active pills, not limitless' dark
+   slate — same selector depth as layout.css's .sidebar-dark rules, and this
+   file loads later. */
+.sidebar.sidebar-dark {
+  background-color: var(--sekoci-white);
+  color: var(--sekoci-text);
+  border-right: 1px solid var(--sekoci-border);
+}
+.sidebar.sidebar-dark .sidebar-content,
+.sidebar.sidebar-dark .card-sidebar-mobile,
+.sidebar.sidebar-dark .card {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+.sidebar.sidebar-dark .sidebar-user {
+  border-bottom: 1px solid var(--sekoci-border) !important; /* inline rgba() border in sidebar.blade.php */
+}
+.sidebar.sidebar-dark .sidebar-user .media-title {
+  color: var(--sekoci-text);
+}
+.sidebar.sidebar-dark .sidebar-user .media-body > div:last-child {
+  color: var(--sekoci-text-muted) !important; /* inline light-blue role label */
+}
+.sidebar.sidebar-dark .sidebar-user .text-white {
+  color: var(--sekoci-text-muted) !important; /* .text-white in colors.css is !important */
+}
+.sidebar.sidebar-dark .sidebar-user img {
+  border-color: var(--sekoci-border) !important; /* inline avatar border */
+}
+.sidebar.sidebar-dark .nav-sidebar .nav-link {
+  color: #475467;
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin: 0 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.75rem;
+}
+.sidebar.sidebar-dark .nav-sidebar .nav-link:not(.disabled):hover {
+  background-color: var(--sekoci-teal-soft);
+  color: var(--sekoci-navy);
+}
+.sidebar.sidebar-dark .nav-sidebar .nav-item > .nav-link.active,
+.sidebar.sidebar-dark .nav-sidebar > .nav-item > .nav-link.active,
+.sidebar.sidebar-dark .nav-sidebar > .nav-item-open > .nav-link:not(.disabled),
+.sidebar.sidebar-dark .nav-sidebar .nav-item-open > .nav-link:not(.disabled),
+.sidebar.sidebar-dark .nav-sidebar > .nav-item-expanded:not(.nav-item-open) > .nav-link {
+  background-color: var(--sekoci-teal-soft);
+  color: var(--sekoci-navy);
+}
+.sidebar.sidebar-dark .nav-sidebar > .nav-item-submenu > .nav-group-sub {
+  background-color: transparent;
+}
+.sidebar.sidebar-dark .nav-sidebar .nav-group-sub .nav-link {
+  color: var(--sekoci-text-muted);
+  font-size: 0.85rem;
+}
+.sidebar.sidebar-dark .nav-sidebar .nav-item-header {
+  color: var(--sekoci-text-muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+}
+.sidebar.sidebar-dark .nav-sidebar .nav-item-divider {
+  background-color: var(--sekoci-border);
+}
+.sidebar.sidebar-dark .sidebar-mobile-toggler {
+  background-color: var(--sekoci-white);
+  color: var(--sekoci-text);
+  border-bottom: 1px solid var(--sekoci-border);
+}
+.sidebar.sidebar-dark .sidebar-mobile-toggler a {
+  color: var(--sekoci-text-muted);
+}
+.sidebar.sidebar-dark ::-webkit-scrollbar-thumb {
+  background: var(--sekoci-border);
+}

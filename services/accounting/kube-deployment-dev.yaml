@@ -1,0 +1,309 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: exco-dev
+  namespace: exco
+  labels:
+    app: exco-dev
+  annotations:
+    deployment.kubernetes.io/revision: '24'
+    kubesphere.io/creator: admin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: exco-dev
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        COMMIT_SHA: $COMMIT_SHA
+        app: exco-dev
+      annotations:
+        kubesphere.io/creator: admin
+        kubesphere.io/imagepullsecrets: '{"container-wifndd":"harbor"}'
+        kubesphere.io/restartedAt: '2024-09-22T13:21:29.913Z'
+    spec:
+      containers:
+        - name: container-wifndd
+          image: 'registry.ti-asia.com/exco/exco:latest'
+          ports:
+            - name: tcp-80
+              containerPort: 80
+              protocol: TCP
+          env:
+            - name: APP_DEBUG
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: APP_DEBUG
+            - name: APP_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: APP_ENV
+            - name: APP_FAKER_LOCALE
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: APP_FAKER_LOCALE
+            - name: APP_FALLBACK_LOCALE
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: APP_FALLBACK_LOCALE
+            - name: APP_KEY
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: APP_KEY
+            - name: APP_LOCALE
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: APP_LOCALE
+            - name: APP_MAINTENANCE_DRIVER
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: APP_MAINTENANCE_DRIVER
+            - name: APP_MAINTENANCE_STORE
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: APP_MAINTENANCE_STORE
+            - name: APP_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: APP_NAME
+            - name: APP_TIMEZONE
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: APP_TIMEZONE
+            - name: APP_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: APP_URL
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: AWS_BUCKET
+            - name: AWS_DEFAULT_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: AWS_DEFAULT_REGION
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: AWS_USE_PATH_STYLE_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: AWS_USE_PATH_STYLE_ENDPOINT
+            - name: BCRYPT_ROUNDS
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: BCRYPT_ROUNDS
+            - name: BROADCAST_CONNECTION
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: BROADCAST_CONNECTION
+            - name: CACHE_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: CACHE_PREFIX
+            - name: CACHE_STORE
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: CACHE_STORE
+            - name: DB_CONNECTION
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: DB_CONNECTION
+            - name: DB_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: DB_DATABASE
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: DB_HOST
+            - name: DB_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: DB_PASSWORD
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: DB_PORT
+            - name: DB_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: DB_USERNAME
+            - name: FILESYSTEM_DISK
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: FILESYSTEM_DISK
+            - name: LOG_CHANNEL
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: LOG_CHANNEL
+            - name: LOG_DEPRECATIONS_CHANNEL
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: LOG_DEPRECATIONS_CHANNEL
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: LOG_LEVEL
+            - name: LOG_STACK
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: LOG_STACK
+            - name: MAIL_ENCRYPTION
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: MAIL_ENCRYPTION
+            - name: MAIL_FROM_ADDRESS
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: MAIL_FROM_ADDRESS
+            - name: MAIL_FROM_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: MAIL_FROM_NAME
+            - name: MAIL_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: MAIL_HOST
+            - name: MAIL_MAILER
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: MAIL_MAILER
+            - name: MAIL_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: MAIL_PASSWORD
+            - name: MAIL_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: MAIL_PORT
+            - name: MAIL_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: MAIL_USERNAME
+            - name: MEMCACHED_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: MEMCACHED_HOST
+            - name: QUEUE_CONNECTION
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: QUEUE_CONNECTION
+            - name: REDIS_CLIENT
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: REDIS_CLIENT
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: REDIS_HOST
+            - name: REDIS_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: REDIS_PASSWORD
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: REDIS_PORT
+            - name: SESSION_DOMAIN
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: SESSION_DOMAIN
+            - name: SESSION_DRIVER
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: SESSION_DRIVER
+            - name: SESSION_ENCRYPT
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: SESSION_ENCRYPT
+            - name: SESSION_LIFETIME
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: SESSION_LIFETIME
+            - name: SESSION_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: SESSION_PATH
+            - name: VITE_APP_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: exco-dev
+                  key: VITE_APP_NAME
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: Always
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      serviceAccountName: default
+      serviceAccount: default
+      securityContext: {}
+      imagePullSecrets:
+        - name: harbor
+      schedulerName: default-scheduler
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600

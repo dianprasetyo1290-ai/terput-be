@@ -1,0 +1,64 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Laravel specific
+# Laravel REGENERATES these at runtime, and a copy made by a local dev
+# `composer install` lists dev-only providers (Collision, Telescope...). The
+# image installs --no-dev, so baking that cache in makes every request fatal
+# with "Class NunoMaduro\Collision\...\CollisionServiceProvider not found".
+bootstrap/cache/*.php
+storage/logs/*
+!storage/logs/.gitkeep
+storage/framework/cache/*
+!storage/framework/cache/.gitkeep
+storage/framework/sessions/*
+!storage/framework/sessions/.gitkeep
+storage/framework/views/*
+!storage/framework/views/.gitkeep
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+tests/
+.phpunit.result.cache
+
+# Documentation
+*.md
+!README.md
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# CI/CD
+.gitlab-ci.yml
+.github/
+
+# Database dumps
+*.sql
+*.dump
+
+# Build artifacts (will be built in container)
+public/build/
+public/hot

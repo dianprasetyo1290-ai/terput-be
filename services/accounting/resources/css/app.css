@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+[x-cloak] {
+    display: none;
+}
+
+/* Fix Tailwind .collapse conflicting with Bootstrap .collapse */
+.navbar-collapse {
+    visibility: visible !important;
+}
+
+/* The old "Modern Blue Theme" block lived here: ~400 lines of !important
+   overrides on the limitless sidebar/navbar/buttons/tables. It is replaced by
+   resources/css/sekoci-theme.css, which maps the same markup onto the Sekoci
+   design tokens; keeping both would mean an !important fight between two files
+   that style the same selectors. */

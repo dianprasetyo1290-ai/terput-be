@@ -74,7 +74,17 @@ func main() {
 		// /auth/me directly reflects the caller's just-switched active_role
 		// (POST /auth/switch-role) -- caching it risks a stale role
 		// showing right when the user is watching for the switch to land.
-		return r.URL.Path == "/auth/me"
+		if r.URL.Path == "/auth/me" {
+			return true
+		}
+		// Saklar fitur per sekolah: PUT tidak punya cara membatalkan entri
+		// cache GET (cache ini tanpa invalidasi, lihat internal/cache), jadi
+		// endpoint fiturnya dikecualikan -- superadmin yang baru menyalakan
+		// Akuntansi harus langsung melihat statusnya benar, bukan 15 detik
+		// yang basi, dan Laravel /sso tidak boleh menerima jawaban "menyala"
+		// untuk sekolah yang baru dimatikan. Volumenya kecil (sekali per
+		// login untuk SPA), jadi tak ada yang hilang.
+		return strings.Contains(r.URL.Path, "/features")
 	}
 
 	r := chi.NewRouter()
@@ -103,6 +113,17 @@ func main() {
 
 		// Superadmin dashboard.
 		pr.Get("/dashboard", app.Dashboard)
+
+		// Saklar fitur per sekolah (school_features). Ditulis langsung di
+		// level root, BUKAN di dalam pr.Route("/schools") di bawah: GET
+		// /schools/{id}/features hidup di grup internal-or-jwt (Laravel /sso
+		// membacanya dengan X-Internal-Key), dan sebuah pola di dalam
+		// sub-router yang di-Mount tidak ikut diperhitungkan terhadap node
+		// /schools/{id}/features milik grup itu -- PUT-nya akan jadi 405.
+		// Didaftarkan di trie yang sama supaya GET dan PUT berdampingan.
+		pr.Put("/schools/{id}/features/{key}", app.SetSchoolFeature)
+		pr.Get("/features", app.ListAllFeatures) // semua sekolah sekaligus (superadmin)
+		pr.Get("/me/features", app.MyFeatures)   // dipakai SPA setelah login
 
 		// Data Yayasan (Foundation) — superadmin CRUD.
 		pr.Route("/foundations", func(fr chi.Router) {
@@ -246,6 +267,10 @@ func main() {
 		// requireRole(superadmin) check same as ExportUsers.
 		ir.Get("/schools/deleted", app.ListDeletedSchools)
 		ir.Get("/schools/{id}", app.GetSchool)
+		// Dibaca Laravel accounting /sso (X-Internal-Key) untuk menolak
+		// sekolah yang fitur accounting-nya mati, dan oleh SPA superadmin /
+		// admin sekolah itu sendiri (read-only).
+		ir.Get("/schools/{id}/features", app.ListSchoolFeatures)
 		ir.Get("/academic-years", app.ListAcademicYears)
 		// Organisasi Sekolah read: report-service scans this for the
 		// current "Kepala Sekolah" jabatan holder (see internal_auth.go).
