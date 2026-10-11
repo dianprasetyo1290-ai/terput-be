@@ -1,0 +1,19 @@
+-- 0010_payroll.down.sql
+DROP TABLE IF EXISTS payroll_journals CASCADE;
+DROP TABLE IF EXISTS tax_remittances CASCADE;
+DROP TABLE IF EXISTS payslips CASCADE;
+DROP TABLE IF EXISTS payroll_lines CASCADE;
+DROP TABLE IF EXISTS payroll_runs CASCADE;
+DROP TABLE IF EXISTS payroll_inputs CASCADE;
+DROP TABLE IF EXISTS payroll_calendars CASCADE;
+DROP TABLE IF EXISTS statutory_misc CASCADE;
+DROP TABLE IF EXISTS statutory_progressive CASCADE;
+DROP TABLE IF EXISTS statutory_ter_brackets CASCADE;
+DROP TABLE IF EXISTS statutory_ter_categories CASCADE;
+DROP TABLE IF EXISTS statutory_ptkp CASCADE;
+DROP TABLE IF EXISTS statutory_bpjs CASCADE;
+DROP TABLE IF EXISTS employee_components CASCADE;
+DROP TABLE IF EXISTS salary_structures CASCADE;
+DROP TABLE IF EXISTS payroll_accounts CASCADE;
+DROP TABLE IF EXISTS pay_component_accounts CASCADE;
+DROP TABLE IF EXISTS pay_components CASCADE;

@@ -282,7 +282,7 @@ func (a *App) AdminPaymentProof(w http.ResponseWriter, r *http.Request) {
 	var key, mime, checksum string
 	var size int64
 	err := a.DB.QueryRowContext(r.Context(),
-		`SELECT object_key,mime,size_bytes,sha256 FROM bill_payments WHERE id::text=$1 AND school_id=$2`,
+		`SELECT object_key,mime,size_bytes,sha256 FROM bill_payments WHERE id::text=$1 AND school_id=$2 AND object_key IS NOT NULL`,
 		param(r, "id"), schoolID).Scan(&key, &mime, &size, &checksum)
 	if err != nil {
 		common.WriteError(w, http.StatusNotFound, "payment not found")
@@ -458,7 +458,7 @@ func (a *App) ReversePayment(w http.ResponseWriter, r *http.Request) {
 	)
 	err = tx.QueryRowContext(r.Context(),
 		`SELECT status,amount_idr,student_bill_id::text FROM bill_payments
-		 WHERE id::text=$1 AND school_id=$2 FOR UPDATE`,
+		 WHERE id::text=$1 AND school_id=$2 AND source='upload' FOR UPDATE`,
 		paymentID, schoolID).Scan(&status, &amount, &billID)
 	if err == sql.ErrNoRows {
 		common.WriteError(w, http.StatusNotFound, "payment not found")

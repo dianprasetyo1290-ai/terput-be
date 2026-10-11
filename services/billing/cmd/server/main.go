@@ -13,6 +13,7 @@ import (
 	"skci/billing/internal/common"
 	"skci/billing/internal/config"
 	"skci/billing/internal/handler"
+	"skci/billing/internal/nicepay"
 	"skci/billing/internal/storage"
 	"skci/billing/internal/store"
 )
@@ -39,6 +40,31 @@ func main() {
 	app := handler.New(db, cfg, client.New(cfg.IdentityURL, cfg.InternalKey), storage.NewLocal(cfg.StorageRoot, cfg.MaxUploadBytes))
 
 	app.Roster = client.New(cfg.AcademicURL, cfg.InternalKey)
+	if cfg.Gateway.NicepayConfigured() {
+		np, err := nicepay.NewClient(nicepay.Config{
+			BaseURL:      cfg.Gateway.NicepayBaseURL,
+			ClientID:     cfg.Gateway.NicepayClientID,
+			ChannelID:    cfg.Gateway.NicepayChannelID,
+			ClientSecret: cfg.Gateway.NicepayClientSecret,
+			PrivateKey:   cfg.Gateway.NicepayPrivateKey,
+			NotifPubKey:  cfg.Gateway.NicepayPublicKey,
+			StoreID:      cfg.Gateway.NicepayStoreID,
+		})
+		if err != nil {
+			log.Printf("nicepay client init error: %v", err)
+		} else {
+			app.Nicepay = np
+		}
+	}
+	if cfg.Gateway.CoreURL != "" {
+		app.Core = client.New(cfg.Gateway.CoreURL, cfg.InternalKey)
+	}
+	if cfg.Gateway.NotificationURL != "" {
+		app.Notification = client.New(cfg.Gateway.NotificationURL, cfg.InternalKey)
+	}
+	if cfg.Gateway.AccountingURL != "" {
+		app.Accounting = client.New(cfg.Gateway.AccountingURL, cfg.InternalKey)
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.RealIP, middleware.Logger, common.SentryMiddleware(), middleware.Recoverer)
@@ -55,12 +81,21 @@ func main() {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
+	// Payment Gateway Webhook (no JWT auth, verified via SNAP signature)
+	r.Post("/webhooks/nicepay", app.NicepayWebhook)
+
 	// ---------------------------------------------------------------------
 	// Portal Orang Tua (identity JWT, active_role=orang_tua). Child
 	// ownership is verified against identity on every request.
 	// ---------------------------------------------------------------------
 	r.Group(func(pr chi.Router) {
 		pr.Use(common.JWTMiddleware(cfg.JWTSecret))
+
+		pr.Get("/payment-methods", app.ListPaymentMethods)
+		pr.Post("/parent/checkout/preview", app.ParentCheckoutPreview)
+		pr.Post("/parent/checkout", app.ParentCheckout)
+		pr.Get("/parent/transactions/{id}", app.ParentGetTransaction)
+		pr.Post("/parent/transactions/{id}/renew", app.ParentRenewTransaction)
 
 		pr.Get("/parent/children/{studentUserId}/bills", app.ListChildBills)
 		pr.Get("/parent/children/{studentUserId}/bills/{billId}", app.GetChildBill)
@@ -76,6 +111,7 @@ func main() {
 		st.Use(common.JWTMiddleware(cfg.JWTSecret))
 
 		st.Get("/me/bills", app.ListMyBills)
+		st.Get("/me/bills/visibility", app.GetMyBillVisibility)
 		st.Get("/me/payments", app.ListMyPayments)
 	})
 
@@ -111,6 +147,36 @@ func main() {
 		ad.Post("/admin/refunds/{id}/process", app.ProcessRefund)
 
 		ad.Get("/admin/finance/summary", app.FinanceSummary)
+		// T6 Payment Gateway & Cashier routes
+		ad.Get("/admin/payment-methods", app.AdminListPaymentMethods)
+		ad.Post("/admin/payment-methods", app.AdminCreatePaymentMethod)
+		ad.Put("/admin/payment-methods/{id}", app.AdminUpdatePaymentMethod)
+		ad.Delete("/admin/payment-methods/{id}", app.AdminDeletePaymentMethod)
+
+		ad.Get("/admin/transactions", app.AdminListTransactions)
+		ad.Get("/admin/transactions/{id}", app.AdminGetTransaction)
+		ad.Post("/admin/receipts/{id}/resend", app.AdminResendReceipt)
+
+		ad.Post("/cashier/payments", app.CashierCreatePayment)
+		ad.Get("/cashier/payments", app.CashierListPayments)
+		ad.Get("/cashier/payments/{id}/receipt.pdf", app.CashierReceiptPDF)
+
+		ad.Post("/admin/payment-corrections", app.AdminCreateCorrection)
+
+		ad.Post("/admin/settlements/import", app.AdminImportSettlement)
+		ad.Get("/admin/settlements", app.AdminListSettlements)
+
+		ad.Post("/admin/reconciliation/run", app.AdminRunReconciliation)
+		ad.Get("/admin/reconciliation/exceptions", app.AdminListExceptions)
+		ad.Post("/admin/reconciliation/exceptions/{id}/resolve", app.AdminResolveException)
+
+		ad.Post("/admin/bank-statements/import", app.AdminImportBankStatement)
+		ad.Post("/admin/bank-reconciliation/run", app.AdminRunBankReconciliation)
+
+		ad.Get("/admin/payment-dashboard", app.AdminPaymentDashboard)
+
+		ad.Get("/admin/student-bill-visibility", app.GetStudentBillVisibility)
+		ad.Put("/admin/student-bill-visibility", app.UpdateStudentBillVisibility)
 	})
 
 	// ---------------------------------------------------------------------
@@ -121,6 +187,10 @@ func main() {
 
 		in.Post("/internal/bills/generate", app.InternalGenerateBills)
 		in.Get("/internal/students/{studentUserId}/outstanding", app.InternalStudentOutstanding)
+		in.Post("/internal/corrections/{id}/callback", app.CorrectionCallback)
+		in.Get("/internal/students/{studentUserId}/financial-summary", app.InternalStudentFinancialSummary)
+		in.Post("/internal/students/{studentUserId}/exit", app.InternalStudentExit)
+		in.Post("/internal/students/{studentUserId}/refund", app.InternalStudentRefund)
 	})
 
 	log.Printf("billing-service listening on :%s (%s)", cfg.Port, cfg.AppEnv)

@@ -39,6 +39,8 @@ type Config struct {
 
 	SentryDSN         string
 	SentryEnvironment string
+
+	Gateway Gateway
 }
 
 // Load reads and validates the configuration.
@@ -59,6 +61,12 @@ func Load() (Config, error) {
 	}
 
 	production := strings.EqualFold(c.AppEnv, "production")
+
+	gw, err := loadGateway()
+	if err != nil {
+		return Config{}, err
+	}
+	c.Gateway = gw
 
 	if c.JWTSecret == "" && !production {
 		c.JWTSecret = "change-me"

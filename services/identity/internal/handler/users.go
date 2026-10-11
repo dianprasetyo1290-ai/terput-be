@@ -26,11 +26,11 @@ import (
 // "admin can reset a student's password" for both, rather than duplicating
 // separate edit/reset handlers per entity (see README Assumptions).
 
-const userCols = `u.id, u.name, u.email, u.phone, u.default_password, u.password_changed, u.photo, u.birth_date, u.birth_place, u.address, u.religion, u.nisn, u.is_superadmin, u.created_at, u.updated_at`
+const userCols = `u.id, u.name, u.email, u.phone, u.default_password, u.password_changed, u.photo, u.birth_date, u.birth_place, u.address, u.religion, u.nisn, u.is_superadmin, u.created_at, u.updated_at, u.managed_by_hr, u.deactivate_at`
 
 func scanUser(row interface{ Scan(...interface{}) error }) (model.User, error) {
 	var u model.User
-	err := row.Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.DefaultPassword, &u.PasswordChanged, &u.Photo, &u.BirthDate, &u.BirthPlace, &u.Address, &u.Religion, &u.NISN, &u.IsSuperadmin, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.DefaultPassword, &u.PasswordChanged, &u.Photo, &u.BirthDate, &u.BirthPlace, &u.Address, &u.Religion, &u.NISN, &u.IsSuperadmin, &u.CreatedAt, &u.UpdatedAt, &u.ManagedByHR, &u.DeactivateAt)
 	if err == nil && u.PasswordChanged {
 		u.DefaultPassword = nil // hide once the user has changed it from the default
 	}
@@ -424,6 +424,26 @@ func (a *App) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
+	// AC-83-02: while HRIS is on for one of the user's schools, the name of an
+	// HR-managed account is owned by the hr service, not Data Guru/Pengguna.
+	var hrLocked bool
+	var currentName string
+	err := a.DB.QueryRow(`SELECT u.managed_by_hr AND EXISTS (
+			SELECT 1 FROM user_school_roles usr
+			JOIN school_features sf ON sf.school_id = usr.school_id AND sf.feature_key = 'hris' AND sf.enabled
+			WHERE usr.user_id = u.id), u.name
+		FROM users u WHERE u.id = $1 AND u.deleted_at IS NULL`, id).Scan(&hrLocked, &currentName)
+	if err == sql.ErrNoRows {
+		common.WriteError(w, http.StatusNotFound, "user not found")
+		return
+	} else if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to update user")
+		return
+	}
+	if hrLocked && strings.TrimSpace(req.Name) != currentName {
+		common.WriteError(w, http.StatusConflict, "Data dikelola dari HRIS")
+		return
+	}
 	row := a.DB.QueryRow(`UPDATE users AS u SET name=$1, phone=$2, photo=$3, birth_date=$4, birth_place=$5, address=$6, religion=$7, nisn=$8, updated_at=now()
 		WHERE id=$9 AND deleted_at IS NULL RETURNING `+userCols,
 		req.Name, req.Phone, req.Photo, req.BirthDate, req.BirthPlace, req.Address, req.Religion, req.NISN, id)
@@ -565,6 +585,12 @@ func (a *App) AssignUserRole(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusInternalServerError, "failed to assign role: "+err.Error())
 		return
 	}
+	var sID *string
+	if schoolID != "" {
+		sID = &schoolID
+	}
+	a.RecordSecurityAudit(sID, "role_assigned", id, &claims.UserID, &claims.ActiveRole, nil, map[string]any{"assigned_role": req.Role}, "assigned role to user", r.Header.Get("X-Correlation-ID"))
+
 	common.WriteJSON(w, http.StatusCreated, map[string]string{"user_id": id, "role": req.Role}, nil)
 }
 
@@ -593,6 +619,13 @@ func (a *App) RemoveUserRole(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusNotFound, "role assignment not found")
 		return
 	}
+
+	var sID *string
+	if claims.SchoolID != "" {
+		sID = &claims.SchoolID
+	}
+	a.RecordSecurityAudit(sID, "role_removed", id, &claims.UserID, &claims.ActiveRole, map[string]any{"removed_role": role}, nil, "removed role from user", r.Header.Get("X-Correlation-ID"))
+
 	common.WriteJSON(w, http.StatusOK, map[string]string{"user_id": id, "role": role}, nil)
 }
 

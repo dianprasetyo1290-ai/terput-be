@@ -93,9 +93,22 @@ const (
 	// is deliberately NOT a dashboard role -- the frontend lands it on
 	// Jadwal Ujian instead (web/src/router/domains/exam.routes.ts).
 	RolePengawas = "pengawas"
+
+	// HR and finance roles (SEKOCI T1-T5, migration 0014)
+	RoleHRAdmin        = "hr_admin"
+	RoleHRManager      = "hr_manager"
+	RolePayrollOfficer = "payroll_officer"
+	RoleRecruiter      = "recruiter"
+	RoleTrainingAdmin  = "training_admin"
+	RoleAuditor        = "auditor"
+	RoleFinanceManager = "finance_manager"
+	RolePegawai        = "pegawai"
 )
 
-var AllRoles = []string{RoleSuperadmin, RoleAdmin, RoleGuru, RoleSiswa, RoleOrangTua, RoleWalikelas, RoleKepalaSekolah, RoleKepalaYayasan, RolePengawas}
+var AllRoles = []string{
+	RoleSuperadmin, RoleAdmin, RoleGuru, RoleSiswa, RoleOrangTua, RoleWalikelas, RoleKepalaSekolah, RoleKepalaYayasan, RolePengawas,
+	RoleHRAdmin, RoleHRManager, RolePayrollOfficer, RoleRecruiter, RoleTrainingAdmin, RoleAuditor, RoleFinanceManager, RolePegawai,
+}
 
 var DashboardRoles = map[string]bool{
 	RoleSuperadmin: true,

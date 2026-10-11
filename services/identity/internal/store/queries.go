@@ -31,9 +31,9 @@ func UserRoles(db *sql.DB, userID string) ([]model.UserSchoolRole, error) {
 func FindUserByEmail(db *sql.DB, email string) (model.User, string, error) {
 	var u model.User
 	var hash string
-	err := db.QueryRow(`SELECT id, name, email, phone, password_hash, password_changed, photo, birth_date, birth_place, address, is_superadmin, created_at, updated_at
+	err := db.QueryRow(`SELECT id, name, email, phone, password_hash, password_changed, photo, birth_date, birth_place, address, is_superadmin, created_at, updated_at, managed_by_hr, deactivate_at
 		FROM users WHERE email = $1 AND deleted_at IS NULL`, email).
-		Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &hash, &u.PasswordChanged, &u.Photo, &u.BirthDate, &u.BirthPlace, &u.Address, &u.IsSuperadmin, &u.CreatedAt, &u.UpdatedAt)
+		Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &hash, &u.PasswordChanged, &u.Photo, &u.BirthDate, &u.BirthPlace, &u.Address, &u.IsSuperadmin, &u.CreatedAt, &u.UpdatedAt, &u.ManagedByHR, &u.DeactivateAt)
 	if err == sql.ErrNoRows {
 		return u, "", ErrNotFound
 	}
@@ -42,9 +42,9 @@ func FindUserByEmail(db *sql.DB, email string) (model.User, string, error) {
 
 func FindUserByID(db *sql.DB, id string) (model.User, error) {
 	var u model.User
-	err := db.QueryRow(`SELECT id, name, email, phone, password_changed, photo, birth_date, birth_place, address, religion, nisn, is_superadmin, created_at, updated_at
+	err := db.QueryRow(`SELECT id, name, email, phone, password_changed, photo, birth_date, birth_place, address, religion, nisn, is_superadmin, created_at, updated_at, managed_by_hr, deactivate_at
 		FROM users WHERE id = $1 AND deleted_at IS NULL`, id).
-		Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.PasswordChanged, &u.Photo, &u.BirthDate, &u.BirthPlace, &u.Address, &u.Religion, &u.NISN, &u.IsSuperadmin, &u.CreatedAt, &u.UpdatedAt)
+		Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.PasswordChanged, &u.Photo, &u.BirthDate, &u.BirthPlace, &u.Address, &u.Religion, &u.NISN, &u.IsSuperadmin, &u.CreatedAt, &u.UpdatedAt, &u.ManagedByHR, &u.DeactivateAt)
 	if err == sql.ErrNoRows {
 		return u, ErrNotFound
 	}

@@ -66,6 +66,7 @@ func main() {
 	}
 
 	app := handler.NewApp(db, jwtSecret, internalKey)
+	app.CoreURL = getenv("CORE_URL", "http://localhost:8091")
 
 	// Redis response cache (client request 2026-08-29): fails open if
 	// REDIS_URL is unset/unreachable, see internal/cache's doc comment.
@@ -251,6 +252,8 @@ func main() {
 		in.Post("/internal/students/create-or-link", app.InternalCreateOrLinkStudent)
 		in.Post("/internal/guardian-links", app.InternalCreateGuardianLink)
 		in.Get("/internal/conversions/{conversionRef}", app.InternalConversionMapping)
+		in.Post("/internal/employees/create-or-link", app.InternalCreateOrLinkEmployee)
+		in.Post("/internal/users/{id}/deactivate", app.InternalDeactivateUser)
 	})
 
 	r.Group(func(ir chi.Router) {

@@ -8,7 +8,7 @@ import "database/sql"
 // FeatureKeys adalah daftar fitur opsional yang dikenal. Dipakai GET
 // /schools/{id}/features supaya UI tetap bisa merender saklar walau belum
 // ada satu baris pun, dan sebagai allowlist pada PUT.
-var FeatureKeys = []string{"accounting"}
+var FeatureKeys = []string{"accounting", "hris"}
 
 // SchoolFeature satu baris tabel (dipakai daftar lintas-sekolah).
 type SchoolFeature struct {

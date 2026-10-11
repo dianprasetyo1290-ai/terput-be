@@ -34,6 +34,7 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 
 	user, hash, err := store.FindUserByEmail(a.DB, req.Email)
 	if err == store.ErrNotFound {
+		a.RecordSecurityAudit(nil, "login_failed", req.Email, nil, nil, nil, nil, "email not found", r.Header.Get("X-Correlation-ID"))
 		common.WriteError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	} else if err != nil {
@@ -41,7 +42,14 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !common.CheckPassword(hash, req.Password) {
+		uid := user.ID
+		a.RecordSecurityAudit(nil, "login_failed", req.Email, &uid, nil, nil, nil, "wrong password", r.Header.Get("X-Correlation-ID"))
 		common.WriteError(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+
+	if user.DeactivateAt != nil && !user.DeactivateAt.After(time.Now()) {
+		common.WriteError(w, http.StatusUnauthorized, "account is deactivated")
 		return
 	}
 
@@ -62,6 +70,12 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var sID *string
+	if schoolID != "" {
+		sID = &schoolID
+	}
+	a.RecordSecurityAudit(sID, "login_success", user.ID, &user.ID, &activeRole, nil, map[string]any{"active_role": activeRole, "roles": allRoles}, "successful authentication", r.Header.Get("X-Correlation-ID"))
+
 	common.WriteJSON(w, http.StatusOK, loginResponse{Token: token, User: user}, nil)
 }
 
@@ -81,6 +95,12 @@ func (a *App) SwitchRole(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Role == "" {
 		common.WriteError(w, http.StatusBadRequest, "role is required")
+		return
+	}
+
+	// A deactivated (offboarded) account must not mint fresh tokens either.
+	if user, err := store.FindUserByID(a.DB, claims.UserID); err != nil || (user.DeactivateAt != nil && !user.DeactivateAt.After(time.Now())) {
+		common.WriteError(w, http.StatusUnauthorized, "account is deactivated")
 		return
 	}
 
@@ -119,6 +139,13 @@ func (a *App) SwitchRole(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusInternalServerError, "failed to issue token")
 		return
 	}
+
+	var sID *string
+	if schoolID != "" {
+		sID = &schoolID
+	}
+	a.RecordSecurityAudit(sID, "role_switched", claims.UserID, &claims.UserID, &req.Role, map[string]any{"from_role": claims.ActiveRole}, map[string]any{"to_role": req.Role}, "switched active role", r.Header.Get("X-Correlation-ID"))
+
 	common.WriteJSON(w, http.StatusOK, loginResponse{Token: token}, nil)
 }
 

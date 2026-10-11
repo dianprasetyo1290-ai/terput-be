@@ -320,6 +320,67 @@ services:
     volumes: ["billing_files:/data/private"]
     ports: ["${BILLING_PORT}:${BILLING_PORT}"]
 
+  # ---------- core (Approval Center, Exception Queue, Audit Trail) ----------
+  core-migrate:
+    image: migrate/migrate:v4.18.1
+    volumes: ["./services/core/migrations:/migrations"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${CORE_DB_NAME}?sslmode=disable", "up"]
+    restart: "no"
+
+  core:
+    build: ./services/core
+    restart: unless-stopped
+    depends_on:
+      core-migrate:
+        condition: service_completed_successfully
+      identity:
+        condition: service_started
+    environment:
+      PORT: ${CORE_PORT}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${CORE_DB_NAME}?sslmode=disable
+      APP_ENV: ${APP_ENV:-production}
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      IDENTITY_URL: http://identity:${IDENTITY_PORT}
+      NOTIFICATION_URL: http://notification:${NOTIFICATION_PORT}
+    ports: ["${CORE_PORT}:${CORE_PORT}"]
+
+  # ---------- hr (Teratai: HRIS & ESS) ----------
+  hr-migrate:
+    image: migrate/migrate:v4.18.1
+    volumes: ["./services/hr/migrations:/migrations"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${HR_DB_NAME:-teratai_hr}?sslmode=disable", "up"]
+    restart: "no"
+
+  hr:
+    build: ./services/hr
+    restart: unless-stopped
+    depends_on:
+      hr-migrate:
+        condition: service_completed_successfully
+      identity:
+        condition: service_started
+    environment:
+      PORT: ${HR_PORT}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${HR_DB_NAME:-teratai_hr}?sslmode=disable
+      APP_ENV: ${APP_ENV:-production}
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      HR_ENC_KEY: ${HR_ENC_KEY}
+      HR_BLIND_KEY: ${HR_BLIND_KEY}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      IDENTITY_URL: http://identity:${IDENTITY_PORT}
+      CORE_URL: http://core:${CORE_PORT:-8091}
+      NOTIFICATION_URL: http://notification:${NOTIFICATION_PORT}
+      STORAGE_ROOT: /data/private
+    volumes: ["hr_files:/data/private"]
+    ports: ["${HR_PORT}:${HR_PORT}"]
+
   # ---------- accounting ----------
   # Laravel, served under /accounting/ by `web` (see web/nginx.conf). No
   # accounting-migrate sidecar: its entrypoint migrates only the shared `public`
@@ -380,6 +441,8 @@ services:
       - admission
       - notification
       - billing
+      - core
+      - hr
     networks:
       - default
       - edge
@@ -387,6 +450,7 @@ services:
 volumes:
   admission_files:
   billing_files:
+  hr_files:
 
 networks:
   default:
