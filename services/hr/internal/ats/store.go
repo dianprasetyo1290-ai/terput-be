@@ -91,7 +91,7 @@ func (s *Store) ListStages(ctx context.Context, schoolID string) ([]PipelineStag
 
 func (s *Store) ListRequisitions(ctx context.Context, schoolID string) ([]Requisition, error) {
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT r.id, r.school_id, r.position_id, COALESCE(p.title, '') as position_name,
+		SELECT r.id, r.school_id, r.position_id, COALESCE(p.name, '') as position_name,
 		       r.department_id, r.quantity, r.reason, r.replaces_employee_id, r.qualifications,
 		       r.budget_idr, r.exceeds_headcount, r.status, r.filled_count, r.approval_id,
 		       r.requested_by, r.idempotency_key, r.created_at, r.updated_at
@@ -124,11 +124,16 @@ func (s *Store) CreateRequisition(ctx context.Context, req Requisition) (*Requis
 	if req.IdempotencyKey == "" {
 		req.IdempotencyKey = fmt.Sprintf("req-%d", time.Now().UnixNano())
 	}
-	// Check headcount vacancy
-	var targetCount, filledCount int
+	// Check headcount vacancy from headcount_plans and active assignments
+	var targetCount int
 	_ = s.DB.QueryRowContext(ctx, `
-		SELECT target_headcount, filled_headcount FROM positions WHERE id = $1 AND school_id = $2
-	`, req.PositionID, req.SchoolID).Scan(&targetCount, &filledCount)
+		SELECT COALESCE(planned, 0) FROM headcount_plans WHERE position_id = $1 AND school_id = $2 ORDER BY created_at DESC LIMIT 1
+	`, req.PositionID, req.SchoolID).Scan(&targetCount)
+
+	var filledCount int
+	_ = s.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM employment_assignments WHERE position_id = $1 AND school_id = $2 AND is_primary = true
+	`, req.PositionID, req.SchoolID).Scan(&filledCount)
 
 	vacant := targetCount - filledCount
 	if vacant < 0 {
@@ -603,7 +608,7 @@ func (s *Store) CreateOffer(ctx context.Context, off Offer) (*Offer, error) {
 	// Check salary range from position
 	var minSalary, maxSalary int64
 	_ = s.DB.QueryRowContext(ctx, `
-		SELECT COALESCE(min_salary, 0), COALESCE(max_salary, 0)
+		SELECT COALESCE(salary_min_idr, 0), COALESCE(salary_max_idr, 0)
 		FROM positions WHERE id = $1 AND school_id = $2
 	`, off.PositionID, off.SchoolID).Scan(&minSalary, &maxSalary)
 

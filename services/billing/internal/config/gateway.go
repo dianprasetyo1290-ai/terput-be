@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	_ "time/tzdata"
 )
 
 // Gateway holds the payment-gateway (T6) settings. NICEPay credentials have

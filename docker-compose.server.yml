@@ -1,0 +1,42 @@
+# Server override for 43.157.207.147 (shared box, edge-nginx serves /teratai/).
+# Postgres = shared-postgres, attached to teratai_net with alias "postgres".
+# No host ports: everything is reached through edge-nginx -> web.
+x-lim: &lim
+  deploy: { resources: { limits: { memory: 192m, cpus: "0.3" } } }
+services:
+  redis: { <<: *lim, deploy: { resources: { limits: { memory: 64m } } } }
+  identity: { <<: *lim, ports: !reset [] }
+  academic: { <<: *lim, ports: !reset [] }
+  attendance: { <<: *lim, ports: !reset [] }
+  exam: { <<: *lim, ports: !reset [] }
+  evaluation: { <<: *lim, ports: !reset [] }
+  report: { <<: *lim, ports: !reset [] }
+  admission:
+    <<: *lim
+    ports: !reset []
+    environment:
+      ADMISSION_SCHOOL_ID: ${ADMISSION_SCHOOL_ID}
+      SCHOOL_NAME: Teratai Putih Global School
+      # OTP wali PPDB lewat email (SMTP), bukan WA. Kredensial = SMTP PASSIN di box ini.
+      APP_ENV: production
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME}
+      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS}
+  notification: { <<: *lim, ports: !reset [] }
+  billing: { <<: *lim, ports: !reset [] }
+  core: { <<: *lim, ports: !reset [] }
+  hr: { <<: *lim, ports: !reset [] }
+  accounting:
+    ports: !reset []
+    deploy: { resources: { limits: { memory: 384m, cpus: "0.5" } } }
+  web:
+    container_name: teratai-web
+    ports: !reset []
+    networks: [default, edge]
+    deploy: { resources: { limits: { memory: 64m } } }
+networks:
+  default: { name: teratai_net, external: true }
+  edge: { external: true }

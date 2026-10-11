@@ -6,7 +6,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/billing-service ./cmd/server
 
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=build /out/billing-service ./billing-service
 COPY migrations ./migrations
