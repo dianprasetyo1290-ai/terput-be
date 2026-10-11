@@ -1,0 +1,2 @@
+ALTER TABLE users DROP COLUMN IF EXISTS deactivate_at;
+ALTER TABLE users DROP COLUMN IF EXISTS managed_by_hr;

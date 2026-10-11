@@ -48,6 +48,11 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if user.DeactivateAt != nil && !user.DeactivateAt.After(time.Now()) {
+		common.WriteError(w, http.StatusUnauthorized, "account is deactivated")
+		return
+	}
+
 	roles, err := store.UserRoles(a.DB, user.ID)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "login failed")
@@ -90,6 +95,12 @@ func (a *App) SwitchRole(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Role == "" {
 		common.WriteError(w, http.StatusBadRequest, "role is required")
+		return
+	}
+
+	// A deactivated (offboarded) account must not mint fresh tokens either.
+	if user, err := store.FindUserByID(a.DB, claims.UserID); err != nil || (user.DeactivateAt != nil && !user.DeactivateAt.After(time.Now())) {
+		common.WriteError(w, http.StatusUnauthorized, "account is deactivated")
 		return
 	}
 
