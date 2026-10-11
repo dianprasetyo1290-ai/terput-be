@@ -1,9 +1,13 @@
 package handler
 
 import (
+	"bytes"
+	"context"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"skci/identity/internal/client"
 	"skci/identity/internal/common"
@@ -16,10 +20,64 @@ type App struct {
 	InternalKey string
 	Exam        *client.ExamClient
 	Academic    *client.AcademicClient
+	CoreURL     string
 }
 
 func NewApp(db *sql.DB, jwtSecret, internalKey string) *App {
-	return &App{DB: db, JWTSecret: jwtSecret, InternalKey: internalKey, Exam: client.NewExamClient(), Academic: client.NewAcademicClient()}
+	return &App{
+		DB:          db,
+		JWTSecret:   jwtSecret,
+		InternalKey: internalKey,
+		Exam:        client.NewExamClient(),
+		Academic:    client.NewAcademicClient(),
+		CoreURL:     "http://localhost:8091",
+	}
+}
+
+// RecordSecurityAudit dispatches an asynchronous security audit event to core service.
+func (a *App) RecordSecurityAudit(schoolID *string, action, entityID string, actorUserID *string, actorRole *string, before, after any, reason string, correlationID string) {
+	if a.CoreURL == "" {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		payload := map[string]any{
+			"school_id":      schoolID,
+			"service":        "identity",
+			"module":         "security",
+			"entity_type":    "user",
+			"entity_id":      entityID,
+			"action":         action,
+			"actor_user_id":  actorUserID,
+			"actor_role":     actorRole,
+			"before":         before,
+			"after":          after,
+			"reason":         reason,
+			"correlation_id": correlationID,
+		}
+
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(a.CoreURL, "/")+"/internal/audit", bytes.NewReader(body))
+		if err != nil {
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Internal-Key", a.InternalKey)
+
+		cl := &http.Client{Timeout: 2 * time.Second}
+		resp, err := cl.Do(req)
+		if err != nil {
+			common.CaptureError(err)
+			return
+		}
+		defer resp.Body.Close()
+	}()
 }
 
 // requireRole rejects the request unless the caller's active_role is one of

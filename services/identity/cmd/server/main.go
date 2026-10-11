@@ -66,6 +66,7 @@ func main() {
 	}
 
 	app := handler.NewApp(db, jwtSecret, internalKey)
+	app.CoreURL = getenv("CORE_URL", "http://localhost:8091")
 
 	// Redis response cache (client request 2026-08-29): fails open if
 	// REDIS_URL is unset/unreachable, see internal/cache's doc comment.

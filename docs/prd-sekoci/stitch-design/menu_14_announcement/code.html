@@ -1,0 +1,893 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta content="width=device-width, initial-scale=1.0" name="viewport"><meta content="web_dashboard" name="shell-type"><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&amp;display=swap" rel="stylesheet"><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={"darkMode":"class","theme":{"extend":{"colors":{"surface":"#FFFFFF","error":"#DC2626","primary":"#004ac6","outline":"#737686","surface-tint":"#0053db","surface-variant":"#dae2fd","surface-container-high":"#e2e7ff","secondary-container":"#d0e1fb","surface-dim":"#d2d9f4","inverse-surface":"#283044","secondary-fixed-dim":"#b7c8e1","inverse-primary":"#b4c5ff","on-surface-variant":"#434655","tertiary-fixed-dim":"#b8c4ff","success-light":"#F0FDF4","surface-container":"#eaedff","on-secondary-container":"#54647a","surface-container-highest":"#dae2fd","on-error-container":"#93000a","muted":"#94A3B8","on-background":"#131b2e","success":"#16A34A","border":"#E2E8F0","surface-container-low":"#f2f3ff","on-secondary-fixed-variant":"#38485d","primary-fixed":"#dbe1ff","error-light":"#FEF2F2","tertiary-container":"#4865d4","inverse-on-surface":"#eef0ff","warning":"#D97706","primary-light":"#EFF6FF","on-secondary":"#ffffff","background":"#F8FAFC","tertiary":"#2c4bb9","outline-variant":"#c3c6d7","info":"#0284C7","on-error":"#ffffff","on-primary-fixed-variant":"#003ea8","secondary-fixed":"#d3e4fe","warning-light":"#FFFBEB","on-secondary-fixed":"#0b1c30","error-container":"#ffdad6","on-tertiary-fixed":"#001453","primary-fixed-dim":"#b4c5ff","on-tertiary":"#ffffff","info-light":"#F0F9FF","surface-bright":"#faf8ff","on-tertiary-fixed-variant":"#173bab","on-primary":"#ffffff","surface-container-lowest":"#ffffff","primary-container":"#2563eb","on-tertiary-container":"#eff0ff","tertiary-fixed":"#dde1ff","on-primary-container":"#eeefff","on-primary-fixed":"#00174b","on-surface":"#131b2e","secondary":"#505f76"},"borderRadius":{"DEFAULT":"0.125rem","lg":"0.25rem","xl":"0.5rem","full":"0.75rem"},"spacing":{"space-xl":"1.5rem","gutter":"1.5rem","space-2xs":"0.25rem","space-2xl":"2rem","space-lg":"1.25rem","space-md":"1rem","margin-mobile":"1rem","space-4xl":"3rem","space-sm":"0.75rem","space-xs":"0.5rem","space-3xl":"2.5rem","gutter-mobile":"1rem","margin":"2rem"},"fontFamily":{"display":["Inter"],"card-title":["Inter"],"display-mobile":["Inter"],"caption":["Inter"],"section-title":["Inter"],"body-small":["Inter"],"label":["Inter"],"body-medium":["Inter"],"body-default":["Inter"],"page-title":["Inter"],"page-title-mobile":["Inter"]},"fontSize":{"display":["32px",{"lineHeight":"40px","letterSpacing":"-0.02em","fontWeight":"700"}],"card-title":["16px",{"lineHeight":"24px","letterSpacing":"-0.005em","fontWeight":"600"}],"display-mobile":["24px",{"lineHeight":"32px","letterSpacing":"-0.015em","fontWeight":"700"}],"caption":["11px",{"lineHeight":"14px","letterSpacing":"0.01em","fontWeight":"400"}],"section-title":["18px",{"lineHeight":"24px","letterSpacing":"-0.01em","fontWeight":"600"}],"body-small":["13px",{"lineHeight":"18px","fontWeight":"400"}],"label":["12px",{"lineHeight":"16px","letterSpacing":"0.01em","fontWeight":"500"}],"body-medium":["14px",{"lineHeight":"20px","fontWeight":"500"}],"body-default":["14px",{"lineHeight":"20px","fontWeight":"400"}],"page-title":["24px",{"lineHeight":"32px","letterSpacing":"-0.015em","fontWeight":"600"}],"page-title-mobile":["20px",{"lineHeight":"28px","letterSpacing":"-0.01em","fontWeight":"600"}]}}}};</script></head><body class="bg-background font-body-default text-body-default text-on-surface antialiased"><aside class="fixed left-0 top-0 h-full w-72 bg-surface border-r border-border z-50 flex flex-col"><div class="h-16 px-space-md flex items-center justify-between border-b border-border bg-surface"><div class="flex items-center gap-space-xs"><div class="w-8 h-8 rounded-xl bg-primary-container flex items-center justify-center"><span class="material-symbols-outlined text-white text-[20px]">school</span></div><div class="flex flex-col"><span class="font-card-title text-card-title text-on-surface leading-none tracking-tight font-bold">SEKOCI</span><span class="font-caption text-caption text-muted">School Management</span></div></div><span class="material-symbols-outlined text-muted text-[18px] cursor-pointer hover:text-on-surface transition-colors">dock_to_right</span></div><div class="flex-1 overflow-y-auto px-space-sm py-space-sm space-y-space-md"><nav class="space-y-space-2xs" data-active-classes="bg-primary-container text-on-primary-container font-medium rounded-xl"><div class="px-space-xs py-space-2xs font-caption text-caption uppercase font-semibold text-muted tracking-wider">OVERVIEW</div><a class="flex items-center gap-space-xs px-space-sm py-space-xs rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-medium text-body-medium" data-path="dashboard-beranda" href="#"><span class="material-symbols-outlined text-[18px]">grid_view</span><span>Dashboard Beranda</span></a></nav><nav class="space-y-space-2xs" data-active-classes="bg-primary-container text-on-primary-container font-medium rounded-xl"><div class="px-space-xs py-space-2xs font-caption text-caption uppercase font-semibold text-muted tracking-wider">PLATFORM FOUNDATION</div><a class="flex items-center gap-space-xs px-space-sm py-space-xs rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-medium text-body-medium" data-path="org-unit" href="#"><span class="material-symbols-outlined text-[18px]">apartment</span><span>01 Org &amp; Unit</span></a><a class="flex items-center gap-space-xs px-space-sm py-space-xs rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-medium text-body-medium" data-path="academic-year" href="#"><span class="material-symbols-outlined text-[18px]">calendar_today</span><span>02 Academic Year</span></a><a class="flex items-center gap-space-xs px-space-sm py-space-xs rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-medium text-body-medium" data-path="master-data" href="#"><span class="material-symbols-outlined text-[18px]">database</span><span>03 Master Data</span></a><a class="flex items-center gap-space-xs px-space-sm py-space-xs rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-medium text-body-medium" data-path="import-migration" href="#"><span class="material-symbols-outlined text-[18px]">upload_file</span><span>04 Import &amp; Migration</span></a><a class="flex items-center gap-space-xs px-space-sm py-space-xs rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-medium text-body-medium" data-path="user-access" href="#"><span class="material-symbols-outlined text-[18px]">admin_panel_settings</span><span>05 User &amp; Access</span></a><a class="flex items-center gap-space-xs px-space-sm py-space-xs rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-medium text-body-medium" data-path="audit-trail" href="#"><span class="material-symbols-outlined text-[18px]">history</span><span>06 Audit Trail</span></a><a class="flex items-center gap-space-xs px-space-sm py-space-xs rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-medium text-body-medium" data-path="notifications-config" href="#"><span class="material-symbols-outlined text-[18px]">campaign</span><span>07 Notifications</span></a></nav><nav class="space-y-space-2xs" data-active-classes="bg-primary-container text-on-primary-container font-medium rounded-xl"><div class="px-space-xs py-space-2xs font-caption text-caption uppercase font-semibold text-muted tracking-wider">PPDB (ADMISSION)</div><a class="flex items-center gap-space-xs px-space-sm py-space-xs rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-medium text-body-medium" data-path="ppdb-dashboard" href="#"><span class="material-symbols-outlined text-[18px]">analytics</span><span>08 PPDB Dashboard</span></a><a class="flex items-center gap-space-xs px-space-sm py-space-xs rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-medium text-body-medium" data-path="konfigurasi-ppdb" href="#"><span class="material-symbols-outlined text-[18px]">settings</span><span>09 Konfigurasi PPDB</span></a><a class="flex items-center gap-space-xs px-space-sm py-space-xs rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-medium text-body-medium" data-path="data-pendaftar" href="#"><span class="material-symbols-outlined text-[18px]">groups</span><span>10 Data Pendaftar</span></a><a class="flex items-center gap-space-xs px-space-sm py-space-xs rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-medium text-body-medium" data-path="verifikasi-berkas" href="#"><span class="material-symbols-outlined text-[18px]">verified</span><span>12 Verifikasi Berkas</span></a><a class="flex items-center gap-space-xs px-space-sm py-space-xs rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-medium text-body-medium" data-path="seleksi-pengumuman" href="#"><span class="material-symbols-outlined text-[18px]">fact_check</span><span>13/14 Seleksi &amp; Pengumuman</span></a><a class="flex items-center gap-space-xs px-space-sm py-space-xs rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-medium text-body-medium" data-path="daftar-ulang" href="#"><span class="material-symbols-outlined text-[18px]">how_to_reg</span><span>15 Daftar Ulang</span></a></nav><nav class="space-y-space-2xs" data-active-classes="bg-primary-container text-on-primary-container font-medium rounded-xl"><div class="px-space-xs py-space-2xs font-caption text-caption uppercase font-semibold text-muted tracking-wider">CORE EXTENSIONS</div><a class="flex items-center gap-space-xs px-space-sm py-space-xs rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-medium text-body-medium" data-path="approval-center" href="#"><span class="material-symbols-outlined text-[18px]">assignment_turned_in</span><span>79 Approval Center</span></a><a class="flex items-center gap-space-xs px-space-sm py-space-xs rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors font-body-medium text-body-medium" data-path="exception-queue" href="#"><span class="material-symbols-outlined text-[18px]">error_outline</span><span>80 Exception Queue</span></a></nav></div><div class="p-space-sm border-t border-border bg-surface"><div class="flex items-center justify-between text-muted font-caption text-caption px-space-xs"><span>Version 2.4.0</span><span class="px-space-2xs py-0.5 rounded bg-surface-container font-medium text-on-surface-variant">STABLE</span></div></div></aside><div class="pl-72"><header class="fixed top-0 left-72 right-0 h-16 bg-surface border-b border-border z-40 flex items-center justify-between px-space-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]"><div class="flex items-center gap-space-md"><div class="flex items-center gap-space-xs text-on-surface-variant font-body-medium text-body-medium"><div class="flex items-center gap-1 px-space-xs py-1 rounded-lg bg-surface-container border border-border cursor-pointer hover:bg-surface-variant transition-colors"><span class="material-symbols-outlined text-[16px] text-primary">domain</span><span class="font-label text-label text-on-surface font-semibold">Yayasan Pendidikan Nusantara</span><span class="material-symbols-outlined text-[16px] text-muted">arrow_drop_down</span></div><span class="text-muted">/</span><div class="flex items-center gap-1 px-space-xs py-1 rounded-lg bg-surface-container border border-border cursor-pointer hover:bg-surface-variant transition-colors"><span class="material-symbols-outlined text-[16px] text-primary">school</span><span class="font-label text-label text-on-surface font-semibold">Unit SMP Nusantara</span><span class="material-symbols-outlined text-[16px] text-muted">arrow_drop_down</span></div><span class="text-muted">/</span><div class="flex items-center gap-1 px-space-xs py-1 rounded-lg bg-primary-light border border-border cursor-pointer"><span class="material-symbols-outlined text-[16px] text-primary">event</span><span class="font-label text-label text-primary font-semibold">2026/2027 Ganjil</span><span class="material-symbols-outlined text-[16px] text-primary">arrow_drop_down</span></div></div></div><div class="flex items-center gap-space-md"><div class="relative flex items-center"><span class="material-symbols-outlined absolute left-space-xs text-muted text-[18px]">search</span><input class="w-64 h-9 pl-8 pr-14 text-body-small font-body-small bg-background border border-border rounded-xl focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-all placeholder:text-muted" placeholder="Cari modul, siswa, berkas..." type="text"><kbd class="absolute right-space-xs px-1.5 py-0.5 text-[10px] font-medium bg-surface text-muted border border-border rounded">Ctrl+K</kbd></div><div class="h-6 w-[1px] bg-border"></div><button class="relative p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors"><span class="material-symbols-outlined text-[20px]">notifications</span><span class="absolute top-1 right-1 w-2 h-2 rounded-full bg-error ring-2 ring-surface"></span></button><div class="flex items-center gap-space-xs pl-space-xs"><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div><div class="flex flex-col text-left"><span class="font-label text-label font-semibold text-on-surface leading-tight">David Pambudi</span><span class="font-caption text-caption text-muted leading-tight">Super Admin</span></div><span class="material-symbols-outlined text-muted text-[16px] cursor-pointer">expand_more</span></div></div></header><main class="relative pt-16 w-full bg-background min-h-screen"><div class="flex flex-col w-full p-8 gap-6 text-on-surface">
+<!-- Top Traceability & Navigation Bar -->
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2">
+<div class="flex flex-col gap-1.5">
+<div class="flex items-center gap-2 text-muted font-caption text-caption flex-wrap">
+<span>PPDB Online</span>
+<span class="material-symbols-outlined text-[14px]">chevron_right</span>
+<span>Alur Masuk Siswa</span>
+<span class="material-symbols-outlined text-[14px]">chevron_right</span>
+<span class="text-primary font-semibold">06. Pengumuman Kelulusan (Menu 14)</span>
+<span class="text-outline-variant">|</span>
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-secondary-container font-label text-label font-semibold">FR-14-001</span>
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-secondary-container font-label text-label font-semibold">FR-14-002</span>
+<span class="px-2 py-0.5 rounded bg-primary-light text-primary font-label text-label font-semibold">AC-14-01 Scheduled Release Protocol</span>
+</div>
+<div class="flex items-center gap-3">
+<h1 class="font-page-title text-page-title text-on-surface tracking-tight">Pengumuman Hasil Seleksi PPDB</h1>
+<span class="px-2.5 py-1 rounded bg-success-light text-success font-label text-label font-semibold flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
+          Gelombang 1
+        </span>
+</div>
+<p class="font-body-small text-body-small text-muted max-w-4xl">
+        Manajemen rilis keputusan hasil seleksi, penjadwalan publikasi otomatis, dispatch notifikasi multi-kanal (WhatsApp &amp; Email), dan penerbitan Surat Keputusan (SK) Kelulusan resmi.
+      </p>
+</div>
+<div class="flex items-center gap-3 self-start md:self-auto">
+<button class="h-9 px-4 rounded bg-surface text-on-surface font-body-medium text-body-medium font-semibold hover:bg-surface-container shadow-sm flex items-center gap-2 transition-all" type="button">
+<span class="material-symbols-outlined text-[18px] text-muted">visibility</span>
+<span>Preview Halaman Publik Orang Tua</span>
+</button>
+<button class="h-9 px-4 rounded bg-primary-container text-on-primary font-body-medium text-body-medium font-semibold hover:bg-primary shadow-sm flex items-center gap-2 transition-all" id="btnReleaseAction" type="button">
+<span class="material-symbols-outlined text-[18px]">cell_tower</span>
+<span>Jadwalkan &amp; Rilis Pengumuman</span>
+</button>
+</div>
+</div>
+<!-- Four Uniform KPI Metric Cards -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+<!-- Card 1 -->
+<div class="bg-surface rounded-xl p-5 shadow-sm flex flex-col justify-between gap-3">
+<div class="flex items-center justify-between">
+<span class="font-caption text-caption uppercase font-semibold text-muted tracking-wider">Status Rilis Pengumuman</span>
+<span class="material-symbols-outlined text-muted text-[20px]">schedule_send</span>
+</div>
+<div>
+<div class="font-section-title text-section-title text-on-surface font-bold flex items-center gap-2">
+<span>Terjadwal Otomatis</span>
+</div>
+<p class="font-body-small text-body-small text-muted mt-0.5">Rilis 01 Nov 2026, 10:00 WIB</p>
+</div>
+<div class="flex items-center gap-1.5 pt-2">
+<span class="px-2 py-0.5 rounded bg-info-light text-info font-label text-label font-medium flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-info"></span>
+          Auto-Publish Aktif (AC-14-01)
+        </span>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="bg-surface rounded-xl p-5 shadow-sm flex flex-col justify-between gap-3">
+<div class="flex items-center justify-between">
+<span class="font-caption text-caption uppercase font-semibold text-muted tracking-wider">Total Hasil Seleksi</span>
+<span class="material-symbols-outlined text-muted text-[20px]">groups</span>
+</div>
+<div>
+<div class="font-section-title text-section-title text-on-surface font-bold">376 Siswa</div>
+<p class="font-body-small text-body-small text-muted mt-0.5">Lulus: <span class="text-success font-semibold">310</span> | Cad: <span class="text-warning font-semibold">50</span> | Gagal: <span class="text-error font-semibold">16</span></p>
+</div>
+<div class="w-full bg-surface-container rounded-full h-1.5 overflow-hidden flex">
+<div class="bg-success h-full" style="width: 82.4%"></div>
+<div class="bg-warning h-full" style="width: 13.3%"></div>
+<div class="bg-error h-full" style="width: 4.3%"></div>
+</div>
+</div>
+<!-- Card 3 -->
+<div class="bg-surface rounded-xl p-5 shadow-sm flex flex-col justify-between gap-3">
+<div class="flex items-center justify-between">
+<span class="font-caption text-caption uppercase font-semibold text-muted tracking-wider">Saluran Dispatch Terpasang</span>
+<span class="material-symbols-outlined text-muted text-[20px]">hub</span>
+</div>
+<div>
+<div class="font-section-title text-section-title text-on-surface font-bold flex items-center gap-1.5">
+<span>WA Gateway &amp; SMTP</span>
+</div>
+<p class="font-body-small text-body-small text-muted mt-0.5">98.4% WA Valid | 100% Email OK</p>
+</div>
+<div class="flex items-center gap-2 pt-2">
+<span class="px-2 py-0.5 rounded bg-success-light text-success font-label text-label font-medium flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px]">check_circle</span>
+          Siap Kirim Otomatis
+        </span>
+</div>
+</div>
+<!-- Card 4 -->
+<div class="bg-surface rounded-xl p-5 shadow-sm flex flex-col justify-between gap-3">
+<div class="flex items-center justify-between">
+<span class="font-caption text-caption uppercase font-semibold text-muted tracking-wider">Akses Portal &amp; Unduh SK</span>
+<span class="material-symbols-outlined text-muted text-[20px]">lock</span>
+</div>
+<div>
+<div class="font-section-title text-section-title text-on-surface font-bold">0 Unduhan</div>
+<p class="font-body-small text-body-small text-muted mt-0.5">Terkunci hingga waktu rilis AC-14-01</p>
+</div>
+<div class="flex items-center gap-1.5 pt-2">
+<span class="px-2 py-0.5 rounded bg-warning-light text-warning font-label text-label font-medium flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px]">shield_lock</span>
+          Enkripsi Portal Aktif
+        </span>
+</div>
+</div>
+</div>
+<!-- Scheduled Release Security & Countdown Banner (FR-14-001, AC-14-01) -->
+<div class="bg-surface rounded-xl shadow-sm p-6 relative overflow-hidden">
+<div class="absolute -right-10 -bottom-10 w-64 h-64 bg-primary-light rounded-full opacity-40 pointer-events-none"></div>
+<div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 relative z-10">
+<div class="flex items-start gap-4 max-w-3xl">
+<div class="w-12 h-12 rounded-xl bg-primary-light flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-primary text-[28px]">lock_clock</span>
+</div>
+<div class="flex flex-col gap-1.5">
+<div class="flex items-center gap-2 flex-wrap">
+<span class="font-section-title text-section-title font-bold text-on-surface">Protokol Keamanan Waktu Rilis (AC-14-01)</span>
+<span class="px-2 py-0.5 rounded bg-primary text-on-primary font-caption text-caption uppercase font-semibold">Enkripsi Publik Aktif</span>
+</div>
+<p class="font-body-default text-body-default text-muted leading-relaxed">
+            Hasil seleksi telah disahkan oleh Approval Center (<strong class="text-on-surface font-semibold">APV-2026-PPDB-01</strong>) namun <strong class="text-error font-semibold">TERKUNCI secara sistematis</strong> dan TIDAK AKAN ditampilkan kepada pendaftar/orang tua sebelum tanggal <strong>01 November 2026, tepat pukul 10:00 WIB</strong>. Pukul 09:59 hasil tetap berstatus rahasia negara/institusi.
+          </p>
+<div class="flex items-center gap-4 text-muted font-caption text-caption mt-1">
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[15px] text-success">verified_user</span> SHA-256 Checksum Valid</span>
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[15px] text-info">lock</span> Parent Portal API Endpoint Muted</span>
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[15px] text-primary">policy</span> Compliance BR-GEN-09</span>
+</div>
+</div>
+</div>
+<!-- Live Countdown Module -->
+<div class="bg-surface-container rounded-xl p-4 flex flex-col items-center justify-center min-w-[300px] w-full lg:w-auto shadow-sm">
+<div class="font-caption text-caption font-semibold text-muted uppercase tracking-wider mb-2 flex items-center gap-1">
+<span class="w-2 h-2 rounded-full bg-error animate-ping"></span>
+          Hitung Mundur Publikasi Terjadwal
+        </div>
+<div class="flex items-center gap-2" id="countdownClock">
+<div class="flex flex-col items-center bg-surface px-3 py-2 rounded-lg shadow-sm">
+<span class="font-page-title text-page-title font-bold text-primary leading-none" id="cdDays">01</span>
+<span class="text-[10px] uppercase font-semibold text-muted mt-1">Hari</span>
+</div>
+<span class="font-page-title text-page-title font-bold text-muted leading-none">:</span>
+<div class="flex flex-col items-center bg-surface px-3 py-2 rounded-lg shadow-sm">
+<span class="font-page-title text-page-title font-bold text-primary leading-none" id="cdHours">14</span>
+<span class="text-[10px] uppercase font-semibold text-muted mt-1">Jam</span>
+</div>
+<span class="font-page-title text-page-title font-bold text-muted leading-none">:</span>
+<div class="flex flex-col items-center bg-surface px-3 py-2 rounded-lg shadow-sm">
+<span class="font-page-title text-page-title font-bold text-primary leading-none" id="cdMinutes">22</span>
+<span class="text-[10px] uppercase font-semibold text-muted mt-1">Menit</span>
+</div>
+<span class="font-page-title text-page-title font-bold text-muted leading-none">:</span>
+<div class="flex flex-col items-center bg-surface px-3 py-2 rounded-lg shadow-sm">
+<span class="font-page-title text-page-title font-bold text-error leading-none" id="cdSeconds">02</span>
+<span class="text-[10px] uppercase font-semibold text-muted mt-1">Detik</span>
+</div>
+</div>
+<div class="mt-3 text-center">
+<span class="text-[11px] text-on-surface-variant font-medium">Auto-trigger: Dispatch WA &amp; Email instan</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Main Work Area (Split 65% : 35%) -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+<!-- Left Column (65%): Daftar Keputusan Kelulusan & Generator SK Resmi -->
+<div class="lg:col-span-8 flex flex-col gap-4">
+<div class="bg-surface rounded-xl shadow-sm p-5 flex flex-col gap-4">
+<!-- Section Header -->
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[22px]">assignment_turned_in</span>
+<h2 class="font-section-title text-section-title font-bold text-on-surface">Daftar Keputusan &amp; Penerbitan SK</h2>
+<span class="px-2 py-0.5 rounded-full bg-surface-container font-caption text-caption font-semibold text-muted">376 Peserta</span>
+</div>
+<div class="flex items-center gap-2">
+<button class="h-8 px-3 rounded bg-surface-container text-on-surface font-body-small text-body-small font-medium hover:bg-surface-variant transition-colors flex items-center gap-1.5" type="button">
+<span class="material-symbols-outlined text-[16px]">print</span>
+              Cetak Rekap Sidang
+            </button>
+<button class="h-8 px-3 rounded bg-primary-light text-primary font-body-small text-body-small font-semibold hover:bg-primary hover:text-on-primary transition-all flex items-center gap-1.5" type="button">
+<span class="material-symbols-outlined text-[16px]">fact_check</span>
+              Sync Menu 13
+            </button>
+</div>
+</div>
+<!-- Filter Controls -->
+<div class="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-1">
+<div class="sm:col-span-5 relative">
+<span class="material-symbols-outlined absolute left-3 top-2.5 text-muted text-[18px]">search</span>
+<input class="w-full h-9 pl-9 pr-3 bg-surface-container-low rounded font-body-small text-body-small text-on-surface placeholder:text-muted focus:outline-none focus:bg-surface focus:shadow-sm transition-all" id="searchInput" placeholder="Cari nomor registrasi, nama siswa, NISN..." type="text">
+</div>
+<div class="sm:col-span-2">
+<select class="w-full h-9 px-2.5 bg-surface-container-low rounded font-body-small text-body-small text-on-surface focus:outline-none focus:bg-surface transition-all" id="filterStatus">
+<option value="ALL">Semua Keputusan</option>
+<option value="LULUS">Diterima (310)</option>
+<option value="CADANGAN">Cadangan (50)</option>
+<option value="TIDAK_LOLOS">Tidak Lolos (16)</option>
+</select>
+</div>
+<div class="sm:col-span-3">
+<select class="w-full h-9 px-2.5 bg-surface-container-low rounded font-body-small text-body-small text-on-surface focus:outline-none focus:bg-surface transition-all" id="filterJalur">
+<option value="ALL">Semua Jalur Masuk</option>
+<option value="PRESTASI">Jalur Prestasi Akademik</option>
+<option value="REGULER">Jalur Reguler Tes</option>
+<option value="TAHFIZH">Jalur Tahfizh Al-Qur'an</option>
+<option value="AFIRMASI">Jalur Afirmasi / Mitra</option>
+</select>
+</div>
+<div class="sm:col-span-2">
+<select class="w-full h-9 px-2.5 bg-surface-container-low rounded font-body-small text-body-small text-on-surface focus:outline-none focus:bg-surface transition-all" id="filterSK">
+<option value="ALL">Status Dokumen SK</option>
+<option value="READY">SK Siap (376)</option>
+<option value="PENDING">Draft Belum Siap (0)</option>
+</select>
+</div>
+</div>
+<!-- Table Container -->
+<div class="overflow-x-auto rounded-lg shadow-sm">
+<table class="w-full text-left font-body-small text-body-small">
+<thead class="bg-surface-container-low text-muted font-caption text-caption uppercase font-semibold">
+<tr>
+<th class="p-3 w-10 text-center">
+<input checked="" class="rounded accent-primary cursor-pointer" id="checkAll" type="checkbox">
+</th>
+<th class="p-3">Calon Siswa &amp; No. Reg</th>
+<th class="p-3">Jalur &amp; Skor Akhir</th>
+<th class="p-3">Keputusan Resmi</th>
+<th class="p-3">Dokumen SK Resmi</th>
+<th class="p-3">Antrean Kanal</th>
+<th class="p-3 text-right">Aksi Tindakan</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-surface-container" id="candidateTableBody">
+<!-- Row 1 -->
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="p-3 text-center">
+<input checked="" class="row-checkbox rounded accent-primary cursor-pointer" type="checkbox">
+</td>
+<td class="p-3">
+<div class="flex flex-col">
+<span class="font-body-medium text-body-medium font-semibold text-on-surface">Ahmad Faiz Ramadhan</span>
+<span class="font-caption text-caption text-muted">REG-2026-0042 • NISN: 0098231901</span>
+</div>
+</td>
+<td class="p-3">
+<div class="flex flex-col">
+<span class="font-medium text-on-surface">Prestasi Akademik</span>
+<span class="font-caption text-caption text-muted">Skor Sidang: <strong class="text-primary font-semibold">94.80</strong></span>
+</div>
+</td>
+<td class="p-3">
+<span class="px-2.5 py-1 rounded bg-success-light text-success font-label text-label font-semibold inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+                    Diterima / Lulus Utama
+                  </span>
+</td>
+<td class="p-3">
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-secondary-container font-caption text-caption font-semibold flex items-center gap-1 w-max">
+<span class="material-symbols-outlined text-[13px] text-primary">description</span>
+                    SK-KLL-2026-0042.pdf
+                  </span>
+</td>
+<td class="p-3">
+<div class="flex items-center gap-1">
+<span class="px-1.5 py-0.5 rounded bg-info-light text-info text-[11px] font-semibold" title="WhatsApp Siap">WA</span>
+<span class="px-1.5 py-0.5 rounded bg-info-light text-info text-[11px] font-semibold" title="Email Siap">Mail</span>
+</div>
+</td>
+<td class="p-3 text-right">
+<div class="flex items-center justify-end gap-1">
+<button class="p-1.5 rounded hover:bg-surface-container text-muted hover:text-primary transition-colors" onclick="previewSK('Ahmad Faiz Ramadhan', 'REG-2026-0042', 'LULUS UTAMA', '94.80')" title="Lihat Preview Dokumen PDF" type="button">
+<span class="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+</button>
+<button class="p-1.5 rounded hover:bg-surface-container text-muted hover:text-success transition-colors" onclick="testNotification('Ahmad Faiz Ramadhan', '08129845112')" title="Kirim Pesan Tes" type="button">
+<span class="material-symbols-outlined text-[18px]">send</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="p-3 text-center">
+<input checked="" class="row-checkbox rounded accent-primary cursor-pointer" type="checkbox">
+</td>
+<td class="p-3">
+<div class="flex flex-col">
+<span class="font-body-medium text-body-medium font-semibold text-on-surface">Nadira Safitri Putri</span>
+<span class="font-caption text-caption text-muted">REG-2026-0089 • NISN: 0098442110</span>
+</div>
+</td>
+<td class="p-3">
+<div class="flex flex-col">
+<span class="font-medium text-on-surface">Tahfizh Al-Qur'an</span>
+<span class="font-caption text-caption text-muted">Skor Sidang: <strong class="text-primary font-semibold">91.20</strong></span>
+</div>
+</td>
+<td class="p-3">
+<span class="px-2.5 py-1 rounded bg-success-light text-success font-label text-label font-semibold inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+                    Diterima / Lulus Utama
+                  </span>
+</td>
+<td class="p-3">
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-secondary-container font-caption text-caption font-semibold flex items-center gap-1 w-max">
+<span class="material-symbols-outlined text-[13px] text-primary">description</span>
+                    SK-KLL-2026-0089.pdf
+                  </span>
+</td>
+<td class="p-3">
+<div class="flex items-center gap-1">
+<span class="px-1.5 py-0.5 rounded bg-info-light text-info text-[11px] font-semibold">WA</span>
+<span class="px-1.5 py-0.5 rounded bg-info-light text-info text-[11px] font-semibold">Mail</span>
+</div>
+</td>
+<td class="p-3 text-right">
+<div class="flex items-center justify-end gap-1">
+<button class="p-1.5 rounded hover:bg-surface-container text-muted hover:text-primary transition-colors" onclick="previewSK('Nadira Safitri Putri', 'REG-2026-0089', 'LULUS UTAMA', '91.20')" type="button">
+<span class="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+</button>
+<button class="p-1.5 rounded hover:bg-surface-container text-muted hover:text-success transition-colors" onclick="testNotification('Nadira Safitri Putri', '08137789214')" type="button">
+<span class="material-symbols-outlined text-[18px]">send</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="p-3 text-center">
+<input checked="" class="row-checkbox rounded accent-primary cursor-pointer" type="checkbox">
+</td>
+<td class="p-3">
+<div class="flex flex-col">
+<span class="font-body-medium text-body-medium font-semibold text-on-surface">Bima Arya Pratama</span>
+<span class="font-caption text-caption text-muted">REG-2026-0154 • NISN: 0098553201</span>
+</div>
+</td>
+<td class="p-3">
+<div class="flex flex-col">
+<span class="font-medium text-on-surface">Reguler Tes CAT</span>
+<span class="font-caption text-caption text-muted">Skor Sidang: <strong class="text-warning font-semibold">74.60</strong></span>
+</div>
+</td>
+<td class="p-3">
+<span class="px-2.5 py-1 rounded bg-warning-light text-warning font-label text-label font-semibold inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">timelapse</span>
+                    Cadangan (Waitlist #04)
+                  </span>
+</td>
+<td class="p-3">
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-secondary-container font-caption text-caption font-semibold flex items-center gap-1 w-max">
+<span class="material-symbols-outlined text-[13px] text-primary">description</span>
+                    SK-KLL-2026-0154.pdf
+                  </span>
+</td>
+<td class="p-3">
+<div class="flex items-center gap-1">
+<span class="px-1.5 py-0.5 rounded bg-info-light text-info text-[11px] font-semibold">WA</span>
+<span class="px-1.5 py-0.5 rounded bg-info-light text-info text-[11px] font-semibold">Mail</span>
+</div>
+</td>
+<td class="p-3 text-right">
+<div class="flex items-center justify-end gap-1">
+<button class="p-1.5 rounded hover:bg-surface-container text-muted hover:text-primary transition-colors" onclick="previewSK('Bima Arya Pratama', 'REG-2026-0154', 'CADANGAN #04', '74.60')" type="button">
+<span class="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+</button>
+<button class="p-1.5 rounded hover:bg-surface-container text-muted hover:text-success transition-colors" onclick="testNotification('Bima Arya Pratama', '08529944123')" type="button">
+<span class="material-symbols-outlined text-[18px]">send</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 4 -->
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="p-3 text-center">
+<input checked="" class="row-checkbox rounded accent-primary cursor-pointer" type="checkbox">
+</td>
+<td class="p-3">
+<div class="flex flex-col">
+<span class="font-body-medium text-body-medium font-semibold text-on-surface">Clarissa Aurelia Chandra</span>
+<span class="font-caption text-caption text-muted">REG-2026-0210 • NISN: 0098771442</span>
+</div>
+</td>
+<td class="p-3">
+<div class="flex flex-col">
+<span class="font-medium text-on-surface">Reguler Tes CAT</span>
+<span class="font-caption text-caption text-muted">Skor Sidang: <strong class="text-error font-semibold">58.40</strong></span>
+</div>
+</td>
+<td class="p-3">
+<span class="px-2.5 py-1 rounded bg-error-light text-error font-label text-label font-semibold inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">cancel</span>
+                    Tidak Diterima
+                  </span>
+</td>
+<td class="p-3">
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-secondary-container font-caption text-caption font-semibold flex items-center gap-1 w-max">
+<span class="material-symbols-outlined text-[13px] text-primary">description</span>
+                    SK-KLL-2026-0210.pdf
+                  </span>
+</td>
+<td class="p-3">
+<div class="flex items-center gap-1">
+<span class="px-1.5 py-0.5 rounded bg-info-light text-info text-[11px] font-semibold">WA</span>
+<span class="px-1.5 py-0.5 rounded bg-info-light text-info text-[11px] font-semibold">Mail</span>
+</div>
+</td>
+<td class="p-3 text-right">
+<div class="flex items-center justify-end gap-1">
+<button class="p-1.5 rounded hover:bg-surface-container text-muted hover:text-primary transition-colors" onclick="previewSK('Clarissa Aurelia Chandra', 'REG-2026-0210', 'TIDAK DITERIMA', '58.40')" type="button">
+<span class="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+</button>
+<button class="p-1.5 rounded hover:bg-surface-container text-muted hover:text-success transition-colors" onclick="testNotification('Clarissa Aurelia Chandra', '08112348877')" type="button">
+<span class="material-symbols-outlined text-[18px]">send</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 5 -->
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="p-3 text-center">
+<input checked="" class="row-checkbox rounded accent-primary cursor-pointer" type="checkbox">
+</td>
+<td class="p-3">
+<div class="flex flex-col">
+<span class="font-body-medium text-body-medium font-semibold text-on-surface">Daffa Wildan Al-Ghazali</span>
+<span class="font-caption text-caption text-muted">REG-2026-0301 • NISN: 0098991208</span>
+</div>
+</td>
+<td class="p-3">
+<div class="flex flex-col">
+<span class="font-medium text-on-surface">Prestasi Akademik</span>
+<span class="font-caption text-caption text-muted">Skor Sidang: <strong class="text-primary font-semibold">96.50</strong></span>
+</div>
+</td>
+<td class="p-3">
+<span class="px-2.5 py-1 rounded bg-success-light text-success font-label text-label font-semibold inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+                    Diterima / Lulus Utama
+                  </span>
+</td>
+<td class="p-3">
+<span class="px-2 py-0.5 rounded bg-surface-container text-on-secondary-container font-caption text-caption font-semibold flex items-center gap-1 w-max">
+<span class="material-symbols-outlined text-[13px] text-primary">description</span>
+                    SK-KLL-2026-0301.pdf
+                  </span>
+</td>
+<td class="p-3">
+<div class="flex items-center gap-1">
+<span class="px-1.5 py-0.5 rounded bg-info-light text-info text-[11px] font-semibold">WA</span>
+<span class="px-1.5 py-0.5 rounded bg-info-light text-info text-[11px] font-semibold">Mail</span>
+</div>
+</td>
+<td class="p-3 text-right">
+<div class="flex items-center justify-end gap-1">
+<button class="p-1.5 rounded hover:bg-surface-container text-muted hover:text-primary transition-colors" onclick="previewSK('Daffa Wildan Al-Ghazali', 'REG-2026-0301', 'LULUS UTAMA', '96.50')" type="button">
+<span class="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+</button>
+<button class="p-1.5 rounded hover:bg-surface-container text-muted hover:text-success transition-colors" onclick="testNotification('Daffa Wildan Al-Ghazali', '08126655443')" type="button">
+<span class="material-symbols-outlined text-[18px]">send</span>
+</button>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Table Pagination & Footer Operations -->
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-2">
+<div class="flex items-center gap-2">
+<button class="h-9 px-3 rounded bg-surface-container text-on-surface font-body-small text-body-small font-semibold hover:bg-surface-variant flex items-center gap-1.5 transition-all" id="btnBatchGenerateSK" type="button">
+<span class="material-symbols-outlined text-[18px] text-primary">auto_mode</span>
+              Generate Ulang Batch SK (376 Berkas)
+            </button>
+<button class="h-9 px-3 rounded bg-surface text-on-surface font-body-small text-body-small font-semibold hover:bg-surface-container shadow-sm flex items-center gap-1.5 transition-all" type="button">
+<span class="material-symbols-outlined text-[18px] text-muted">download</span>
+              Unduh Lampiran Resmi (.PDF)
+            </button>
+</div>
+<div class="flex items-center gap-2 text-muted font-caption text-caption self-end sm:self-auto">
+<span>Menampilkan 1 - 5 dari 376 baris</span>
+<div class="flex items-center gap-1">
+<button class="w-7 h-7 rounded bg-surface-container flex items-center justify-center text-on-surface hover:bg-surface-variant disabled:opacity-50" disabled="">
+<span class="material-symbols-outlined text-[14px]">chevron_left</span>
+</button>
+<button class="w-7 h-7 rounded bg-primary text-on-primary font-bold flex items-center justify-center">1</button>
+<button class="w-7 h-7 rounded bg-surface-container flex items-center justify-center text-on-surface hover:bg-surface-variant">2</button>
+<button class="w-7 h-7 rounded bg-surface-container flex items-center justify-center text-on-surface hover:bg-surface-variant">3</button>
+<span class="px-1">...</span>
+<button class="w-7 h-7 rounded bg-surface-container flex items-center justify-center text-on-surface hover:bg-surface-variant">76</button>
+<button class="w-7 h-7 rounded bg-surface-container flex items-center justify-center text-on-surface hover:bg-surface-variant">
+<span class="material-symbols-outlined text-[14px]">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Column (35%): Konfigurasi Kanal Notifikasi & Template FR-14-002 -->
+<div class="lg:col-span-4 flex flex-col gap-6">
+<!-- Card 1: Multi-Channel Dispatch Setup (FR-14-002) -->
+<div class="bg-surface rounded-xl shadow-sm p-5 flex flex-col gap-4">
+<div class="flex items-center justify-between pb-1">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[20px]">send_time_extension</span>
+<h3 class="font-card-title text-card-title font-bold text-on-surface">Kanal Publikasi (FR-14-002)</h3>
+</div>
+<span class="px-2 py-0.5 rounded bg-success-light text-success font-label text-label font-medium">Otomatis Aktif</span>
+</div>
+<p class="font-body-small text-body-small text-muted">
+          Penyebaran pesan otomatis serentak dijalankan ketika timer hitung mundur mencapai pukul 10:00 WIB.
+        </p>
+<div class="flex flex-col gap-3">
+<!-- Toggle 1: WhatsApp Gateway -->
+<div class="p-3 rounded-lg bg-surface-container-low flex items-center justify-between gap-3">
+<div class="flex items-start gap-2.5">
+<span class="material-symbols-outlined text-success text-[22px] mt-0.5">chat</span>
+<div>
+<span class="font-body-medium text-body-medium font-semibold text-on-surface block leading-tight">WhatsApp Bisnis API</span>
+<span class="font-caption text-caption text-muted">Kuota: 3,450 Msg • 370 nomor terverifikasi</span>
+</div>
+</div>
+<label class="relative inline-flex items-center cursor-pointer shrink-0">
+<input checked="" class="sr-only peer" type="checkbox">
+<div class="w-9 h-5 bg-outline-variant peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-surface after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+<!-- Toggle 2: Email Gateway -->
+<div class="p-3 rounded-lg bg-surface-container-low flex items-center justify-between gap-3">
+<div class="flex items-start gap-2.5">
+<span class="material-symbols-outlined text-info text-[22px] mt-0.5">mail</span>
+<div>
+<span class="font-body-medium text-body-medium font-semibold text-on-surface block leading-tight">Email SMTP Resmi + PDF</span>
+<span class="font-caption text-caption text-muted">Lampiran PDF SK terenkripsi kata sandi</span>
+</div>
+</div>
+<label class="relative inline-flex items-center cursor-pointer shrink-0">
+<input checked="" class="sr-only peer" type="checkbox">
+<div class="w-9 h-5 bg-outline-variant peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-surface after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+<!-- Toggle 3: Digital Notice Board Website -->
+<div class="p-3 rounded-lg bg-surface-container-low flex items-center justify-between gap-3">
+<div class="flex items-start gap-2.5">
+<span class="material-symbols-outlined text-primary text-[22px] mt-0.5">public</span>
+<div>
+<span class="font-body-medium text-body-medium font-semibold text-on-surface block leading-tight">Papan Web Portal Utama</span>
+<span class="font-caption text-caption text-muted">Halaman Pencarian NISN di ppdb.smpnusantara.sch.id</span>
+</div>
+</div>
+<label class="relative inline-flex items-center cursor-pointer shrink-0">
+<input checked="" class="sr-only peer" type="checkbox">
+<div class="w-9 h-5 bg-outline-variant peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-surface after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+</div>
+</div>
+<!-- Card 2: Template Pesan Pengumuman WhatsApp Dinamis -->
+<div class="bg-surface rounded-xl shadow-sm p-5 flex flex-col gap-4">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[20px]">quickreply</span>
+<h3 class="font-card-title text-card-title font-bold text-on-surface">Template Pesan Notifikasi</h3>
+</div>
+<span class="font-caption text-caption text-muted font-mono">FR-14-002</span>
+</div>
+<div class="flex flex-col gap-2">
+<label class="font-caption text-caption uppercase font-semibold text-muted">Pilih Kategori Keputusan:</label>
+<div class="grid grid-cols-3 gap-1.5 p-1 bg-surface-container rounded-lg">
+<button class="py-1 px-2 rounded text-center font-caption text-caption font-semibold bg-surface text-primary shadow-sm transition-all" id="tabAccepted" onclick="switchTemplate('LULUS')" type="button">Diterima</button>
+<button class="py-1 px-2 rounded text-center font-caption text-caption font-semibold text-muted hover:text-on-surface transition-all" id="tabWaitlist" onclick="switchTemplate('CADANGAN')" type="button">Cadangan</button>
+<button class="py-1 px-2 rounded text-center font-caption text-caption font-semibold text-muted hover:text-on-surface transition-all" id="tabRejected" onclick="switchTemplate('TIDAK_LOLOS')" type="button">Tidak Lolos</button>
+</div>
+</div>
+<!-- Chat Bubble Preview Mockup -->
+<div class="bg-surface-container-low rounded-lg p-3">
+<div class="flex items-center justify-between pb-2 mb-2 text-muted font-caption text-caption">
+<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-success"></span> Preview WhatsApp Chat</span>
+<span>Pratinjau Variabel</span>
+</div>
+<div class="bg-[#DCF8C6]/20 p-3 rounded-lg shadow-sm font-body-small text-body-small text-on-surface flex flex-col gap-2 leading-relaxed" id="waPreviewText">
+<p>Yth. Bapak/Ibu <strong class="text-primary font-semibold">{NAMA_WALI}</strong>,</p>
+<p>Selamat! Berdasarkan hasil sidang Komite Seleksi PPDB SMP Nusantara TP 2026/2027, calon siswa:</p>
+<div class="pl-2.5 py-1 text-on-surface-variant font-mono text-[12px] flex flex-col gap-0.5">
+<div>Nama: <strong class="text-on-surface">{NAMA_SISWA}</strong></div>
+<div>No. Reg: <strong class="text-on-surface">{NO_REGISTRASI}</strong></div>
+<div>Jalur: <strong class="text-on-surface">{JALUR_SELEKSI}</strong></div>
+<div>Status: <span class="px-1.5 py-0.2 rounded bg-success text-on-primary font-bold">DITERIMA</span></div>
+</div>
+<p>Silakan login ke Parent Portal untuk mengunduh Surat Keputusan resmi dan menyelesaikan tahap <strong>Daftar Ulang (Menu 15)</strong> sebelum <strong>{BATAS_DAFTAR_ULANG}</strong>.</p>
+<p class="font-caption text-caption text-muted italic">Panitia PPDB SMP Nusantara</p>
+</div>
+</div>
+<div class="flex items-center justify-between pt-1">
+<button class="h-8 px-3 rounded bg-surface-container text-on-surface font-body-small text-body-small font-medium hover:bg-surface-variant flex items-center gap-1 transition-colors" onclick="editTemplate()" type="button">
+<span class="material-symbols-outlined text-[16px]">edit_note</span>
+            Ubah Redaksi
+          </button>
+<span class="font-caption text-caption text-muted">Placeholder dinamis diaktifkan</span>
+</div>
+</div>
+<!-- Card 3: Riwayat Rilis & Audit Trail Publikasi -->
+<div class="bg-surface rounded-xl shadow-sm p-5 flex flex-col gap-4">
+<div class="flex items-center justify-between pb-1">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[20px]">history_edu</span>
+<h3 class="font-card-title text-card-title font-bold text-on-surface">Audit Trail &amp; Siklus Rilis</h3>
+</div>
+<span class="font-caption text-caption text-muted">CC-04 / CC-07</span>
+</div>
+<div class="relative pl-5 flex flex-col gap-4">
+<!-- Event 1 -->
+<div class="relative flex flex-col gap-1">
+<span class="absolute -left-5 top-1 w-2.5 h-2.5 rounded-full bg-success"></span>
+<div class="flex items-center justify-between">
+<span class="font-body-small text-body-small font-semibold text-on-surface">Pengesahan Kepala Sekolah</span>
+<span class="font-caption text-caption text-muted">28 Okt, 14:00</span>
+</div>
+<p class="font-caption text-caption text-muted leading-tight">
+              Sidang penetapan disahkan (Ref: APV-79-012) oleh Dr. Hj. Nurul Hidayah, M.Pd.
+            </p>
+</div>
+<!-- Event 2 -->
+<div class="relative flex flex-col gap-1">
+<span class="absolute -left-5 top-1 w-2.5 h-2.5 rounded-full bg-primary"></span>
+<div class="flex items-center justify-between">
+<span class="font-body-small text-body-small font-semibold text-on-surface">Batch SK Siap Diterbitkan</span>
+<span class="font-caption text-caption text-muted">28 Okt, 15:30</span>
+</div>
+<p class="font-caption text-caption text-muted leading-tight">
+              376 dokumen Surat Keputusan selesai di-render oleh David Pambudi (Admin PPDB).
+            </p>
+</div>
+<!-- Event 3 -->
+<div class="relative flex flex-col gap-1">
+<span class="absolute -left-5 top-1 w-2.5 h-2.5 rounded-full bg-warning"></span>
+<div class="flex items-center justify-between">
+<span class="font-body-small text-body-small font-semibold text-on-surface">Penjadwalan Kunci Otomatis</span>
+<span class="font-caption text-caption text-muted">28 Okt, 16:00</span>
+</div>
+<p class="font-caption text-caption text-muted leading-tight">
+              Timer AC-14-01 diaktifkan untuk eksekusi 01 Nov 2026 pukul 10:00 WIB.
+            </p>
+</div>
+</div>
+<div class="p-2.5 rounded bg-surface-container font-caption text-caption text-muted flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-primary">security</span>
+<span>Integritas Log tercatat permanen di Database Audit Server.</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Interactive Modal: Preview SK Resmi (Hidden by default) -->
+<div class="fixed inset-0 bg-inverse-surface/40 backdrop-blur-[2px] z-50 flex items-center justify-center hidden p-4" id="skPreviewModal">
+<div class="bg-surface rounded-xl shadow-xl w-full max-w-2xl max-h-[921px] flex flex-col overflow-hidden">
+<!-- Modal Header -->
+<div class="p-4 px-6 flex items-center justify-between bg-surface-container-low">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[22px]">verified</span>
+<div>
+<h3 class="font-card-title text-card-title font-bold text-on-surface">Pratinjau Surat Keputusan Kelulusan</h3>
+<span class="font-caption text-caption text-muted">Dokumen Resmi Penerimaan Peserta Didik Baru TP 2026/2027</span>
+</div>
+</div>
+<button class="w-8 h-8 rounded-lg flex items-center justify-center text-muted hover:bg-surface-container hover:text-on-surface transition-colors" onclick="closeSKModal()" type="button">
+<span class="material-symbols-outlined text-[20px]">close</span>
+</button>
+</div>
+<!-- Modal Body Mock Document -->
+<div class="p-6 overflow-y-auto flex-1 flex flex-col gap-4 bg-background">
+<div class="bg-surface p-8 rounded-lg shadow-sm flex flex-col gap-4 text-on-surface font-body-small text-body-small leading-relaxed">
+<!-- Kop Surat -->
+<div class="flex items-center justify-between pb-4">
+<div class="w-12 h-12 rounded bg-primary text-on-primary flex items-center justify-center font-bold text-lg">
+              SMP
+            </div>
+<div class="text-center flex-1 pr-6">
+<h4 class="font-bold text-on-surface text-[15px] uppercase">Yayasan Pendidikan Nusantara</h4>
+<h5 class="font-bold text-primary text-[14px]">SMP NUSANTARA JAKARTA</h5>
+<p class="font-caption text-caption text-muted">Jl. Pendidikan Mandiri No. 12, Kebayoran Baru, Jakarta Selatan • Telp: (021) 7890123</p>
+</div>
+</div>
+<div class="text-center my-2">
+<span class="font-bold uppercase tracking-wider block text-on-surface">SURAT KEPUTUSAN KEPALA SEKOLAH</span>
+<span class="font-caption text-caption font-mono text-muted" id="modalDocNumber">Nomor: 421.3/SK-PPDB/SMP-NUS/XI/2026</span>
+</div>
+<p>
+            Berdasarkan hasil Evaluasi Berkas, Ujian Seleksi CAT, dan Rapat Pleno Komite Seleksi PPDB pada tanggal 28 Oktober 2026, Kepala SMP Nusantara menetapkan bahwa:
+          </p>
+<div class="bg-surface-container-low p-4 rounded-lg flex flex-col gap-1.5 font-mono text-[13px]">
+<div class="flex justify-between"><span class="text-muted">Nama Calon Siswa:</span> <strong class="text-on-surface" id="modalStudentName">-</strong></div>
+<div class="flex justify-between"><span class="text-muted">Nomor Registrasi:</span> <strong class="text-on-surface" id="modalRegNum">-</strong></div>
+<div class="flex justify-between"><span class="text-muted">Skor Hasil Seleksi:</span> <strong class="text-primary font-bold" id="modalScore">-</strong></div>
+<div class="flex justify-between items-center pt-2">
+<span class="text-muted">Keputusan Akhir:</span>
+<span class="px-2.5 py-0.5 rounded font-bold uppercase text-[12px]" id="modalDecisionPill">-</span>
+</div>
+</div>
+<p class="text-justify font-caption text-caption text-muted">
+            Keputusan ini bersifat mutlak dan tidak dapat diganggu gugat. Calon siswa yang dinyatakan diterima diwajibkan melakukan registrasi Daftar Ulang sesuai tanggal yang telah dijadwalkan pada sistem portal penerimaan siswa baru.
+          </p>
+<div class="flex justify-end pt-4">
+<div class="text-center flex flex-col items-center">
+<span class="font-caption text-caption text-muted">Jakarta, 01 November 2026</span>
+<span class="font-caption text-caption font-semibold">Kepala SMP Nusantara,</span>
+<div class="h-12 w-28 my-1 flex items-center justify-center text-primary/40 font-mono text-[10px] bg-surface-container-low rounded">
+                [Tanda Tangan Digital]
+              </div>
+<strong class="font-body-small text-body-small text-on-surface">Dr. Hj. Nurul Hidayah, M.Pd.</strong>
+<span class="font-caption text-caption text-muted">NIP. 197804122003122001</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Modal Footer -->
+<div class="p-4 px-6 bg-surface flex items-center justify-between">
+<div class="flex items-center gap-1.5 text-muted font-caption text-caption">
+<span class="material-symbols-outlined text-[16px] text-success">lock</span>
+<span>Dokumen tersertifikasi BSrE Digital Seal</span>
+</div>
+<div class="flex items-center gap-2">
+<button class="h-8 px-4 rounded bg-surface-container text-on-surface font-body-small text-body-small font-medium hover:bg-surface-variant transition-colors" onclick="closeSKModal()" type="button">
+            Tutup
+          </button>
+<button class="h-8 px-4 rounded bg-primary text-on-primary font-body-small text-body-small font-semibold hover:bg-primary-container flex items-center gap-1.5 transition-colors" onclick="alert('Mengunduh sampel berkas PDF...')" type="button">
+<span class="material-symbols-outlined text-[16px]">download</span>
+            Download Sampel PDF
+          </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Micro-interaction Scripts -->
+<script>
+    // Live Countdown Clock Micro-Interaction
+    (function initCountdown() {
+      let targetDate = new Date();
+      targetDate.setDate(targetDate.getDate() + 1);
+      targetDate.setHours(targetDate.getHours() + 14);
+      targetDate.setMinutes(targetDate.getMinutes() + 22);
+      targetDate.setSeconds(targetDate.getSeconds() + 15);
+
+      function updateClock() {
+        const now = new Date().getTime();
+        const distance = targetDate.getTime() - now;
+
+        if (distance > 0) {
+          const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+          const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+          const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+          const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+          const elD = document.getElementById('cdDays');
+          const elH = document.getElementById('cdHours');
+          const elM = document.getElementById('cdMinutes');
+          const elS = document.getElementById('cdSeconds');
+
+          if (elD) elD.innerText = String(days).padStart(2, '0');
+          if (elH) elH.innerText = String(hours).padStart(2, '0');
+          if (elM) elM.innerText = String(minutes).padStart(2, '0');
+          if (elS) elS.innerText = String(seconds).padStart(2, '0');
+        }
+      }
+      setInterval(updateClock, 1000);
+    })();
+
+    // Checkbox toggle logic
+    const checkAll = document.getElementById('checkAll');
+    if (checkAll) {
+      checkAll.addEventListener('change', function() {
+        const boxes = document.querySelectorAll('.row-checkbox');
+        boxes.forEach(cb => cb.checked = checkAll.checked);
+      });
+    }
+
+    // Modal preview SK
+    function previewSK(name, reg, status, score) {
+      const modal = document.getElementById('skPreviewModal');
+      document.getElementById('modalStudentName').innerText = name;
+      document.getElementById('modalRegNum').innerText = reg;
+      document.getElementById('modalScore').innerText = score;
+      
+      const pill = document.getElementById('modalDecisionPill');
+      pill.innerText = status;
+      if (status.includes('LULUS')) {
+        pill.className = "px-2.5 py-0.5 rounded font-bold uppercase text-[12px] bg-success-light text-success";
+      } else if (status.includes('CADANGAN')) {
+        pill.className = "px-2.5 py-0.5 rounded font-bold uppercase text-[12px] bg-warning-light text-warning";
+      } else {
+        pill.className = "px-2.5 py-0.5 rounded font-bold uppercase text-[12px] bg-error-light text-error";
+      }
+      
+      modal.classList.remove('hidden');
+    }
+
+    function closeSKModal() {
+      document.getElementById('skPreviewModal').classList.add('hidden');
+    }
+
+    // WhatsApp Template Switcher
+    function switchTemplate(type) {
+      const container = document.getElementById('waPreviewText');
+      const tabA = document.getElementById('tabAccepted');
+      const tabW = document.getElementById('tabWaitlist');
+      const tabR = document.getElementById('tabRejected');
+
+      tabA.className = "py-1 px-2 rounded text-center font-caption text-caption font-semibold text-muted hover:text-on-surface transition-all";
+      tabW.className = "py-1 px-2 rounded text-center font-caption text-caption font-semibold text-muted hover:text-on-surface transition-all";
+      tabR.className = "py-1 px-2 rounded text-center font-caption text-caption font-semibold text-muted hover:text-on-surface transition-all";
+
+      if (type === 'LULUS') {
+        tabA.className = "py-1 px-2 rounded text-center font-caption text-caption font-semibold bg-surface text-primary shadow-sm transition-all";
+        container.innerHTML = `
+          <p>Yth. Bapak/Ibu <strong class="text-primary font-semibold">{NAMA_WALI}</strong>,</p>
+          <p>Selamat! Berdasarkan hasil sidang Komite Seleksi PPDB SMP Nusantara TP 2026/2027, calon siswa:</p>
+          <div class="pl-2.5 py-1 text-on-surface-variant font-mono text-[12px] flex flex-col gap-0.5">
+            <div>Nama: <strong class="text-on-surface">{NAMA_SISWA}</strong></div>
+            <div>No. Reg: <strong class="text-on-surface">{NO_REGISTRASI}</strong></div>
+            <div>Jalur: <strong class="text-on-surface">{JALUR_SELEKSI}</strong></div>
+            <div>Status: <span class="px-1.5 py-0.2 rounded bg-success text-on-primary font-bold">DITERIMA</span></div>
+          </div>
+          <p>Silakan login ke Parent Portal untuk mengunduh Surat Keputusan resmi dan menyelesaikan tahap <strong>Daftar Ulang (Menu 15)</strong> sebelum <strong>{BATAS_DAFTAR_ULANG}</strong>.</p>
+          <p class="font-caption text-caption text-muted italic">Panitia PPDB SMP Nusantara</p>
+        `;
+      } else if (type === 'CADANGAN') {
+        tabW.className = "py-1 px-2 rounded text-center font-caption text-caption font-semibold bg-surface text-warning shadow-sm transition-all";
+        container.innerHTML = `
+          <p>Yth. Bapak/Ibu <strong class="text-warning font-semibold">{NAMA_WALI}</strong>,</p>
+          <p>Terima kasih telah berpartisipasi dalam proses seleksi PPDB SMP Nusantara TP 2026/2027. Berdasarkan rapat pleno, calon siswa:</p>
+          <div class="pl-2.5 py-1 text-on-surface-variant font-mono text-[12px] flex flex-col gap-0.5">
+            <div>Nama: <strong class="text-on-surface">{NAMA_SISWA}</strong></div>
+            <div>No. Reg: <strong class="text-on-surface">{NO_REGISTRASI}</strong></div>
+            <div>Status: <span class="px-1.5 py-0.2 rounded bg-warning text-on-primary font-bold">CADANGAN ({NOMOR_WAITLIST})</span></div>
+          </div>
+          <p>Status cadangan akan otomatis dipromosikan apabila kuota pendaftar utama tidak terpenuhi hingga batas akhir daftar ulang tahap 1. Informasi update akan diteruskan via saluran ini.</p>
+          <p class="font-caption text-caption text-muted italic">Panitia PPDB SMP Nusantara</p>
+        `;
+      } else {
+        tabR.className = "py-1 px-2 rounded text-center font-caption text-caption font-semibold bg-surface text-error shadow-sm transition-all";
+        container.innerHTML = `
+          <p>Yth. Bapak/Ibu <strong class="text-muted font-semibold">{NAMA_WALI}</strong>,</p>
+          <p>Terima kasih atas keikutsertaan calon siswa <strong>{NAMA_SISWA}</strong> (No. Reg: {NO_REGISTRASI}) pada seleksi PPDB SMP Nusantara TP 2026/2027.</p>
+          <p>Kami mengapresiasi segala usaha dan dedikasi ananda, namun mohon maaf dengan keterbatasan kuota, kami belum dapat menerima calon siswa pada Gelombang 1 kali ini.</p>
+          <p>Surat keterangan resmi partisipasi seleksi dapat diunduh melalui Parent Portal.</p>
+          <p class="font-caption text-caption text-muted italic">Panitia PPDB SMP Nusantara</p>
+        `;
+      }
+    }
+
+    function testNotification(studentName, phone) {
+      alert(`[SIMULASI DISPATCH TEST]\nPesan notifikasi WhatsApp uji coba berhasil dikirim ke nomor wali ${phone} (${studentName}). Status API: 200 OK.`);
+    }
+
+    function editTemplate() {
+      alert('Editor template dinamis dibuka. Anda dapat mengkustomisasi token {NAMA_SISWA}, {NO_REGISTRASI}, {TANGGAL_SELESAI}.');
+    }
+
+    // Action button listeners
+    document.getElementById('btnBatchGenerateSK').addEventListener('click', function() {
+      const btn = this;
+      btn.innerHTML = `<span class="material-symbols-outlined text-[18px] animate-spin text-primary">sync</span> Memproses 376 Dokumen...`;
+      setTimeout(() => {
+        btn.innerHTML = `<span class="material-symbols-outlined text-[18px] text-success">check</span> 376 Dokumen SK Siap!`;
+        setTimeout(() => {
+          btn.innerHTML = `<span class="material-symbols-outlined text-[18px] text-primary">auto_mode</span> Generate Ulang Batch SK (376 Berkas)`;
+        }, 2000);
+      }, 1200);
+    });
+
+    document.getElementById('btnReleaseAction').addEventListener('click', function() {
+      const confirmOverride = confirm('PERINGATAN PROTOKOL AC-14-01:\nPengumuman dijadwalkan otomatis pada 01 Nov 2026 10:00 WIB.\nApakah Anda berwenang melakukan override manual untuk rilis publik saat ini?');
+      if (confirmOverride) {
+        alert('Otorisasi Kepala Sekolah atau Super Admin diperlukan untuk override jadwal otomatis.');
+      }
+    });
+
+    // Realtime search filter simulation
+    document.getElementById('searchInput').addEventListener('input', function(e) {
+      const val = e.target.value.toLowerCase();
+      const rows = document.querySelectorAll('#candidateTableBody tr');
+      rows.forEach(r => {
+        const txt = r.innerText.toLowerCase();
+        r.style.display = txt.includes(val) ? '' : 'none';
+      });
+    });
+  </script>
+</div></main></div></body></html>

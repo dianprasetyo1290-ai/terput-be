@@ -565,6 +565,12 @@ func (a *App) AssignUserRole(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusInternalServerError, "failed to assign role: "+err.Error())
 		return
 	}
+	var sID *string
+	if schoolID != "" {
+		sID = &schoolID
+	}
+	a.RecordSecurityAudit(sID, "role_assigned", id, &claims.UserID, &claims.ActiveRole, nil, map[string]any{"assigned_role": req.Role}, "assigned role to user", r.Header.Get("X-Correlation-ID"))
+
 	common.WriteJSON(w, http.StatusCreated, map[string]string{"user_id": id, "role": req.Role}, nil)
 }
 
@@ -593,6 +599,13 @@ func (a *App) RemoveUserRole(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusNotFound, "role assignment not found")
 		return
 	}
+
+	var sID *string
+	if claims.SchoolID != "" {
+		sID = &claims.SchoolID
+	}
+	a.RecordSecurityAudit(sID, "role_removed", id, &claims.UserID, &claims.ActiveRole, map[string]any{"removed_role": role}, nil, "removed role from user", r.Header.Get("X-Correlation-ID"))
+
 	common.WriteJSON(w, http.StatusOK, map[string]string{"user_id": id, "role": role}, nil)
 }
 
