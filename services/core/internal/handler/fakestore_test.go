@@ -584,3 +584,46 @@ func (f *fakeStore) ListAudit(ctx context.Context, filter store.AuditFilter, pag
 	}
 	return res, len(res), nil
 }
+
+func (f *fakeStore) ListServiceRequestCategories(ctx context.Context, schoolID string, activeOnly bool) ([]model.ServiceRequestCategory, error) {
+	return nil, nil
+}
+func (f *fakeStore) GetServiceRequestCategory(ctx context.Context, schoolID, id string) (*model.ServiceRequestCategory, error) {
+	return nil, store.ErrNotFound
+}
+func (f *fakeStore) CreateServiceRequestCategory(ctx context.Context, cat model.ServiceRequestCategory) (*model.ServiceRequestCategory, error) {
+	cat.ID = f.nextID("cat")
+	return &cat, nil
+}
+func (f *fakeStore) UpdateServiceRequestCategory(ctx context.Context, schoolID, id string, cat model.ServiceRequestCategory) (*model.ServiceRequestCategory, error) {
+	return &cat, nil
+}
+func (f *fakeStore) DeleteServiceRequestCategory(ctx context.Context, schoolID, id string) error {
+	return nil
+}
+func (f *fakeStore) CreateServiceRequest(ctx context.Context, req model.ServiceRequest) (*model.ServiceRequest, error) {
+	req.ID = f.nextID("sr")
+	return &req, nil
+}
+func (f *fakeStore) GetServiceRequest(ctx context.Context, schoolID, id string) (*model.ServiceRequest, error) {
+	return nil, store.ErrNotFound
+}
+func (f *fakeStore) ListParentServiceRequests(ctx context.Context, schoolID, requesterUserID string) ([]model.ServiceRequest, error) {
+	return nil, nil
+}
+func (f *fakeStore) ListHandlerServiceRequests(ctx context.Context, schoolID string, roles []string, status string) ([]model.ServiceRequest, error) {
+	return nil, nil
+}
+func (f *fakeStore) UpdateServiceRequestStatus(ctx context.Context, schoolID, id, newStatus, note, actorUserID string) (*model.ServiceRequest, error) {
+	return nil, nil
+}
+func (f *fakeStore) UpdateServiceRequestResult(ctx context.Context, schoolID, id string, resultAttachments []byte) (*model.ServiceRequest, error) {
+	return nil, nil
+}
+func (f *fakeStore) ListServiceRequestEvents(ctx context.Context, schoolID, requestID string) ([]model.ServiceRequestEvent, error) {
+	return nil, nil
+}
+func (f *fakeStore) CanUserHandleServiceRequests(ctx context.Context, schoolID string, roles []string) ([]string, error) {
+	return nil, nil
+}
+
