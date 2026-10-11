@@ -6,6 +6,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"skci/hr/internal/ats"
 	"skci/hr/internal/common"
 	"skci/hr/internal/training"
 )
@@ -14,6 +15,7 @@ func (a *App) Router() http.Handler {
 	r := chi.NewRouter()
 
 	trHandler := training.NewHandler(training.NewStore(a.DB))
+	atsHandler := ats.NewHandler(ats.NewStore(a.DB))
 
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -23,6 +25,11 @@ func (a *App) Router() http.Handler {
 
 	// Public
 	r.Get("/healthz", a.Healthz)
+	r.Get("/public/careers/{schoolSlug}", atsHandler.PublicListCareers)
+	r.Get("/public/careers/{schoolSlug}/{postingSlug}", atsHandler.PublicGetPosting)
+	r.Post("/public/careers/{schoolSlug}/{postingSlug}/apply", atsHandler.PublicApply)
+	r.Get("/public/applications/status", atsHandler.PublicApplicationStatus)
+	r.Post("/public/offers/{offerId}/accept", atsHandler.PublicAcceptOffer)
 
 	// Internal routes protected by X-Internal-Key
 	r.Group(func(internal chi.Router) {
@@ -62,6 +69,9 @@ func (a *App) Router() http.Handler {
 		api.Post("/me/training/assignments/{assignmentId}/materials/{materialId}/done", trHandler.MarkMaterialDone)
 		api.Get("/me/onboarding", trHandler.MyOnboarding)
 		api.Post("/onboarding/tasks/{taskId}/done", trHandler.MarkOnboardingTaskDone)
+
+		// ATS Panel Interviews
+		api.Get("/ats/interviews/mine", atsHandler.MyInterviews)
 
 		// 2. HR Management routes: HR Admin, HR Manager, Superadmin
 		api.Group(func(hr chi.Router) {
@@ -187,6 +197,25 @@ func (a *App) Router() http.Handler {
 			hr.Post("/training/assignments", trHandler.CreateAssignment)
 			hr.Get("/onboarding/templates", trHandler.ListOnboardingTemplates)
 			hr.Post("/onboarding/templates", trHandler.CreateOnboardingTemplate)
+
+			// ATS (Applicant Tracking System)
+			hr.Get("/ats/requisitions", atsHandler.ListRequisitions)
+			hr.Post("/ats/requisitions", atsHandler.CreateRequisition)
+			hr.Post("/ats/requisitions/{id}/submit", atsHandler.SubmitRequisition)
+			hr.Get("/ats/postings", atsHandler.ListPostings)
+			hr.Get("/ats/postings/{id}", atsHandler.GetPosting)
+			hr.Post("/ats/postings", atsHandler.CreatePosting)
+			hr.Post("/ats/postings/{id}/publish", atsHandler.PublishPosting)
+			hr.Post("/ats/postings/{id}/close", atsHandler.ClosePosting)
+			hr.Get("/ats/applications", atsHandler.ListApplications)
+			hr.Post("/ats/applications/{id}/move", atsHandler.MoveApplication)
+			hr.Get("/ats/stages", atsHandler.ListStages)
+			hr.Get("/ats/scorecard-templates", atsHandler.ListScorecardTemplates)
+			hr.Post("/ats/scorecard-templates", atsHandler.CreateScorecardTemplate)
+			hr.Post("/ats/interviews", atsHandler.ScheduleInterview)
+			hr.Post("/ats/offers", atsHandler.CreateOffer)
+			hr.Get("/ats/settings", atsHandler.GetSettings)
+			hr.Get("/ats/talent-pool", atsHandler.ListTalentPool)
 		})
 	})
 

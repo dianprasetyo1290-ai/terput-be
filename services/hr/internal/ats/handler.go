@@ -1,0 +1,395 @@
+package ats
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+
+	"skci/hr/internal/common"
+)
+
+type Handler struct {
+	Store *Store
+}
+
+func NewHandler(s *Store) *Handler {
+	return &Handler{Store: s}
+}
+
+// -----------------------------------------------------------------------------
+// Requisitions Handlers
+// -----------------------------------------------------------------------------
+
+func (h *Handler) ListRequisitions(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	list, err := h.Store.ListRequisitions(r.Context(), schoolID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat permintaan rekrutmen: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, list, nil)
+}
+
+func (h *Handler) CreateRequisition(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if claims == nil {
+		common.WriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	schoolID := common.EffectiveSchoolID(r)
+
+	var req Requisition
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.WriteError(w, http.StatusBadRequest, "format json tidak valid")
+		return
+	}
+	req.SchoolID = schoolID
+	req.RequestedBy = claims.UserID
+
+	created, err := h.Store.CreateRequisition(r.Context(), req)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal membuat permintaan rekrutmen: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusCreated, created, nil)
+}
+
+func (h *Handler) SubmitRequisition(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	id := chi.URLParam(r, "id")
+
+	if err := h.Store.SubmitRequisition(r.Context(), schoolID, id); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal mengajukan persetujuan: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "permintaan diajukan untuk persetujuan"}, nil)
+}
+
+// -----------------------------------------------------------------------------
+// Job Postings Handlers
+// -----------------------------------------------------------------------------
+
+func (h *Handler) ListPostings(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	status := r.URL.Query().Get("status")
+
+	list, err := h.Store.ListPostings(r.Context(), schoolID, status)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat lowongan kerja: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, list, nil)
+}
+
+func (h *Handler) GetPosting(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	id := chi.URLParam(r, "id")
+
+	p, err := h.Store.GetPosting(r.Context(), schoolID, id)
+	if err != nil {
+		common.WriteError(w, http.StatusNotFound, "lowongan tidak ditemukan")
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, p, nil)
+}
+
+func (h *Handler) CreatePosting(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	var p JobPosting
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		common.WriteError(w, http.StatusBadRequest, "format json tidak valid")
+		return
+	}
+	p.SchoolID = schoolID
+
+	created, err := h.Store.CreatePosting(r.Context(), p)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal membuat lowongan: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusCreated, created, nil)
+}
+
+func (h *Handler) PublishPosting(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	id := chi.URLParam(r, "id")
+
+	if err := h.Store.PublishPosting(r.Context(), schoolID, id); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal mempublikasikan lowongan: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "lowongan berhasil dipublikasikan"}, nil)
+}
+
+func (h *Handler) ClosePosting(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	id := chi.URLParam(r, "id")
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	if err := h.Store.ClosePosting(r.Context(), schoolID, id, body.Reason); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal menutup lowongan: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "lowongan berhasil ditutup"}, nil)
+}
+
+// -----------------------------------------------------------------------------
+// Public Careers & Candidates
+// -----------------------------------------------------------------------------
+
+func (h *Handler) PublicListCareers(w http.ResponseWriter, r *http.Request) {
+	schoolID := chi.URLParam(r, "schoolSlug") // or school ID passed
+	list, err := h.Store.ListPostings(r.Context(), schoolID, "open")
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat info karier")
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, list, nil)
+}
+
+func (h *Handler) PublicGetPosting(w http.ResponseWriter, r *http.Request) {
+	schoolID := chi.URLParam(r, "schoolSlug")
+	slug := chi.URLParam(r, "postingSlug")
+
+	p, err := h.Store.GetPostingBySlug(r.Context(), schoolID, slug)
+	if err != nil {
+		common.WriteError(w, http.StatusNotFound, "lowongan tidak ditemukan atau sudah ditutup")
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, p, nil)
+}
+
+func (h *Handler) PublicApply(w http.ResponseWriter, r *http.Request) {
+	schoolID := chi.URLParam(r, "schoolSlug")
+	postingSlug := chi.URLParam(r, "postingSlug")
+
+	p, err := h.Store.GetPostingBySlug(r.Context(), schoolID, postingSlug)
+	if err != nil {
+		common.WriteError(w, http.StatusNotFound, "lowongan tidak ditemukan")
+		return
+	}
+
+	var body struct {
+		FullName          string `json:"full_name"`
+		Email             string `json:"email"`
+		CVObjectKey       string `json:"cv_object_key"`
+		ConsentTalentPool bool   `json:"consent_talent_pool"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.WriteError(w, http.StatusBadRequest, "format json tidak valid")
+		return
+	}
+	if body.FullName == "" || body.Email == "" {
+		common.WriteError(w, http.StatusBadRequest, "nama lengkap dan email wajib diisi")
+		return
+	}
+
+	app, token, err := h.Store.ApplyCandidate(
+		r.Context(), schoolID, p.ID, body.FullName, body.Email, body.CVObjectKey, body.ConsentTalentPool,
+	)
+	if err != nil {
+		if err == ErrConflict {
+			common.WriteError(w, http.StatusConflict, "Anda sudah melamar pada lowongan ini sebelumnya")
+			return
+		}
+		common.WriteError(w, http.StatusInternalServerError, "gagal mengirimkan lamaran: "+err.Error())
+		return
+	}
+
+	common.WriteJSON(w, http.StatusCreated, map[string]interface{}{
+		"application":  app,
+		"status_token": token,
+	}, nil)
+}
+
+func (h *Handler) PublicApplicationStatus(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		common.WriteError(w, http.StatusBadRequest, "token tidak valid")
+		return
+	}
+
+	app, err := h.Store.GetApplicationByToken(r.Context(), token)
+	if err != nil {
+		common.WriteError(w, http.StatusNotFound, "lamaran tidak ditemukan")
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, app, nil)
+}
+
+// -----------------------------------------------------------------------------
+// Pipeline Board & Applications
+// -----------------------------------------------------------------------------
+
+func (h *Handler) ListApplications(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	postingID := r.URL.Query().Get("posting_id")
+
+	list, err := h.Store.ListApplications(r.Context(), schoolID, postingID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat data pelamar: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, list, nil)
+}
+
+func (h *Handler) MoveApplication(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	schoolID := common.EffectiveSchoolID(r)
+	appID := chi.URLParam(r, "id")
+
+	var body struct {
+		ToStageID string `json:"to_stage_id"`
+		Note      string `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.WriteError(w, http.StatusBadRequest, "format json tidak valid")
+		return
+	}
+
+	actorID := ""
+	if claims != nil {
+		actorID = claims.UserID
+	}
+
+	if err := h.Store.MoveApplication(r.Context(), schoolID, appID, body.ToStageID, body.Note, actorID); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal memindahkan tahap: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "tahap berhasil diperbarui"}, nil)
+}
+
+func (h *Handler) ListStages(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	stages, err := h.Store.EnsureDefaultStages(r.Context(), schoolID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat tahapan seleksi: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, stages, nil)
+}
+
+// -----------------------------------------------------------------------------
+// Scorecard Templates & Interviews
+// -----------------------------------------------------------------------------
+
+func (h *Handler) ListScorecardTemplates(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	list, err := h.Store.ListScorecardTemplates(r.Context(), schoolID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat template asesmen: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, list, nil)
+}
+
+func (h *Handler) CreateScorecardTemplate(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	var t ScorecardTemplate
+	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
+		common.WriteError(w, http.StatusBadRequest, "format json tidak valid")
+		return
+	}
+	t.SchoolID = schoolID
+
+	created, err := h.Store.CreateScorecardTemplate(r.Context(), t)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal membuat template asesmen: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusCreated, created, nil)
+}
+
+func (h *Handler) ScheduleInterview(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	var body struct {
+		Interview
+		PanelUserIDs []string `json:"panel_user_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.WriteError(w, http.StatusBadRequest, "format json tidak valid")
+		return
+	}
+	body.Interview.SchoolID = schoolID
+
+	inv, err := h.Store.ScheduleInterview(r.Context(), body.Interview, body.PanelUserIDs)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal menjadwalkan wawancara: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusCreated, inv, nil)
+}
+
+func (h *Handler) MyInterviews(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if claims == nil {
+		common.WriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	schoolID := common.EffectiveSchoolID(r)
+
+	list, err := h.Store.MyInterviews(r.Context(), schoolID, claims.UserID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat jadwal wawancara: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, list, nil)
+}
+
+// -----------------------------------------------------------------------------
+// Offers Handlers
+// -----------------------------------------------------------------------------
+
+func (h *Handler) CreateOffer(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	var o Offer
+	if err := json.NewDecoder(r.Body).Decode(&o); err != nil {
+		common.WriteError(w, http.StatusBadRequest, "format json tidak valid")
+		return
+	}
+	o.SchoolID = schoolID
+
+	created, err := h.Store.CreateOffer(r.Context(), o)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal membuat penawaran: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusCreated, created, nil)
+}
+
+func (h *Handler) PublicAcceptOffer(w http.ResponseWriter, r *http.Request) {
+	offerID := chi.URLParam(r, "offerId")
+	if err := h.Store.AcceptOffer(r.Context(), offerID); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal menerima penawaran: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "penawaran kerja berhasil diterima"}, nil)
+}
+
+// -----------------------------------------------------------------------------
+// Settings & Talent Pool
+// -----------------------------------------------------------------------------
+
+func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	st, err := h.Store.GetSettings(r.Context(), schoolID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat pengaturan: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, st, nil)
+}
+
+func (h *Handler) ListTalentPool(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	list, err := h.Store.ListTalentPool(r.Context(), schoolID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat talent pool: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, list, nil)
+}
