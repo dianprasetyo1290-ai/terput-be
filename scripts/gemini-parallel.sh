@@ -42,9 +42,9 @@ Task kamu: $1. File spesifikasi: docs/prd-sekoci/$2 (bagian: $3).
 
 Langkah wajib:
 1. Baca seluruh GEMINI.md (terutama §7b Mode paralel). Aturannya mengikat dan mengalahkan kebiasaanmu sendiri.
-2. Baca docs/prd-sekoci/README.md, docs/prd-sekoci/PARALLEL.md (nomor migrasimu), lalu file spesifikasi task-mu sampai habis, lalu bagian PRD di docs/prd-sekoci/source/ yang dirujuk.
+2. Baca docs/prd-sekoci/README.md, docs/prd-sekoci/PARALLEL.md (nomor migrasimu), docs/prd-sekoci/DESIGN.md (desain sistem & UI Teratai), lalu file spesifikasi task-mu sampai habis, lalu bagian PRD di docs/prd-sekoci/source/ yang dirujuk.
 3. Sebelum menulis kode, baca kode acuan yang disebut di GEMINI.md §1 dan file donor yang disebut di task. Ikuti pola yang ada, jangan menciptakan pola baru.
-4. Kerjakan backend dulu (migrasi → fungsi murni + test tabel → store → handler + test → integrasi), lalu frontend (types → service → route → view), sesuai urutan di file task.
+4. Kerjakan backend dulu (migrasi → fungsi murni + test tabel → store → handler + test → integrasi), lalu frontend (types → service → route → view mengikuti desain di docs/prd-sekoci/DESIGN.md), sesuai urutan di file task.
 5. Verifikasi sesuai GEMINI.md §7b: go vet + go test setiap service yang disentuh, migrasi up/down/up di DB Postgres lokal khusus task-mu, npx vue-tsc -b && npm run build. Semua harus hijau. Jangan pakai docker compose, jangan jalankan server.
 6. Tulis docs/prd-sekoci/handoff/$1.md (format GEMINI.md §7 langkah 4) dengan tabel FR/AC → bukti dan output asli perintah verifikasi.
 7. Commit semua perubahan di branch saat ini (lokal, jangan push, jangan deploy). Baris terakhir output: "SELESAI $1" atau "BLOCKED $1".
