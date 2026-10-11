@@ -59,6 +59,22 @@ type Store interface {
 	// Central Audit Trail
 	InsertAudit(ctx context.Context, event model.AuditEvent) error
 	ListAudit(ctx context.Context, f AuditFilter, page, perPage int) ([]model.AuditEvent, int, error)
+
+	// Parent Service Requests (Menu 81)
+	ListServiceRequestCategories(ctx context.Context, schoolID string, activeOnly bool) ([]model.ServiceRequestCategory, error)
+	GetServiceRequestCategory(ctx context.Context, schoolID, id string) (*model.ServiceRequestCategory, error)
+	CreateServiceRequestCategory(ctx context.Context, cat model.ServiceRequestCategory) (*model.ServiceRequestCategory, error)
+	UpdateServiceRequestCategory(ctx context.Context, schoolID, id string, cat model.ServiceRequestCategory) (*model.ServiceRequestCategory, error)
+	DeleteServiceRequestCategory(ctx context.Context, schoolID, id string) error
+
+	CreateServiceRequest(ctx context.Context, req model.ServiceRequest) (*model.ServiceRequest, error)
+	GetServiceRequest(ctx context.Context, schoolID, id string) (*model.ServiceRequest, error)
+	ListParentServiceRequests(ctx context.Context, schoolID, requesterUserID string) ([]model.ServiceRequest, error)
+	ListHandlerServiceRequests(ctx context.Context, schoolID string, roles []string, status string) ([]model.ServiceRequest, error)
+	UpdateServiceRequestStatus(ctx context.Context, schoolID, id, newStatus, note, actorUserID string) (*model.ServiceRequest, error)
+	UpdateServiceRequestResult(ctx context.Context, schoolID, id string, resultAttachments []byte) (*model.ServiceRequest, error)
+	ListServiceRequestEvents(ctx context.Context, schoolID, requestID string) ([]model.ServiceRequestEvent, error)
+	CanUserHandleServiceRequests(ctx context.Context, schoolID string, roles []string) ([]string, error)
 }
 
 // PGStore implements Store over Postgres.

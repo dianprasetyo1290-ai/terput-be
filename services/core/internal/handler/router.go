@@ -76,6 +76,23 @@ func NewRouter(h *Handler, cfg config.Config) http.Handler {
 
 		// Central Audit Trail
 		pr.Get("/audit", h.ListAudit)
+
+		// Parent Service Requests (Menu 81)
+		pr.Get("/service-request-categories", h.ListCategories)
+		pr.Post("/service-request-categories", h.CreateCategory)
+		pr.Get("/service-request-categories/{id}", h.GetCategory)
+		pr.Put("/service-request-categories/{id}", h.UpdateCategory)
+		pr.Delete("/service-request-categories/{id}", h.DeleteCategory)
+
+		pr.Post("/parent/service-requests", h.CreateParentServiceRequest)
+		pr.Get("/parent/service-requests", h.ListParentServiceRequests)
+		pr.Get("/parent/service-requests/{id}", h.GetServiceRequestDetail)
+
+		pr.Get("/service-requests", h.ListHandlerServiceRequests)
+		pr.Get("/service-requests/can-handle", h.CanUserHandle)
+		pr.Get("/service-requests/{id}", h.GetServiceRequestDetail)
+		pr.Post("/service-requests/{id}/status", h.UpdateServiceRequestStatus)
+		pr.Post("/service-requests/{id}/result", h.UpdateServiceRequestResult)
 	})
 
 	return r
