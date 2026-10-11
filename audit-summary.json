@@ -1,0 +1,1189 @@
+{
+  "totalRoutes": 118,
+  "passCount": 118,
+  "failCount": 0,
+  "negPassCount": 4,
+  "negTotal": 4,
+  "auditResults": [
+    {
+      "index": 1,
+      "domain": "Foundation",
+      "path": "/dashboard",
+      "name": "Dashboard Home Overview (Stitch Screen 1)",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Ikhtisar Operasional Sekolah",
+      "failureReason": ""
+    },
+    {
+      "index": 2,
+      "domain": "Foundation",
+      "path": "/sekolah",
+      "name": "Manajemen Satuan Pendidikan",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Data Sekolah",
+      "failureReason": ""
+    },
+    {
+      "index": 3,
+      "domain": "Foundation",
+      "path": "/pengguna",
+      "name": "Manajemen Pengguna & Hak Akses",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Data Pengguna",
+      "failureReason": ""
+    },
+    {
+      "index": 4,
+      "domain": "Foundation",
+      "path": "/audit",
+      "name": "Audit Trail Sistem",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Audit Trail",
+      "failureReason": ""
+    },
+    {
+      "index": 5,
+      "domain": "Foundation",
+      "path": "/ubah-password",
+      "name": "Ubah Password Profil",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Ubah Password",
+      "failureReason": ""
+    },
+    {
+      "index": 6,
+      "domain": "Foundation",
+      "path": "/informasi",
+      "name": "Papan Informasi Sekolah",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Informasi",
+      "failureReason": ""
+    },
+    {
+      "index": 7,
+      "domain": "Akademik",
+      "path": "/akademik/tahun-akademik",
+      "name": "Tahun Akademik",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Tahun Akademik",
+      "failureReason": ""
+    },
+    {
+      "index": 8,
+      "domain": "Akademik",
+      "path": "/akademik/kelas",
+      "name": "Data Rombel & Kelas",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Data Kelas",
+      "failureReason": ""
+    },
+    {
+      "index": 9,
+      "domain": "Akademik",
+      "path": "/akademik/mata-pelajaran",
+      "name": "Kurikulum & Mata Pelajaran",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Mata Pelajaran",
+      "failureReason": ""
+    },
+    {
+      "index": 10,
+      "domain": "Akademik",
+      "path": "/akademik/jadwal-pelajaran",
+      "name": "Jadwal Pelajaran Mingguan",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Jadwal Pelajaran",
+      "failureReason": ""
+    },
+    {
+      "index": 11,
+      "domain": "Akademik",
+      "path": "/akademik/matriks-pelajaran",
+      "name": "Matriks Alokasi Pelajaran",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Matriks Pelajaran",
+      "failureReason": ""
+    },
+    {
+      "index": 12,
+      "domain": "Akademik",
+      "path": "/akademik/wali-kelas",
+      "name": "Penetapan Wali Kelas",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Wali Kelas",
+      "failureReason": ""
+    },
+    {
+      "index": 13,
+      "domain": "Akademik",
+      "path": "/akademik/kenaikan-kelas",
+      "name": "Kenaikan Kelas & Kelulusan",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Kenaikan Kelas",
+      "failureReason": ""
+    },
+    {
+      "index": 14,
+      "domain": "Akademik",
+      "path": "/akademik/mutasi-siswa",
+      "name": "Mutasi & Status Siswa",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Pindah & Keluar Siswa",
+      "failureReason": ""
+    },
+    {
+      "index": 15,
+      "domain": "Akademik",
+      "path": "/siswa",
+      "name": "Data Induk Siswa",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Data Siswa",
+      "failureReason": ""
+    },
+    {
+      "index": 16,
+      "domain": "Presensi",
+      "path": "/presensi/harian",
+      "name": "Presensi Harian Guru",
+      "role": "guru",
+      "passed": true,
+      "heading": "Selamat Datang, Auditor Sekoci!",
+      "failureReason": ""
+    },
+    {
+      "index": 17,
+      "domain": "Presensi",
+      "path": "/presensi/ringkasan",
+      "name": "Ringkasan Kehadiran",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Ringkasan Presensi",
+      "failureReason": ""
+    },
+    {
+      "index": 18,
+      "domain": "Presensi",
+      "path": "/presensi/siswa",
+      "name": "Presensi Siswa per Kelas",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Presensi Siswa",
+      "failureReason": ""
+    },
+    {
+      "index": 19,
+      "domain": "Presensi",
+      "path": "/presensi/guru",
+      "name": "Presensi Guru & Staf",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Presensi Guru",
+      "failureReason": ""
+    },
+    {
+      "index": 20,
+      "domain": "Presensi",
+      "path": "/presensi/laporan",
+      "name": "Laporan Rekapitulasi Presensi",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Attendance Report (Rekapitulasi Kehadiran)",
+      "failureReason": ""
+    },
+    {
+      "index": 21,
+      "domain": "Presensi",
+      "path": "/presensi/izin",
+      "name": "Pengajuan & Verifikasi Izin",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Persetujuan Izin / Sakit",
+      "failureReason": ""
+    },
+    {
+      "index": 22,
+      "domain": "Ujian CBT",
+      "path": "/exam/bank-soal",
+      "name": "Bank Soal Terpusat",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "",
+      "failureReason": ""
+    },
+    {
+      "index": 23,
+      "domain": "Ujian CBT",
+      "path": "/exam/tipe-ujian",
+      "name": "Konfigurasi Tipe Ujian",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "",
+      "failureReason": ""
+    },
+    {
+      "index": 24,
+      "domain": "Ujian CBT",
+      "path": "/exam/ujian",
+      "name": "Daftar Ujian & Asesmen",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "",
+      "failureReason": ""
+    },
+    {
+      "index": 25,
+      "domain": "Ujian CBT",
+      "path": "/exam/jadwal-ujian",
+      "name": "Jadwal Pelaksanaan Ujian",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "",
+      "failureReason": ""
+    },
+    {
+      "index": 26,
+      "domain": "Ujian CBT",
+      "path": "/exam/dashboard",
+      "name": "Dashboard Siswa CBT",
+      "role": "siswa",
+      "passed": true,
+      "heading": "",
+      "failureReason": ""
+    },
+    {
+      "index": 27,
+      "domain": "Evaluasi & Rapor",
+      "path": "/evaluasi/rpm",
+      "name": "Evaluasi RPM Guru",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Modul RPM",
+      "failureReason": ""
+    },
+    {
+      "index": 28,
+      "domain": "Evaluasi & Rapor",
+      "path": "/evaluasi/prota",
+      "name": "Program Tahunan (Prota)",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Program Tahunan",
+      "failureReason": ""
+    },
+    {
+      "index": 29,
+      "domain": "Evaluasi & Rapor",
+      "path": "/evaluasi/prosem",
+      "name": "Program Semester (Prosem)",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Program Semester",
+      "failureReason": ""
+    },
+    {
+      "index": 30,
+      "domain": "Evaluasi & Rapor",
+      "path": "/evaluasi/periode",
+      "name": "Periode Evaluasi Kinerja",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Buat Periode Penilaian",
+      "failureReason": ""
+    },
+    {
+      "index": 31,
+      "domain": "Evaluasi & Rapor",
+      "path": "/evaluasi/hasil",
+      "name": "Hasil & Rekap Evaluasi",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Hasil Periode Penilaian",
+      "failureReason": ""
+    },
+    {
+      "index": 32,
+      "domain": "Evaluasi & Rapor",
+      "path": "/rapor/generate",
+      "name": "Generate Buku Rapor",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Generate Rapor",
+      "failureReason": ""
+    },
+    {
+      "index": 33,
+      "domain": "Evaluasi & Rapor",
+      "path": "/rapor/deskripsi",
+      "name": "Deskripsi Capaian Kompetensi",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Deskripsi Rapor",
+      "failureReason": ""
+    },
+    {
+      "index": 34,
+      "domain": "Evaluasi & Rapor",
+      "path": "/rapor/formatif",
+      "name": "Penilaian Formatif",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Penilaian Formatif",
+      "failureReason": ""
+    },
+    {
+      "index": 35,
+      "domain": "Evaluasi & Rapor",
+      "path": "/rapor/formatif-admin",
+      "name": "Rekap Formatif Admin",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Penilaian Formatif",
+      "failureReason": ""
+    },
+    {
+      "index": 36,
+      "domain": "Evaluasi & Rapor",
+      "path": "/rapor/leger",
+      "name": "Leger Nilai Akademik",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Leger Nilai",
+      "failureReason": ""
+    },
+    {
+      "index": 37,
+      "domain": "PPDB",
+      "path": "/ppdb/admin",
+      "name": "Dashboard Admin PPDB",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "PPDB Dashboard",
+      "failureReason": ""
+    },
+    {
+      "index": 38,
+      "domain": "PPDB",
+      "path": "/ppdb/admin/pendaftaran",
+      "name": "Daftar Berkas Calon Siswa",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Pendaftar PPDB",
+      "failureReason": ""
+    },
+    {
+      "index": 39,
+      "domain": "PPDB",
+      "path": "/ppdb/admin/berkas",
+      "name": "Verifikasi Berkas Persyaratan",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Verifikasi berkas",
+      "failureReason": ""
+    },
+    {
+      "index": 40,
+      "domain": "PPDB",
+      "path": "/ppdb/admin/pembayaran",
+      "name": "Pembayaran Formulir PPDB",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Review pembayaran",
+      "failureReason": ""
+    },
+    {
+      "index": 41,
+      "domain": "PPDB",
+      "path": "/ppdb/admin/seleksi",
+      "name": "Hasil Seleksi & Kelulusan",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Seleksi dan ranking",
+      "failureReason": ""
+    },
+    {
+      "index": 42,
+      "domain": "PPDB",
+      "path": "/ppdb/admin/konversi",
+      "name": "Konversi Menjadi Siswa Aktif",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Konversi calon siswa",
+      "failureReason": ""
+    },
+    {
+      "index": 43,
+      "domain": "PPDB",
+      "path": "/ppdb/admin/konfigurasi",
+      "name": "Konfigurasi Gelombang PPDB",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Konfigurasi PPDB",
+      "failureReason": ""
+    },
+    {
+      "index": 44,
+      "domain": "PPDB",
+      "path": "/ppdb/admin/biaya",
+      "name": "Skema Biaya Pendaftaran",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Biaya, diskon, dan voucher",
+      "failureReason": ""
+    },
+    {
+      "index": 45,
+      "domain": "PPDB",
+      "path": "/ppdb",
+      "name": "Landing PPDB Publik",
+      "role": "public",
+      "passed": true,
+      "heading": "Tumbuh berprestasi dan berkarakter bersama Teratai Putih Global School",
+      "failureReason": ""
+    },
+    {
+      "index": 46,
+      "domain": "Keuangan",
+      "path": "/keuangan/payment-dashboard",
+      "name": "Dashboard Pembayaran SPP",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Payment Dashboard",
+      "failureReason": ""
+    },
+    {
+      "index": 47,
+      "domain": "Keuangan",
+      "path": "/keuangan/skema-spp",
+      "name": "Skema Tarif SPP & Biaya",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Skema SPP",
+      "failureReason": ""
+    },
+    {
+      "index": 48,
+      "domain": "Keuangan",
+      "path": "/keuangan/buat-tagihan",
+      "name": "Generate Tagihan Siswa",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Buat Tagihan",
+      "failureReason": ""
+    },
+    {
+      "index": 49,
+      "domain": "Keuangan",
+      "path": "/keuangan/verifikasi-pembayaran",
+      "name": "Verifikasi Bukti Bayar",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Verifikasi Pembayaran",
+      "failureReason": ""
+    },
+    {
+      "index": 50,
+      "domain": "Keuangan",
+      "path": "/keuangan/tunggakan",
+      "name": "Monitoring Tunggakan",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Tunggakan",
+      "failureReason": ""
+    },
+    {
+      "index": 51,
+      "domain": "Keuangan",
+      "path": "/keuangan/detail-siswa",
+      "name": "Buku Pembantu Keuangan Siswa",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Student Billing Detail",
+      "failureReason": ""
+    },
+    {
+      "index": 52,
+      "domain": "Keuangan",
+      "path": "/keuangan/aging",
+      "name": "Analisis Aging Piutang",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Aging Piutang & Tunggakan Siswa",
+      "failureReason": ""
+    },
+    {
+      "index": 53,
+      "domain": "Keuangan",
+      "path": "/keuangan/beasiswa",
+      "name": "Alokasi Beasiswa & Potongan",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Manajemen Beasiswa & Keringanan Biaya",
+      "failureReason": ""
+    },
+    {
+      "index": 54,
+      "domain": "Keuangan",
+      "path": "/keuangan/rekonsiliasi",
+      "name": "Rekonsiliasi Bank",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Rekonsiliasi Transaksi & Bank",
+      "failureReason": ""
+    },
+    {
+      "index": 55,
+      "domain": "Keuangan",
+      "path": "/keuangan/transaksi",
+      "name": "Log Transaksi Keuangan",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Transaksi Online Gateway",
+      "failureReason": ""
+    },
+    {
+      "index": 56,
+      "domain": "Keuangan",
+      "path": "/keuangan/kasir",
+      "name": "Loket Kasir Sekolah",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Kasir Pembayaran Sekolah",
+      "failureReason": ""
+    },
+    {
+      "index": 57,
+      "domain": "Keuangan",
+      "path": "/keuangan/metode-pembayaran",
+      "name": "Kanal Pembayaran (VA/QRIS)",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Pengaturan Metode Pembayaran",
+      "failureReason": ""
+    },
+    {
+      "index": 58,
+      "domain": "Keuangan",
+      "path": "/keuangan/settlement",
+      "name": "Penyelesaian Settlement",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Settlement Gateway NICEPay",
+      "failureReason": ""
+    },
+    {
+      "index": 59,
+      "domain": "Akuntansi",
+      "path": "/chartofaccount",
+      "name": "Bagan Akun (Chart of Accounts)",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "",
+      "failureReason": ""
+    },
+    {
+      "index": 60,
+      "domain": "Akuntansi",
+      "path": "/journaltransaction",
+      "name": "Entri Transaksi Jurnal",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "",
+      "failureReason": ""
+    },
+    {
+      "index": 61,
+      "domain": "Akuntansi",
+      "path": "/historyjournaltransaction",
+      "name": "Riwayat Jurnal Umum",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "",
+      "failureReason": ""
+    },
+    {
+      "index": 62,
+      "domain": "Akuntansi",
+      "path": "/balance",
+      "name": "Neraca Saldo (Trial Balance)",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "",
+      "failureReason": ""
+    },
+    {
+      "index": 63,
+      "domain": "Akuntansi",
+      "path": "/reportgeneralledger",
+      "name": "Buku Besar (General Ledger)",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "",
+      "failureReason": ""
+    },
+    {
+      "index": 64,
+      "domain": "Akuntansi",
+      "path": "/report/financial",
+      "name": "Laporan Keuangan Komprehensif",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "",
+      "failureReason": ""
+    },
+    {
+      "index": 65,
+      "domain": "SDM & Pelatihan",
+      "path": "/hr/pegawai",
+      "name": "Direktori Pegawai & Guru",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Master Pegawai",
+      "failureReason": ""
+    },
+    {
+      "index": 66,
+      "domain": "SDM & Pelatihan",
+      "path": "/hr/organisasi",
+      "name": "Struktur Organisasi Unit",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Struktur Organisasi & Formasi",
+      "failureReason": ""
+    },
+    {
+      "index": 67,
+      "domain": "SDM & Pelatihan",
+      "path": "/hr/dokumen",
+      "name": "Dokumen & Kontrak Kerja",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Manajemen Dokumen & Kepatuhan Berkas",
+      "failureReason": ""
+    },
+    {
+      "index": 68,
+      "domain": "SDM & Pelatihan",
+      "path": "/hr/absensi",
+      "name": "Rekap Presensi Karyawan",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Manajemen Presensi & Log Jam Kerja",
+      "failureReason": ""
+    },
+    {
+      "index": 69,
+      "domain": "SDM & Pelatihan",
+      "path": "/hr/cuti",
+      "name": "Persetujuan Cuti Pegawai",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Kelola Cuti, Jam Kerja & Hari Libur",
+      "failureReason": ""
+    },
+    {
+      "index": 70,
+      "domain": "SDM & Pelatihan",
+      "path": "/pelatihan/katalog",
+      "name": "Katalog Pelatihan Pegawai",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Katalog Pelatihan & Kursus",
+      "failureReason": ""
+    },
+    {
+      "index": 71,
+      "domain": "SDM & Pelatihan",
+      "path": "/pelatihan/kursus",
+      "name": "Alias Kursus Pelatihan",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Katalog Pelatihan & Kursus",
+      "failureReason": ""
+    },
+    {
+      "index": 72,
+      "domain": "SDM & Pelatihan",
+      "path": "/pelatihan/wajib",
+      "name": "Pelatihan Wajib Yayasan",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Matriks Pelatihan Wajib (BR-TRN-01)",
+      "failureReason": ""
+    },
+    {
+      "index": 73,
+      "domain": "SDM & Pelatihan",
+      "path": "/pelatihan/penugasan",
+      "name": "Penugasan Training",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Penugasan Pelatihan Pegawai",
+      "failureReason": ""
+    },
+    {
+      "index": 74,
+      "domain": "SDM & Pelatihan",
+      "path": "/pelatihan/kepatuhan",
+      "name": "Matriks Kepatuhan Sertifikasi",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Laporan Kepatuhan Pelatihan Pegawai",
+      "failureReason": ""
+    },
+    {
+      "index": 75,
+      "domain": "SDM & Pelatihan",
+      "path": "/sdm/onboarding",
+      "name": "Program Onboarding Staf",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Program Onboarding Pegawai Baru",
+      "failureReason": ""
+    },
+    {
+      "index": 76,
+      "domain": "Rekrutmen ATS",
+      "path": "/rekrutmen/lowongan",
+      "name": "Lowongan Kerja Aktif",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Kelola Lowongan Kerja (Job Postings)",
+      "failureReason": ""
+    },
+    {
+      "index": 77,
+      "domain": "Rekrutmen ATS",
+      "path": "/rekrutmen/permintaan",
+      "name": "Permintaan Tenaga Kerja (FPTK)",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Permintaan Rekrutmen Pegawai (Requisition)",
+      "failureReason": ""
+    },
+    {
+      "index": 78,
+      "domain": "Rekrutmen ATS",
+      "path": "/rekrutmen/wawancara",
+      "name": "Jadwal Wawancara",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Jadwal Wawancara & Asesmen Saya",
+      "failureReason": ""
+    },
+    {
+      "index": 79,
+      "domain": "Rekrutmen ATS",
+      "path": "/rekrutmen/talent-pool",
+      "name": "Bank Kandidat (Talent Pool)",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Bank Talenta (Talent Pool)",
+      "failureReason": ""
+    },
+    {
+      "index": 80,
+      "domain": "Rekrutmen ATS",
+      "path": "/karier/teratai-putih",
+      "name": "Portal Karier Publik Teratai",
+      "role": "public",
+      "passed": true,
+      "heading": "Bergabung Bersama Kami",
+      "failureReason": ""
+    },
+    {
+      "index": 81,
+      "domain": "Rekrutmen ATS",
+      "path": "/karier/status",
+      "name": "Cek Status Lamaran Pelamar",
+      "role": "public",
+      "passed": true,
+      "heading": "Pantau Status Lamaran Kerja",
+      "failureReason": ""
+    },
+    {
+      "index": 82,
+      "domain": "Payroll Gaji",
+      "path": "/payroll/run",
+      "name": "Siklus Payroll Runs",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Proses Penggajian Bulanan (Payroll Run)",
+      "failureReason": ""
+    },
+    {
+      "index": 83,
+      "domain": "Payroll Gaji",
+      "path": "/payroll/komponen",
+      "name": "Komponen Gaji & Tunjangan",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Komponen & Pengaturan Penggajian (Payroll)",
+      "failureReason": ""
+    },
+    {
+      "index": 84,
+      "domain": "Payroll Gaji",
+      "path": "/payroll/parameter",
+      "name": "Parameter PTKP & Tarif Pajak",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Parameter Statutori Pajak PPh 21 & BPJS",
+      "failureReason": ""
+    },
+    {
+      "index": 85,
+      "domain": "Payroll Gaji",
+      "path": "/payroll/input",
+      "name": "Input Variabel Lembur & Potongan",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Input & Rekapitulasi Data Gaji (Payroll Inputs)",
+      "failureReason": ""
+    },
+    {
+      "index": 86,
+      "domain": "Payroll Gaji",
+      "path": "/payroll/slip",
+      "name": "Distribusi Slip Gaji",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Slip Gaji Pegawai (Payslips)",
+      "failureReason": ""
+    },
+    {
+      "index": 87,
+      "domain": "Payroll Gaji",
+      "path": "/payroll/laporan",
+      "name": "Rekapitulasi Biaya Gaji",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Laporan Pajak PPh 21 & BPJS (Tax Reports)",
+      "failureReason": ""
+    },
+    {
+      "index": 88,
+      "domain": "Payroll Gaji",
+      "path": "/payroll/jurnal",
+      "name": "Integrasi Jurnal Payroll",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Jurnal Otomatis Payroll (Akuntansi)",
+      "failureReason": ""
+    },
+    {
+      "index": 89,
+      "domain": "Layanan & Alur",
+      "path": "/approval/inbox",
+      "name": "Kotak Masuk Persetujuan",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Kotak Masuk Approval",
+      "failureReason": ""
+    },
+    {
+      "index": 90,
+      "domain": "Layanan & Alur",
+      "path": "/approval/saya",
+      "name": "Riwayat Pengajuan Saya",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Pengajuan Saya",
+      "failureReason": ""
+    },
+    {
+      "index": 91,
+      "domain": "Layanan & Alur",
+      "path": "/pengaturan/alur-approval",
+      "name": "Konfigurasi Alur Multi-Step",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Alur Approval",
+      "failureReason": ""
+    },
+    {
+      "index": 92,
+      "domain": "Layanan & Alur",
+      "path": "/pengaturan/delegasi",
+      "name": "Delegasi Wewenang Approval",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Delegasi Wewenang",
+      "failureReason": ""
+    },
+    {
+      "index": 93,
+      "domain": "Layanan & Alur",
+      "path": "/integrasi/antrean-galat",
+      "name": "Dead Letter Queue Integrasi",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Antrean Galat Integrasi",
+      "failureReason": ""
+    },
+    {
+      "index": 94,
+      "domain": "Layanan & Alur",
+      "path": "/layanan/permintaan",
+      "name": "Layanan Tata Usaha & Siswa",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Meja Kerja Layanan Orang Tua",
+      "failureReason": ""
+    },
+    {
+      "index": 95,
+      "domain": "Layanan & Alur",
+      "path": "/pengaturan/kategori-layanan",
+      "name": "Katalog Kategori Layanan",
+      "role": "superadmin",
+      "passed": true,
+      "heading": "Kategori Layanan Sekolah",
+      "failureReason": ""
+    },
+    {
+      "index": 96,
+      "domain": "Portal Ortu",
+      "path": "/orang-tua/dashboard",
+      "name": "Dashboard Orang Tua",
+      "role": "orang_tua",
+      "passed": true,
+      "heading": "Selamat Sore, Auditor Sekoci!",
+      "failureReason": ""
+    },
+    {
+      "index": 97,
+      "domain": "Portal Ortu",
+      "path": "/orang-tua/tagihan",
+      "name": "Tagihan & Pembayaran SPP",
+      "role": "orang_tua",
+      "passed": true,
+      "heading": "Tagihan & Riwayat Pembayaran",
+      "failureReason": ""
+    },
+    {
+      "index": 98,
+      "domain": "Portal Ortu",
+      "path": "/orang-tua/presensi",
+      "name": "Monitoring Kehadiran Anak",
+      "role": "orang_tua",
+      "passed": true,
+      "heading": "Presensi Anak",
+      "failureReason": ""
+    },
+    {
+      "index": 99,
+      "domain": "Portal Ortu",
+      "path": "/orang-tua/ujian",
+      "name": "Jadwal & Nilai Ujian Anak",
+      "role": "orang_tua",
+      "passed": true,
+      "heading": "",
+      "failureReason": ""
+    },
+    {
+      "index": 100,
+      "domain": "Portal Ortu",
+      "path": "/orang-tua/rapor",
+      "name": "Akses E-Rapor Anak",
+      "role": "orang_tua",
+      "passed": true,
+      "heading": "",
+      "failureReason": ""
+    },
+    {
+      "index": 101,
+      "domain": "Portal Ortu",
+      "path": "/orang-tua/layanan",
+      "name": "Pengajuan Layanan Surat",
+      "role": "orang_tua",
+      "passed": true,
+      "heading": "Layanan Sekolah",
+      "failureReason": ""
+    },
+    {
+      "index": 102,
+      "domain": "Portal Siswa",
+      "path": "/siswa/dashboard",
+      "name": "Dashboard Siswa",
+      "role": "siswa",
+      "passed": true,
+      "heading": "Selamat Datang, Auditor Sekoci!",
+      "failureReason": ""
+    },
+    {
+      "index": 103,
+      "domain": "Portal Siswa",
+      "path": "/siswa/jadwal",
+      "name": "Jadwal Pelajaran Siswa",
+      "role": "siswa",
+      "passed": true,
+      "heading": "Jadwal Pelajaran",
+      "failureReason": ""
+    },
+    {
+      "index": 104,
+      "domain": "Portal Siswa",
+      "path": "/siswa/nilai",
+      "name": "Buku Nilai & Tugas Siswa",
+      "role": "siswa",
+      "passed": true,
+      "heading": "Nilai & Rapor Siswa",
+      "failureReason": ""
+    },
+    {
+      "index": 105,
+      "domain": "Portal Siswa",
+      "path": "/siswa/presensi",
+      "name": "Rekap Presensi Siswa",
+      "role": "siswa",
+      "passed": true,
+      "heading": "Presensi & Kehadiran Siswa",
+      "failureReason": ""
+    },
+    {
+      "index": 106,
+      "domain": "Portal Siswa",
+      "path": "/siswa/keuangan",
+      "name": "Status Tagihan Siswa",
+      "role": "siswa",
+      "passed": true,
+      "heading": "",
+      "failureReason": ""
+    },
+    {
+      "index": 107,
+      "domain": "Portal Siswa",
+      "path": "/siswa/pengumuman",
+      "name": "Pengumuman Sekolah Siswa",
+      "role": "siswa",
+      "passed": true,
+      "heading": "Pengumuman Sekolah",
+      "failureReason": ""
+    },
+    {
+      "index": 108,
+      "domain": "Portal Siswa",
+      "path": "/siswa/profil",
+      "name": "Profil Data Pribadi Siswa",
+      "role": "siswa",
+      "passed": true,
+      "heading": "Profil & Akun",
+      "failureReason": ""
+    },
+    {
+      "index": 109,
+      "domain": "Guru & Walikelas",
+      "path": "/walikelas/dashboard",
+      "name": "Dashboard Wali Kelas",
+      "role": "walikelas",
+      "passed": true,
+      "heading": "Selamat Datang, Auditor Sekoci!",
+      "failureReason": ""
+    },
+    {
+      "index": 110,
+      "domain": "Guru & Walikelas",
+      "path": "/walikelas/jadwal-kelas",
+      "name": "Jadwal Rombel Binaan",
+      "role": "walikelas",
+      "passed": true,
+      "heading": "Jadwal Kelas",
+      "failureReason": ""
+    },
+    {
+      "index": 111,
+      "domain": "Guru & Walikelas",
+      "path": "/walikelas/presensi-siswa",
+      "name": "Presensi Rombel Binaan",
+      "role": "walikelas",
+      "passed": true,
+      "heading": "Presensi Siswa",
+      "failureReason": ""
+    },
+    {
+      "index": 112,
+      "domain": "Guru & Walikelas",
+      "path": "/walikelas/kenaikan-kelas",
+      "name": "Sidang Kenaikan Kelas",
+      "role": "walikelas",
+      "passed": true,
+      "heading": "Kenaikan Kelas",
+      "failureReason": ""
+    },
+    {
+      "index": 113,
+      "domain": "Guru & Walikelas",
+      "path": "/walikelas/matriks-pelajaran",
+      "name": "Matriks Pelajaran Kelas",
+      "role": "walikelas",
+      "passed": true,
+      "heading": "Matriks Pelajaran",
+      "failureReason": ""
+    },
+    {
+      "index": 114,
+      "domain": "Guru & Walikelas",
+      "path": "/walikelas/generate-rapor",
+      "name": "Generate Rapor Siswa Binaan",
+      "role": "walikelas",
+      "passed": true,
+      "heading": "Generate Rapor",
+      "failureReason": ""
+    },
+    {
+      "index": 115,
+      "domain": "Guru & Walikelas",
+      "path": "/walikelas/deskripsi-rapor",
+      "name": "Catatan Wali Kelas di Rapor",
+      "role": "walikelas",
+      "passed": true,
+      "heading": "Deskripsi Rapor",
+      "failureReason": ""
+    },
+    {
+      "index": 116,
+      "domain": "Guru & Walikelas",
+      "path": "/akademik/jadwal-saya",
+      "name": "Jadwal Mengajar Guru",
+      "role": "guru",
+      "passed": true,
+      "heading": "Jadwal Mengajar Saya",
+      "failureReason": ""
+    },
+    {
+      "index": 117,
+      "domain": "Guru & Walikelas",
+      "path": "/evaluasi/rpm-saya",
+      "name": "Unggah RPM & Silabus Guru",
+      "role": "guru",
+      "passed": true,
+      "heading": "Modul RPM Saya",
+      "failureReason": ""
+    },
+    {
+      "index": 118,
+      "domain": "Publik & Auth",
+      "path": "/login",
+      "name": "Halaman Login Utama",
+      "role": "public",
+      "passed": true,
+      "heading": "SEKOCI Sekolah Cerdas Indonesia",
+      "failureReason": ""
+    }
+  ]
+}
