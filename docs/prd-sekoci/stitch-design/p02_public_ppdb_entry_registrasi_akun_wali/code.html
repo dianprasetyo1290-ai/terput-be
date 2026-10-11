@@ -1,0 +1,509 @@
+<!DOCTYPE html><html lang="id"><head><meta charset="utf-8"><meta content="width=device-width, initial-scale=1.0" name="viewport"><meta content="web_blank" name="shell-type"><title>SEKOCI PPDB - Akses Masuk Pendaftar</title><link href="https://fonts.googleapis.com" rel="preconnect"><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{"colors":{"on-primary-container":"#eeefff","warning-light":"#FFFBEB","primary-fixed-dim":"#b4c5ff","inverse-on-surface":"#eef0ff","inverse-surface":"#283044","on-primary-fixed":"#00174b","primary-fixed":"#dbe1ff","surface-variant":"#dae2fd","info":"#0284C7","outline":"#737686","on-primary":"#ffffff","on-surface-variant":"#434655","inverse-primary":"#b4c5ff","error-light":"#FEF2F2","on-background":"#131b2e","success":"#16A34A","surface-bright":"#faf8ff","surface-container-high":"#e2e7ff","surface-container-highest":"#dae2fd","on-secondary-fixed-variant":"#38485d","surface-container-low":"#f2f3ff","info-light":"#F0F9FF","tertiary-fixed-dim":"#b8c4ff","error-container":"#ffdad6","on-error":"#ffffff","tertiary":"#2c4bb9","on-primary-fixed-variant":"#003ea8","background":"#F8FAFC","warning":"#D97706","on-tertiary-fixed":"#001453","secondary-container":"#d0e1fb","surface-container":"#eaedff","secondary":"#505f76","tertiary-fixed":"#dde1ff","primary":"#004ac6","primary-light":"#EFF6FF","on-error-container":"#93000a","surface-container-lowest":"#ffffff","success-light":"#F0FDF4","outline-variant":"#c3c6d7","border":"#E2E8F0","on-tertiary-container":"#eff0ff","on-tertiary-fixed-variant":"#173bab","surface":"#FFFFFF","on-secondary":"#ffffff","surface-dim":"#d2d9f4","surface-tint":"#0053db","tertiary-container":"#4865d4","primary-container":"#2563eb","on-surface":"#131b2e","secondary-fixed-dim":"#b7c8e1","on-secondary-fixed":"#0b1c30","muted":"#94A3B8","secondary-fixed":"#d3e4fe","error":"#DC2626","on-tertiary":"#ffffff","on-secondary-container":"#54647a"},"borderRadius":{"DEFAULT":"0.125rem","lg":"0.25rem","xl":"0.5rem","full":"0.75rem"},"spacing":{"space-2xs":"0.25rem","gutter-mobile":"1rem","space-2xl":"2rem","space-3xl":"2.5rem","space-4xl":"3rem","space-lg":"1.25rem","margin-mobile":"1rem","space-md":"1rem","space-xs":"0.5rem","space-xl":"1.5rem","space-sm":"0.75rem","gutter":"1.5rem","margin":"2rem"},"fontFamily":{"body-medium":["Inter"],"display":["Inter"],"caption":["Inter"],"card-title":["Inter"],"page-title":["Inter"],"body-default":["Inter"],"section-title":["Inter"],"page-title-mobile":["Inter"],"label":["Inter"],"body-small":["Inter"],"display-mobile":["Inter"]},"fontSize":{"body-medium":["14px",{"lineHeight":"20px","fontWeight":"500"}],"display":["32px",{"lineHeight":"40px","letterSpacing":"-0.02em","fontWeight":"700"}],"caption":["11px",{"lineHeight":"14px","letterSpacing":"0.01em","fontWeight":"400"}],"card-title":["16px",{"lineHeight":"24px","letterSpacing":"-0.005em","fontWeight":"600"}],"page-title":["24px",{"lineHeight":"32px","letterSpacing":"-0.015em","fontWeight":"600"}],"body-default":["14px",{"lineHeight":"20px","fontWeight":"400"}],"section-title":["18px",{"lineHeight":"24px","letterSpacing":"-0.01em","fontWeight":"600"}],"page-title-mobile":["20px",{"lineHeight":"28px","letterSpacing":"-0.01em","fontWeight":"600"}],"label":["12px",{"lineHeight":"16px","letterSpacing":"0.01em","fontWeight":"500"}],"body-small":["13px",{"lineHeight":"18px","fontWeight":"400"}],"display-mobile":["24px",{"lineHeight":"32px","letterSpacing":"-0.015em","fontWeight":"700"}]}}}};</script></head><body class="bg-background font-body-default text-body-default text-on-surface antialiased flex items-center justify-center min-h-screen"><main class="w-full"><div class="flex flex-col w-full">
+<!-- Interactive Top Notification / Announcement Banner -->
+<section class="w-full bg-surface-container-low px-space-md py-space-xs text-on-surface">
+<div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-space-xs text-body-small font-body-small">
+<div class="flex items-center gap-space-2xs text-on-surface-variant">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-success-light text-success font-label text-label">
+<span class="w-1.5 h-1.5 rounded-full bg-success animate-pulse"></span>
+          PPDB Online Terbuka
+        </span>
+<span class="text-muted font-label">•</span>
+<span class="">Yayasan Pendidikan Nusantara • Portal Resmi Terintegrasi (SEKOCI v2.4)</span>
+</div>
+<div class="flex items-center gap-space-md text-on-surface-variant font-label text-label">
+<span class="inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px] text-info">verified_user</span>
+          Kepatuhan UU PDP No. 27/2022
+        </span>
+<span class="text-muted">•</span>
+<span class="inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px] text-success">bolt</span>
+          Verifikasi Berkas Instant &lt; 24 Jam
+        </span>
+</div>
+</div>
+</section>
+<!-- Main Hero & Scope Section -->
+<section class="w-full bg-surface px-space-md py-space-2xl md:py-space-3xl">
+<div class="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 flex flex-col gap-6">
+<!-- Unit Selection Bar & Active Wave Badge -->
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-space-md">
+<!-- Unit Selector Chips -->
+<div class="flex flex-wrap items-center gap-space-2xs" id="unit-selector">
+<span class="font-label text-label text-muted mr-space-2xs uppercase tracking-wider">Pilih Jenjang:</span>
+<button class="unit-btn px-space-sm py-1.5 rounded-full font-label text-label transition-colors bg-primary text-on-primary shadow-sm flex items-center gap-1.5" data-unit="smp" type="button">
+<span class="material-symbols-outlined text-[16px]">school</span>
+            SMP Nusantara (Reguler &amp; Bilingual)
+          </button>
+<button class="unit-btn px-space-sm py-1.5 rounded-full font-label text-label transition-colors bg-surface-container text-on-surface-variant hover:bg-surface-container-high flex items-center gap-1.5" data-unit="smk" type="button">
+<span class="material-symbols-outlined text-[16px]">precision_manufacturing</span>
+            SMK Nusantara (Teknik &amp; Bisnis)
+          </button>
+<button class="unit-btn px-space-sm py-1.5 rounded-full font-label text-label transition-colors bg-surface-container text-on-surface-variant hover:bg-surface-container-high flex items-center gap-1.5" data-unit="sd" type="button">
+<span class="material-symbols-outlined text-[16px]">child_care</span>
+            SD Nusantara (Dasar Unggul)
+          </button>
+</div>
+<!-- Wave / Quota Badge -->
+<div class="inline-flex items-center gap-space-xs px-space-sm py-1.5 rounded-full bg-warning-light text-warning font-label text-label shadow-sm self-start md:self-auto">
+<span class="material-symbols-outlined text-[18px]">event_available</span>
+<span class="font-semibold">Gelombang 1 Reguler:</span>
+<span class="">01 Okt — 30 Nov 2026</span>
+<span class="bg-warning text-surface px-1.5 py-0.5 rounded text-[10px] font-bold tracking-tight">Sisa Kuota: 48 Kursi</span>
+</div>
+</div>
+<!-- Hero Header & Value Proposition -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-space-xl items-center">
+<div class="lg:col-span-8 flex flex-col gap-space-sm">
+<span class="font-label text-label tracking-wide uppercase text-primary font-semibold flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[18px]">verified</span>
+            Sistem Elektronik Komprehensif Operasional Civitas &amp; Informasi (SEKOCI)
+          </span>
+<h1 class="font-display text-display text-on-surface tracking-tight leading-tight">
+            Penerimaan Peserta Didik Baru (PPDB) <br class="hidden sm:inline">
+<span class="text-primary-container">Tahun Ajaran 2026/2027</span>
+</h1>
+<p class="font-body-default text-body-default text-on-surface-variant max-w-2xl leading-relaxed">
+            Daftarkan putra-putri Anda secara mandiri di SMP &amp; SMK Nusantara dengan proses transparan, mudah, dan terintegrasi penuh ke dalam sistem akademik berstandar akreditasi A.
+          </p>
+</div>
+<!-- Quick Metrics KPI Tile -->
+<div class="lg:col-span-4 bg-surface-container-low rounded-lg border border-border p-6 shadow-sm flex flex-col gap-space-sm">
+<div class="flex items-center justify-between">
+<span class="font-label text-label text-muted uppercase">Statistik Pendaftar Masuk</span>
+<span class="material-symbols-outlined text-secondary text-[20px]">insights</span>
+</div>
+<div class="flex items-baseline gap-space-xs">
+<span class="font-display text-display text-on-surface font-bold">342</span>
+<span class="font-body-small text-body-small text-muted">/ 410 Kapasitas Total</span>
+</div>
+<div class="w-full bg-surface-container-high h-2 rounded-full overflow-hidden">
+<div class="bg-primary h-full rounded-full" style="width: 83.4%;"></div>
+</div>
+<div class="flex items-center justify-between text-caption font-caption text-on-surface-variant">
+<span class="flex items-center gap-1 text-success">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+              83% Kuota Terisi
+            </span>
+<span class="text-secondary">Update realtime otomatis</span>
+</div>
+</div>
+</div>
+<!-- Admission Milestones Flow Stepper -->
+<div class="w-full bg-surface-container-low rounded-lg border border-border p-6 shadow-sm">
+<div class="flex flex-col md:flex-row md:items-center justify-between mb-space-md pb-space-xs">
+<div>
+<h2 class="font-card-title text-card-title text-on-surface">5 Tahapan Pendaftaran Mandiri</h2>
+<p class="font-caption text-caption text-muted">Pelacakan otomatis dari aktivasi akun hingga cetak bukti kelulusan definitif (Traceability AC-16-01).</p>
+</div>
+<span class="mt-2 md:mt-0 inline-flex items-center gap-1 font-label text-label text-primary bg-primary-light px-2.5 py-1 rounded-full">
+<span class="material-symbols-outlined text-[16px]">touch_app</span> Alur 100% Online
+          </span>
+</div>
+<div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-space-md relative">
+<!-- Step 1 -->
+<div class="flex flex-col gap-1.5 p-space-sm rounded-lg bg-surface shadow-sm">
+<div class="flex items-center gap-2">
+<span class="w-6 h-6 rounded-full bg-primary text-on-primary flex items-center justify-center font-label text-label font-bold">1</span>
+<span class="font-body-medium text-body-medium text-primary font-semibold">Buat Akun &amp; Biodata</span>
+</div>
+<p class="font-caption text-caption text-on-surface-variant">Registrasi akun wali murid &amp; pengisian riwayat calon siswa.</p>
+</div>
+<!-- Step 2 -->
+<div class="flex flex-col gap-1.5 p-space-sm rounded-lg bg-surface shadow-sm">
+<div class="flex items-center gap-2">
+<span class="w-6 h-6 rounded-full bg-surface-container-highest text-on-surface-variant flex items-center justify-center font-label text-label font-bold">2</span>
+<span class="font-body-medium text-body-medium text-on-surface">Biaya Formulir</span>
+</div>
+<p class="font-caption text-caption text-on-surface-variant">Pembayaran instant otomatis VA BCA, Mandiri, BRI &amp; QRIS.</p>
+</div>
+<!-- Step 3 -->
+<div class="flex flex-col gap-1.5 p-space-sm rounded-lg bg-surface shadow-sm">
+<div class="flex items-center gap-2">
+<span class="w-6 h-6 rounded-full bg-surface-container-highest text-on-surface-variant flex items-center justify-center font-label text-label font-bold">3</span>
+<span class="font-body-medium text-body-medium text-on-surface">Unggah Berkas</span>
+</div>
+<p class="font-caption text-caption text-on-surface-variant">Upload scan Akta, KK, Rapor, dan Pasfoto (PDF/JPG maks 5MB).</p>
+</div>
+<!-- Step 4 -->
+<div class="flex flex-col gap-1.5 p-space-sm rounded-lg bg-surface shadow-sm">
+<div class="flex items-center gap-2">
+<span class="w-6 h-6 rounded-full bg-surface-container-highest text-on-surface-variant flex items-center justify-center font-label text-label font-bold">4</span>
+<span class="font-body-medium text-body-medium text-on-surface">Tes &amp; Wawancara</span>
+</div>
+<p class="font-caption text-caption text-on-surface-variant">Jadwal seleksi pemetaan minat bakat &amp; wawancara orang tua.</p>
+</div>
+<!-- Step 5 -->
+<div class="flex flex-col gap-1.5 p-space-sm rounded-lg bg-surface shadow-sm">
+<div class="flex items-center gap-2">
+<span class="w-6 h-6 rounded-full bg-surface-container-highest text-on-surface-variant flex items-center justify-center font-label text-label font-bold">5</span>
+<span class="font-body-medium text-body-medium text-on-surface">Pengumuman &amp; Daftar Ulang</span>
+</div>
+<p class="font-caption text-caption text-on-surface-variant">Hasil kelulusan, penerbitan NIS, dan konfirmasi seragam.</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Two-Column Interactive Workspace Layout (60% Info & Transparency : 40% Action Form) -->
+<section class="w-full bg-background px-space-md py-space-xl">
+<div class="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+<!-- LEFT COLUMN (60% = 7 Cols) -->
+<div class="lg:col-span-7 flex flex-col gap-space-lg">
+<!-- JALUR MASUK & KUOTA TERSEDIA -->
+<div class="bg-surface rounded-lg border border-border p-6 shadow-sm flex flex-col gap-space-md">
+<div class="flex items-center justify-between pb-space-xs">
+<div class="flex items-center gap-space-xs">
+<div class="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[20px]">category</span>
+</div>
+<div>
+<h3 class="font-section-title text-section-title text-on-surface">Jalur Masuk &amp; Kuota Penerimaan</h3>
+<p class="font-caption text-caption text-muted">Alokasi resmi tahun akademik 2026/2027 unit SMP &amp; SMK Nusantara</p>
+</div>
+</div>
+<span class="font-label text-label bg-surface-container px-2.5 py-1 rounded text-secondary font-medium">3 Kategori Jalur</span>
+</div>
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-space-sm">
+<!-- Jalur Reguler -->
+<div class="bg-surface-container-low rounded-lg border border-border p-4 flex flex-col justify-between gap-space-sm">
+<div class="flex flex-col gap-1">
+<span class="font-label text-label text-primary font-semibold uppercase">Jalur 01</span>
+<h4 class="font-card-title text-card-title text-on-surface leading-snug">Reguler &amp; Bilingual</h4>
+<p class="font-caption text-caption text-on-surface-variant">Kurikulum Nasional Plus dengan pembiasaan Bahasa Inggris &amp; IT.</p>
+</div>
+<div class="flex flex-col gap-1 pt-space-xs">
+<span class="font-caption text-caption text-muted">Biaya Formulir:</span>
+<span class="font-body-medium text-body-medium text-on-surface font-semibold">Rp 200.000</span>
+<span class="inline-block mt-1 font-label text-label px-2 py-0.5 rounded bg-surface text-secondary text-center">Kuota: 180 Kursi</span>
+</div>
+</div>
+<!-- Jalur Prestasi & Tahfizh -->
+<div class="bg-surface-container-low rounded-lg border border-border p-4 flex flex-col justify-between gap-space-sm">
+<div class="flex flex-col gap-1">
+<span class="font-label text-label text-success font-semibold uppercase">Jalur 02</span>
+<h4 class="font-card-title text-card-title text-on-surface leading-snug">Prestasi &amp; Tahfizh</h4>
+<p class="font-caption text-caption text-on-surface-variant">Sertifikat kejuaraan sains, seni, olahraga, atau hafalan juz 30/29.</p>
+</div>
+<div class="flex flex-col gap-1 pt-space-xs">
+<span class="font-caption text-caption text-muted">Insentif Beasiswa:</span>
+<span class="font-body-medium text-body-medium text-success font-semibold">Potongan DP s.d 50%</span>
+<span class="inline-block mt-1 font-label text-label px-2 py-0.5 rounded bg-surface text-secondary text-center">Kuota: 40 Kursi</span>
+</div>
+</div>
+<!-- Jalur Afirmasi / Kemitraan -->
+<div class="bg-surface-container-low rounded-lg border border-border p-4 flex flex-col justify-between gap-space-sm">
+<div class="flex flex-col gap-1">
+<span class="font-label text-label text-warning font-semibold uppercase">Jalur 03</span>
+<h4 class="font-card-title text-card-title text-on-surface leading-snug">Afirmasi / Mitra</h4>
+<p class="font-caption text-caption text-on-surface-variant">Keluarga tenaga pendidik, alumni yayasan, dan program mitra binaan.</p>
+</div>
+<div class="flex flex-col gap-1 pt-space-xs">
+<span class="font-caption text-caption text-muted">Kemudahan Finansial:</span>
+<span class="font-body-medium text-body-medium text-on-surface font-semibold">Skema Cicilan Ringan</span>
+<span class="inline-block mt-1 font-label text-label px-2 py-0.5 rounded bg-surface text-secondary text-center">Kuota: 20 Kursi</span>
+</div>
+</div>
+</div>
+</div>
+<!-- SYARAT BERKAS AWAL (FR-16-002) -->
+<div class="bg-surface rounded-lg border border-border p-6 shadow-sm flex flex-col gap-space-md">
+<div class="flex items-center justify-between pb-space-xs">
+<div class="flex items-center gap-space-xs">
+<div class="w-8 h-8 rounded-lg bg-info-light flex items-center justify-center text-info">
+<span class="material-symbols-outlined text-[20px]">folder_open</span>
+</div>
+<div>
+<h3 class="font-section-title text-section-title text-on-surface">Ketentuan Berkas Pendaftaran Awal</h3>
+<p class="font-caption text-caption text-muted">Pedoman pemenuhan dokumen syarat administrasi (FR-16-002)</p>
+</div>
+</div>
+<span class="font-label text-label px-2.5 py-1 rounded bg-info-light text-info font-medium">Maks. 5 MB / Berkas</span>
+</div>
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-space-sm">
+<div class="flex items-start gap-space-xs p-space-sm rounded-lg bg-surface-container-low">
+<span class="material-symbols-outlined text-primary text-[20px] mt-0.5">badge</span>
+<div>
+<span class="font-body-medium text-body-medium text-on-surface block font-medium">Akta Kelahiran &amp; Kartu Keluarga</span>
+<span class="font-caption text-caption text-on-surface-variant">Scan dokumen asli atau fotokopi legalisir Disdukcapil setempat.</span>
+</div>
+</div>
+<div class="flex items-start gap-space-xs p-space-sm rounded-lg bg-surface-container-low">
+<span class="material-symbols-outlined text-primary text-[20px] mt-0.5">portrait</span>
+<div>
+<span class="font-body-medium text-body-medium text-on-surface block font-medium">Pasfoto Formal 3x4 (Terbaru)</span>
+<span class="font-caption text-caption text-on-surface-variant">Latar belakang merah (tahun genap) atau biru (tahun ganjil).</span>
+</div>
+</div>
+<div class="flex items-start gap-space-xs p-space-sm rounded-lg bg-surface-container-low">
+<span class="material-symbols-outlined text-primary text-[20px] mt-0.5">history_edu</span>
+<div>
+<span class="font-body-medium text-body-medium text-on-surface block font-medium">Buku Rapor Kelas 5 &amp; 6</span>
+<span class="font-caption text-caption text-on-surface-variant">Halaman identitas, nilai pengetahuan umum, dan deskripsi sikap.</span>
+</div>
+</div>
+<div class="flex items-start gap-space-xs p-space-sm rounded-lg bg-surface-container-low">
+<span class="material-symbols-outlined text-primary text-[20px] mt-0.5">assignment_turned_in</span>
+<div>
+<span class="font-body-medium text-body-medium text-on-surface block font-medium">Surat Pernyataan Orang Tua</span>
+<span class="font-caption text-caption text-on-surface-variant">Format template resmi dapat diunduh otomatis pada dashboard pendaftar.</span>
+</div>
+</div>
+</div>
+<!-- Format specifications note -->
+<div class="flex items-center gap-space-xs bg-surface-container-low p-space-sm rounded-lg text-body-small font-body-small text-on-surface-variant">
+<span class="material-symbols-outlined text-[18px] text-muted">info</span>
+<span class="">Format unggahan yang didukung sistem: <strong>PDF, JPG, PNG</strong> dengan ukuran berkas individual maksimal 5 Megabytes per PRD NFR.</span>
+</div>
+</div>
+<!-- KEUNGGULAN & FASILITAS SEKOLAH -->
+<div class="bg-surface rounded-lg border border-border p-6 shadow-sm flex flex-col gap-space-md">
+<div class="flex items-center justify-between pb-space-xs">
+<div class="flex items-center gap-space-xs">
+<div class="w-8 h-8 rounded-lg bg-success-light flex items-center justify-center text-success">
+<span class="material-symbols-outlined text-[20px]">workspace_premium</span>
+</div>
+<div>
+<h3 class="font-section-title text-section-title text-on-surface">Ekosistem Belajar &amp; Fasilitas Unggulan</h3>
+<p class="font-caption text-caption text-muted">Pengembangan holistik akademik, karakter, dan kesiapan teknologi masa depan</p>
+</div>
+</div>
+</div>
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-space-sm">
+<div class="flex flex-col gap-space-2xs bg-surface-container-low rounded-lg p-space-sm">
+<div class="w-7 h-7 rounded-full bg-surface flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[18px]">biotech</span>
+</div>
+<h4 class="font-body-medium text-body-medium text-on-surface font-semibold">Lab Sains &amp; Komputer Apple</h4>
+<p class="font-caption text-caption text-on-surface-variant">Fasilitas riset sains interaktif dan workstation coding dengan perangkat terkini.</p>
+</div>
+<div class="flex flex-col gap-space-2xs bg-surface-container-low rounded-lg p-space-sm">
+<div class="w-7 h-7 rounded-full bg-surface flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[18px]">translate</span>
+</div>
+<h4 class="font-body-medium text-body-medium text-on-surface font-semibold">Cambridge English Pathway</h4>
+<p class="font-caption text-caption text-on-surface-variant">Sertifikasi kemahiran berbahasa Inggris resmi terintegrasi pada kegiatan belajar mengajar harian.</p>
+</div>
+<div class="flex flex-col gap-space-2xs bg-surface-container-low rounded-lg p-space-sm">
+<div class="w-7 h-7 rounded-full bg-surface flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[18px]">smart_toy</span>
+</div>
+<h4 class="font-body-medium text-body-medium text-on-surface font-semibold">Robotika &amp; Sport Center</h4>
+<p class="font-caption text-caption text-on-surface-variant">Kompetisi nasional robotika, arena futsal indoor, lapangan basket standar FIBA.</p>
+</div>
+</div>
+</div>
+<!-- HELPDESK & KONSULTASI WHATSAPP -->
+<div class="bg-primary-light rounded-lg border border-border p-6 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-space-md">
+<div class="flex items-center gap-space-md">
+<div class="w-12 h-12 rounded-xl bg-success text-on-primary flex items-center justify-center shrink-0 shadow-sm">
+<span class="material-symbols-outlined text-[26px]">support_agent</span>
+</div>
+<div class="flex flex-col">
+<span class="font-card-title text-card-title text-on-surface font-semibold">Butuh Bantuan Selama Pendaftaran?</span>
+<span class="font-body-small text-body-small text-on-surface-variant">Hubungi Tim Sekretariat PPDB via WhatsApp resmi: <strong>+62 811-2345-6789</strong></span>
+<span class="font-caption text-caption text-muted">Layanan Aktif: Senin – Sabtu | 07.30 – 16.00 WIB</span>
+</div>
+</div>
+<a class="h-10 px-4 bg-success text-on-primary rounded-lg font-body-medium text-body-medium font-medium hover:opacity-90 transition-opacity flex items-center gap-1.5 shrink-0 shadow-sm" href="https://wa.me/6281123456789" rel="noopener noreferrer" target="_blank">
+<span class="material-symbols-outlined text-[18px]">chat</span>
+            Chat Helpdesk
+          </a>
+</div>
+</div>
+<!-- RIGHT COLUMN (40% = 5 Cols) : FORM REGISTRASI WALI MURID (FR-16-001) -->
+<div class="lg:col-span-5 flex flex-col gap-space-md sticky top-6">
+<div class="bg-surface rounded-lg border border-border p-6 shadow-sm flex flex-col gap-space-lg">
+<!-- Card Header & Badge -->
+<div class="flex flex-col gap-space-2xs">
+<div class="flex items-center justify-between">
+<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-info-light text-info font-label text-label font-medium">
+<span class="material-symbols-outlined text-[14px]">timer</span>
+                Pendaftaran Cepat &lt; 2 Menit
+              </span>
+<span class="font-caption text-caption text-muted">FR-16-001 / AC-16-01</span>
+</div>
+<h2 class="font-section-title text-section-title text-on-surface font-bold mt-1">Registrasi Akun Calon Wali Murid</h2>
+<p class="font-body-small text-body-small text-on-surface-variant">
+              Buat akun induk pendaftaran untuk mengelola formulir, jadwal seleksi, dan status kelulusan putra-putri Anda.
+            </p>
+</div>
+<!-- Registration Form -->
+<form class="flex flex-col gap-space-md" id="form-ppdb-register" onsubmit="event.preventDefault(); handleRegistration();">
+<!-- Field 1: Nama Lengkap Orang Tua / Wali -->
+<div class="flex flex-col gap-1.5">
+<label class="font-label text-label text-on-surface font-medium flex items-center justify-between" for="parent-name">
+<span class="">Nama Lengkap Orang Tua / Wali <span class="text-error">*</span></span>
+</label>
+<div class="relative">
+<span class="material-symbols-outlined text-muted absolute left-3 top-2.5 text-[18px]">person</span>
+<input class="w-full h-10 pl-10 pr-3 rounded-lg bg-surface-container-low font-body-default text-body-default text-on-surface placeholder:text-muted focus:outline-none focus:bg-surface focus:ring-2 focus:ring-primary-container transition-all" id="parent-name" name="parent_name" placeholder="Contoh: Hendra Santoso, M.Kom" required="" type="text">
+</div>
+</div>
+<!-- Field 2: Alamat Email Aktif -->
+<div class="flex flex-col gap-1.5">
+<label class="font-label text-label text-on-surface font-medium flex items-center justify-between" for="parent-email">
+<span class="">Alamat Email Aktif <span class="text-error">*</span></span>
+<span class="font-caption text-caption text-muted">Untuk tiket bukti &amp; reset sandi</span>
+</label>
+<div class="relative">
+<span class="material-symbols-outlined text-muted absolute left-3 top-2.5 text-[18px]">mail</span>
+<input class="w-full h-10 pl-10 pr-3 rounded-lg bg-surface-container-low font-body-default text-body-default text-on-surface placeholder:text-muted focus:outline-none focus:bg-surface focus:ring-2 focus:ring-primary-container transition-all" id="parent-email" name="parent_email" placeholder="hendra.santoso@gmail.com" required="" type="email">
+</div>
+</div>
+<!-- Field 3: Nomor Handphone / WhatsApp Aktif -->
+<div class="flex flex-col gap-1.5">
+<label class="font-label text-label text-on-surface font-medium flex items-center justify-between" for="parent-phone">
+<span class="">Nomor WhatsApp Aktif <span class="text-error">*</span></span>
+<span class="font-caption text-caption text-muted">Format Indonesia (+62)</span>
+</label>
+<div class="relative">
+<span class="material-symbols-outlined text-muted absolute left-3 top-2.5 text-[18px]">phone_iphone</span>
+<input class="w-full h-10 pl-10 pr-3 rounded-lg bg-surface-container-low font-body-default text-body-default text-on-surface placeholder:text-muted focus:outline-none focus:bg-surface focus:ring-2 focus:ring-primary-container transition-all" id="parent-phone" name="parent_phone" placeholder="0812-9876-5432" required="" type="tel">
+</div>
+<span class="font-caption text-caption text-muted">Digunakan untuk notifikasi tagihan Virtual Account &amp; link tes online.</span>
+</div>
+<!-- Field 4: Kata Sandi & Konfirmasi Kata Sandi -->
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-space-sm">
+<div class="flex flex-col gap-1.5">
+<label class="font-label text-label text-on-surface font-medium" for="password">
+                  Kata Sandi <span class="text-error">*</span>
+</label>
+<div class="relative">
+<span class="material-symbols-outlined text-muted absolute left-3 top-2.5 text-[18px]">lock</span>
+<input class="w-full h-10 pl-10 pr-3 rounded-lg bg-surface-container-low font-body-default text-body-default text-on-surface placeholder:text-muted focus:outline-none focus:bg-surface focus:ring-2 focus:ring-primary-container transition-all" id="password" minlength="8" name="password" placeholder="Min. 8 karakter" required="" type="password">
+</div>
+</div>
+<div class="flex flex-col gap-1.5">
+<label class="font-label text-label text-on-surface font-medium" for="password-confirm">
+                  Ulangi Sandi <span class="text-error">*</span>
+</label>
+<div class="relative">
+<span class="material-symbols-outlined text-muted absolute left-3 top-2.5 text-[18px]">lock_reset</span>
+<input class="w-full h-10 pl-10 pr-3 rounded-lg bg-surface-container-low font-body-default text-body-default text-on-surface placeholder:text-muted focus:outline-none focus:bg-surface focus:ring-2 focus:ring-primary-container transition-all" id="password-confirm" minlength="8" name="password_confirm" placeholder="Ketik ulang" required="" type="password">
+</div>
+</div>
+</div>
+<!-- Field 5: Pilihan Unit Pendaftaran Awal -->
+<div class="flex flex-col gap-1.5">
+<label class="font-label text-label text-on-surface font-medium" for="unit-destination">
+                Pilihan Unit Pendaftaran Awal <span class="text-error">*</span>
+</label>
+<div class="relative">
+<span class="material-symbols-outlined text-muted absolute left-3 top-2.5 text-[18px]">domain</span>
+<select class="w-full h-10 pl-10 pr-8 rounded-lg bg-surface-container-low font-body-default text-body-default text-on-surface focus:outline-none focus:bg-surface focus:ring-2 focus:ring-primary-container appearance-none transition-all cursor-pointer" id="unit-destination" name="unit_destination">
+<option selected="" value="smp-nusantara">Unit SMP Nusantara (Reguler &amp; Bilingual)</option>
+<option value="smk-nusantara">Unit SMK Nusantara (Teknik Komputer &amp; Bisnis)</option>
+<option value="sd-nusantara">Unit SD Nusantara (Pendidikan Karakter &amp; Dasar)</option>
+</select>
+<span class="material-symbols-outlined text-muted absolute right-3 top-2.5 text-[18px] pointer-events-none">arrow_drop_down</span>
+</div>
+</div>
+<!-- Checkbox Kebijakan Privasi (UU PDP) -->
+<div class="flex items-start gap-2.5 pt-1">
+<input class="mt-1 w-4 h-4 rounded text-primary-container focus:ring-primary bg-surface-container-low cursor-pointer" id="agreement" name="agreement" required="" type="checkbox">
+<label class="font-caption text-caption text-on-surface-variant cursor-pointer leading-tight" for="agreement">
+                Saya menyetujui seluruh ketentuan seleksi PPDB serta memberikan persetujuan pemrosesan data pribadi calon siswa dan orang tua sesuai 
+                <span class="text-primary font-medium underline">UU No. 27/2022 (Perlindungan Data Pribadi)</span>.
+              </label>
+</div>
+<!-- Submit Button (Solid Primary) -->
+<button class="w-full h-10 bg-primary text-on-primary rounded-lg font-body-medium text-body-medium font-semibold hover:bg-tertiary transition-colors flex items-center justify-center gap-2 shadow-sm mt-1" type="submit">
+<span class="material-symbols-outlined text-[18px]">how_to_reg</span>
+              Daftar &amp; Mulai Isi Formulir (FR-16-001)
+            </button>
+<!-- Helper Switch to Login -->
+<div class="flex items-center justify-center gap-1.5 text-center font-body-small text-body-small text-on-surface-variant pt-2">
+<span class="">Sudah memiliki akun pendaftaran atau anak aktif?</span>
+<a class="text-primary font-semibold hover:underline flex items-center gap-0.5" href="#">
+                Masuk Akun Wali Murid
+                <span class="material-symbols-outlined text-[14px]">arrow_forward</span>
+</a>
+</div>
+<!-- Continuous Portal Reassurance Note (FR-16-006) -->
+<div class="p-space-sm bg-surface-container-low rounded-lg flex items-start gap-space-xs text-caption font-caption text-secondary mt-1">
+<span class="material-symbols-outlined text-[18px] text-info shrink-0 mt-0.5">verified</span>
+<span class="">
+<strong>Jaminan Akun Berkelanjutan:</strong> Akun ini akan otomatis bermutasi menjadi akun portal definitif orang tua siswa (SIAKAD &amp; Keuangan) setelah ananda resmi dinyatakan diterima (FR-16-006).
+              </span>
+</div>
+</form>
+</div>
+<!-- Privacy & Live Consultation Mini Card -->
+<div class="bg-surface rounded-lg border border-border p-4 shadow-sm flex items-center justify-between text-caption font-caption text-on-surface-variant">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-success text-[18px]">lock</span>
+<span class="">Koneksi Aman &amp; Terenkripsi End-to-End</span>
+</div>
+<span class="font-label text-label text-muted">ID Sesi: SEKOCI-2026-REG</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Global Footer Bar: Security & Compliance -->
+<footer class="w-full bg-surface-container-lowest py-space-lg px-space-md shadow-inner mt-space-xl">
+<div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-space-md text-on-surface-variant">
+<!-- Left: Security badges -->
+<div class="flex flex-wrap items-center gap-space-md text-body-small font-body-small">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-success text-[18px]">enhanced_encryption</span>
+<span class="">Data Pribadi Terenkripsi TLS 1.2+ &amp; Hashing Argon2</span>
+</div>
+<span class="text-muted hidden md:inline">•</span>
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-info text-[18px]">account_balance_wallet</span>
+<span class="">Rekonsiliasi Otomatis Virtual Account &amp; QRIS Nasional</span>
+</div>
+</div>
+<!-- Right: Master PRD SEKOCI Phase 1 -->
+<div class="flex items-center gap-space-xs text-caption font-caption text-muted">
+<span class="material-symbols-outlined text-[16px]">verified_user</span>
+<span class="">Kepatuhan Standar Master PRD SEKOCI Phase 1 • ISO/IEC 27001 Certified System</span>
+</div>
+</div>
+</footer>
+<!-- Micro-interactions Script -->
+<script>
+    // Tab switching for unit selection chips
+    const unitButtons = document.querySelectorAll('.unit-btn');
+    const unitSelectDropdown = document.getElementById('unit-destination');
+
+    unitButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        unitButtons.forEach(b => {
+          b.classList.remove('bg-primary', 'text-on-primary', 'shadow-sm');
+          b.classList.add('bg-surface-container', 'text-on-surface-variant');
+        });
+        btn.classList.remove('bg-surface-container', 'text-on-surface-variant');
+        btn.classList.add('bg-primary', 'text-on-primary', 'shadow-sm');
+
+        // Sync dropdown selection with clicked chip
+        const unit = btn.getAttribute('data-unit');
+        if (unit === 'smp' && unitSelectDropdown) {
+          unitSelectDropdown.value = 'smp-nusantara';
+        } else if (unit === 'smk' && unitSelectDropdown) {
+          unitSelectDropdown.value = 'smk-nusantara';
+        } else if (unit === 'sd' && unitSelectDropdown) {
+          unitSelectDropdown.value = 'sd-nusantara';
+        }
+      });
+    });
+
+    // Handle form submit feedback
+    function handleRegistration() {
+      const pwd = document.getElementById('password').value;
+      const pwdConfirm = document.getElementById('password-confirm').value;
+
+      if (pwd !== pwdConfirm) {
+        alert('Konfirmasi kata sandi tidak cocok. Harap periksa kembali.');
+        return;
+      }
+
+      const parentName = document.getElementById('parent-name').value;
+      alert(`Terima kasih, Bapak/Ibu ${parentName}. Akun pendaftar berhasil dibuat! Silakan melanjutkan ke pengisian biodata ananda.`);
+    }
+  </script>
+</div></main>
+
+</body></html>
