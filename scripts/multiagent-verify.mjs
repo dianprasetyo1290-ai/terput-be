@@ -56,6 +56,16 @@ const tasks = [
     cwd: path.join(rootDir, 'services/billing'),
     cmd: 'go test ./...',
   },
+  {
+    name: 'Core Service Tests',
+    cwd: path.join(rootDir, 'services/core'),
+    cmd: 'go test ./internal/model/... ./internal/handler/...',
+  },
+  {
+    name: 'HR Service Tests',
+    cwd: path.join(rootDir, 'services/hr'),
+    cmd: 'go test ./...',
+  },
 ]
 
 const startTime = Date.now()
