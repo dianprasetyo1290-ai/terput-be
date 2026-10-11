@@ -81,8 +81,12 @@ func isAdmin(c *common.Claims) bool {
 	return c != nil && (c.ActiveRole == "admin" || c.ActiveRole == "superadmin")
 }
 
+// isStaff gates read-only E-Rapor views (leger, generate/preview, deskripsi).
+// kepala_sekolah is included because the school principal must be able to
+// review the school's leger and report cards; it stays read-only here since
+// admin-only writes are gated separately by isAdmin.
 func isStaff(c *common.Claims) bool {
-	return c != nil && (c.ActiveRole == "admin" || c.ActiveRole == "superadmin" || c.ActiveRole == "guru")
+	return c != nil && (c.ActiveRole == "admin" || c.ActiveRole == "superadmin" || c.ActiveRole == "guru" || c.ActiveRole == "kepala_sekolah")
 }
 
 // isWaliKelasOwner is the wali-kelas classroom-ownership guard (Bug Report
@@ -550,7 +554,7 @@ func (h *Handler) GetReportCard(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusNotFound, "report card not found")
 		return
 	}
-	if !authorizeReportCardAccess(claims, rc.SchoolID, rc.StudentID) {
+	if !authorizeReportCardAccess(claims, rc.SchoolID, rc.StudentID, rc.Status) {
 		common.WriteError(w, http.StatusNotFound, "report card not found")
 		return
 	}
@@ -746,14 +750,15 @@ func (h *Handler) enrichSubjectGroups(ctx context.Context, classroomID, termID s
 }
 
 // authorizeReportCardAccess enforces: siswa can only see their own report
-// card; admin/guru/superadmin are scoped to their school (superadmin
-// unrestricted).
-func authorizeReportCardAccess(c *common.Claims, schoolID, studentID string) bool {
+// card, and only once it is finalized (PRD v2.1 decision: a draft rapor's
+// numbers can still change, so the student portal shows final rapor only);
+// admin/guru/superadmin are scoped to their school (superadmin unrestricted).
+func authorizeReportCardAccess(c *common.Claims, schoolID, studentID, status string) bool {
 	if c == nil {
 		return false
 	}
 	if c.ActiveRole == "siswa" {
-		return c.UserID == studentID
+		return c.UserID == studentID && status == "finalized"
 	}
 	if c.ActiveRole == "superadmin" {
 		return true
@@ -784,6 +789,10 @@ func (h *Handler) ListStudentReportCards(w http.ResponseWriter, r *http.Request)
 	out := make([]model.ReportCard, 0, len(cards))
 	for _, rc := range cards {
 		if claims.ActiveRole != "superadmin" && claims.ActiveRole != "siswa" && rc.SchoolID != claims.SchoolID {
+			continue
+		}
+		// Siswa sees final rapor only -- same rule as authorizeReportCardAccess.
+		if claims.ActiveRole == "siswa" && rc.Status != "finalized" {
 			continue
 		}
 		// Same classroom-ownership restriction as GetReportCard: walikelas

@@ -154,6 +154,8 @@ services:
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
       IDENTITY_URL: http://identity:${IDENTITY_PORT}
       ACADEMIC_URL: http://academic:${ACADEMIC_PORT}
+      # Token peserta applicant PPDB (jangan pakai JWT identity).
+      EXAM_PARTICIPANT_SECRET: ${EXAM_PARTICIPANT_SECRET}
     ports: ["${EXAM_PORT}:${EXAM_PORT}"]
 
   # ---------- evaluation ----------
@@ -222,6 +224,102 @@ services:
       EXAM_SERVICE_URL: http://exam:${EXAM_PORT}
     ports: ["${REPORT_PORT}:${REPORT_PORT}"]
 
+  # ---------- admission (Teratai PPDB) ----------
+  admission-migrate:
+    image: migrate/migrate:v4.18.1
+    volumes: ["./services/admission/migrations:/migrations"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${ADMISSION_DB_NAME}?sslmode=disable", "up"]
+    restart: "no"
+
+  admission:
+    build: ./services/admission
+    restart: unless-stopped
+    depends_on:
+      admission-migrate:
+        condition: service_completed_successfully
+      identity:
+        condition: service_started
+      academic:
+        condition: service_started
+      exam:
+        condition: service_started
+    environment:
+      PORT: ${ADMISSION_PORT}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${ADMISSION_DB_NAME}?sslmode=disable
+      APP_ENV: ${APP_ENV:-production}
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      # Secret terpisah: sesi wali PPDB tidak boleh memakai JWT identity.
+      ADMISSION_GUARDIAN_JWT_SECRET: ${ADMISSION_GUARDIAN_JWT_SECRET}
+      OTP_PROVIDER: ${OTP_PROVIDER:-dev}
+      STORAGE_ROOT: /data/private
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      IDENTITY_URL: http://identity:${IDENTITY_PORT}
+      ACADEMIC_URL: http://academic:${ACADEMIC_PORT}
+      EXAM_URL: http://exam:${EXAM_PORT}
+    volumes: ["admission_files:/data/private"]
+    ports: ["8098:${ADMISSION_PORT}"]
+
+  # ---------- notification (Teratai: notifikasi + chat portal) ----------
+  notification-migrate:
+    image: migrate/migrate:v4.18.1
+    volumes: ["./services/notification/migrations:/migrations"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${NOTIFICATION_DB_NAME}?sslmode=disable", "up"]
+    restart: "no"
+
+  notification:
+    build: ./services/notification
+    restart: unless-stopped
+    depends_on:
+      notification-migrate:
+        condition: service_completed_successfully
+      identity:
+        condition: service_started
+    environment:
+      PORT: ${NOTIFICATION_PORT}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${NOTIFICATION_DB_NAME}?sslmode=disable
+      APP_ENV: ${APP_ENV:-production}
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      NOTIFICATION_PROVIDER: ${NOTIFICATION_PROVIDER:-unconfigured}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      IDENTITY_URL: http://identity:${IDENTITY_PORT}
+    ports: ["${NOTIFICATION_PORT}:${NOTIFICATION_PORT}"]
+
+  # ---------- billing (Teratai: SPP / tagihan sekolah) ----------
+  billing-migrate:
+    image: migrate/migrate:v4.18.1
+    volumes: ["./services/billing/migrations:/migrations"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${BILLING_DB_NAME}?sslmode=disable", "up"]
+    restart: "no"
+
+  billing:
+    build: ./services/billing
+    restart: unless-stopped
+    depends_on:
+      billing-migrate:
+        condition: service_completed_successfully
+      identity:
+        condition: service_started
+    environment:
+      PORT: ${BILLING_PORT}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${BILLING_DB_NAME}?sslmode=disable
+      APP_ENV: ${APP_ENV:-production}
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      IDENTITY_URL: http://identity:${IDENTITY_PORT}
+      ACADEMIC_URL: http://academic:${ACADEMIC_PORT}
+      STORAGE_ROOT: /data/private
+    volumes: ["billing_files:/data/private"]
+    ports: ["${BILLING_PORT}:${BILLING_PORT}"]
+
   # ---------- accounting ----------
   # Laravel, served under /accounting/ by `web` (see web/nginx.conf). No
   # accounting-migrate sidecar: its entrypoint migrates only the shared `public`
@@ -279,4 +377,18 @@ services:
       - evaluation
       - report
       - accounting
-    ports: ["80:80"]
+      - admission
+      - notification
+      - billing
+    networks:
+      - default
+      - edge
+
+volumes:
+  admission_files:
+  billing_files:
+
+networks:
+  default:
+  edge:
+    external: true

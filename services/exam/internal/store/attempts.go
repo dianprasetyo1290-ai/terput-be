@@ -42,27 +42,32 @@ func scanAttempt(row interface {
 }) (*model.ExamAttempt, error) {
 	var a model.ExamAttempt
 	var qOrderJSON []byte
-	err := row.Scan(&a.ID, &a.SchoolID, &a.AcademicYearID, &a.ExamID, &a.UserID, &a.ClassroomID, &a.TokenID, &a.Status,
-		&qOrderJSON, &a.CurrentPosition, &a.FocusLostCount, &a.StartedAt, &a.SubmittedAt,
-		&a.BlockedAt, &a.BlockedReason, &a.BlockedBy, &a.BannedAt, &a.BannedReason, &a.BannedBy,
-		&a.Score, &a.CorrectCount, &a.GradedAt, &a.FinalScore, &a.FinalAccAt, &a.FinalAccBy, &a.CreatedAt, &a.UpdatedAt)
+	var academicYearID, userID, classroomID sql.NullString
+	err := row.Scan(&a.ID, &a.SchoolID, &academicYearID, &a.ExamID, &a.ParticipantType, &a.ParticipantID,
+		&userID, &classroomID, &a.TokenID, &a.Status, &qOrderJSON, &a.CurrentPosition, &a.FocusLostCount,
+		&a.StartedAt, &a.SubmittedAt, &a.BlockedAt, &a.BlockedReason, &a.BlockedBy, &a.BannedAt,
+		&a.BannedReason, &a.BannedBy, &a.Score, &a.CorrectCount, &a.GradedAt, &a.FinalScore,
+		&a.FinalAccAt, &a.FinalAccBy, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
+	a.AcademicYearID = academicYearID.String
+	a.UserID = userID.String
+	a.ClassroomID = classroomID.String
 	if len(qOrderJSON) > 0 {
 		_ = json.Unmarshal(qOrderJSON, &a.QuestionOrder)
 	}
 	return &a, nil
 }
 
-const attemptCols = `id, school_id, academic_year_id, exam_id, user_id, classroom_id, token_id, status,
+const attemptCols = `id, school_id, academic_year_id, exam_id, participant_type, participant_id, user_id, classroom_id, token_id, status,
 	question_order, current_position, focus_lost_count, started_at, submitted_at,
 	blocked_at, blocked_reason, blocked_by, banned_at, banned_reason, banned_by,
 	score, correct_count, graded_at, final_score, final_acc_at, final_acc_by, created_at, updated_at`
 
 // attemptColsQualified is attemptCols prefixed with "ea." for use in JOIN
 // queries against other tables that share column names (id, created_at, ...).
-const attemptColsQualified = `ea.id, ea.school_id, ea.academic_year_id, ea.exam_id, ea.user_id, ea.classroom_id, ea.token_id, ea.status,
+const attemptColsQualified = `ea.id, ea.school_id, ea.academic_year_id, ea.exam_id, ea.participant_type, ea.participant_id, ea.user_id, ea.classroom_id, ea.token_id, ea.status,
 	ea.question_order, ea.current_position, ea.focus_lost_count, ea.started_at, ea.submitted_at,
 	ea.blocked_at, ea.blocked_reason, ea.blocked_by, ea.banned_at, ea.banned_reason, ea.banned_by,
 	ea.score, ea.correct_count, ea.graded_at, ea.final_score, ea.final_acc_at, ea.final_acc_by, ea.created_at, ea.updated_at`
@@ -85,13 +90,21 @@ func (s *Store) GetAttemptByID(ctx context.Context, id, schoolID string) (*model
 	return a, err
 }
 
-// ListAttemptsByExam returns every attempt for an exam regardless of
+// ListAttemptsByExam returns every STUDENT attempt for an exam regardless of
 // classroom_id — a multi-classroom exam (migration 0005) has attempts
 // denormalized across several classrooms, so filtering by a single one (the
 // old ListAttemptsByClassroom) silently dropped every non-primary-classroom
 // student from the monitor roster. See Monitor in handler/monitor.go.
+//
+// participant_type='student' is a deliberate half of the admission isolation
+// rule: the monitor is the academic proctoring view (its roster is unioned
+// with academic-service's classroom lists, and its guru-ownership check reads
+// exams.teacher_id, which an admission exam does not have), so applicant
+// attempts must not appear in it. Applicants are watched through the admission
+// pipeline, and their result is served by store.AdmissionResult.
 func (s *Store) ListAttemptsByExam(ctx context.Context, examID string) ([]model.ExamAttempt, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+attemptCols+` FROM exam_attempts WHERE exam_id=$1 ORDER BY created_at`, examID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+attemptCols+` FROM exam_attempts
+		WHERE exam_id=$1 AND participant_type='student' ORDER BY created_at`, examID)
 	if err != nil {
 		return nil, err
 	}
@@ -192,9 +205,9 @@ func (s *Store) EnterExam(ctx context.Context, examID, userID, code, studentClas
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO exam_attempts (school_id, academic_year_id, exam_id, user_id, classroom_id, token_id, status)
-		VALUES ($1,$2,$3,$4,$5,$6,'belum_mulai')
-		ON CONFLICT (exam_id, user_id) DO NOTHING`,
+		INSERT INTO exam_attempts (school_id, academic_year_id, exam_id, participant_type, participant_id, user_id, classroom_id, token_id, status)
+		VALUES ($1,$2,$3,'student',$4,$4,$5,$6,'belum_mulai')
+		ON CONFLICT (exam_id, participant_type, participant_id) DO NOTHING`,
 		schoolID, academicYearID, examID, userID, classroomID, tokenID)
 	if err != nil {
 		return nil, err
@@ -303,10 +316,10 @@ func (s *Store) SubmitAnswer(ctx context.Context, attemptID, examQuestionID stri
 	}
 
 	ans := &model.ExamAttemptAnswer{
-		AttemptID:      attemptID,
-		ExamQuestionID: examQuestionID,
+		AttemptID:        attemptID,
+		ExamQuestionID:   examQuestionID,
 		SelectedOptionID: selectedOptionID,
-		EssayAnswer:    essayAnswer,
+		EssayAnswer:      essayAnswer,
 	}
 
 	switch questionType {
@@ -552,9 +565,9 @@ func (s *Store) LarangUjianPreEntry(ctx context.Context, examID, userID, byUserI
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO exam_attempts (school_id, academic_year_id, exam_id, user_id, classroom_id, status)
-		VALUES ($1,$2,$3,$4,$5,'belum_mulai')
-		ON CONFLICT (exam_id, user_id) DO NOTHING`,
+		INSERT INTO exam_attempts (school_id, academic_year_id, exam_id, participant_type, participant_id, user_id, classroom_id, status)
+		VALUES ($1,$2,$3,'student',$4,$4,$5,'belum_mulai')
+		ON CONFLICT (exam_id, participant_type, participant_id) DO NOTHING`,
 		schoolID, academicYearID, examID, userID, classroomID)
 	if err != nil {
 		return "", err
@@ -659,10 +672,21 @@ type ScoreRow struct {
 	CorrectCount *int     `json:"correct_count"`
 }
 
+// ExamScores returns the per-STUDENT scores of an exam: what report-service
+// turns into e-raport rows. Admission applicant attempts are excluded here on
+// purpose — an applicant's result is not a rapor value, is not keyed on
+// user_id (it is NULL for an applicant row), and must only ever leave through
+// store.AdmissionResult. Without the participant_type filter an admission
+// exam, or a school that ran both kinds of CBT, would emit phantom "student"
+// rows with an empty user_id into the academic report. The `user_id IS NOT
+// NULL` guard is the second half of the same rule: a row without a student id
+// has no business in a per-student report, and scanning it into a plain string
+// would fail the whole request instead of skipping one row.
 func (s *Store) ExamScores(ctx context.Context, examID string) ([]ScoreRow, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT user_id, status, COALESCE(final_score, score), correct_count
-		FROM exam_attempts WHERE exam_id=$1 ORDER BY created_at`, examID)
+		FROM exam_attempts WHERE exam_id=$1 AND participant_type='student' AND user_id IS NOT NULL
+		ORDER BY created_at`, examID)
 	if err != nil {
 		return nil, err
 	}

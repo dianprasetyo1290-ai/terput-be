@@ -166,6 +166,24 @@ curl "http://localhost:8083/students/$STUDENT/attendance-summary?term_id=<term_i
 It also accepts a normal user JWT (admin/guru/the student themself) instead
 of the internal key — see Assumptions below.
 
+## curl example (Portal Orang Tua / wali)
+
+The Portal Orang Tua SPA reads a linked child's presensi through this
+endpoint. The caller's JWT must have `active_role=orang_tua`; the child link
+is re-verified live against identity-service's internal
+`GET /internal/guardians/{guardianUserId}/students/{studentUserId}/access?school_id=`
+(200 = linked, 404 = not), never trusted from the URL.
+
+```bash
+PARENT_TOKEN="<jwt with active_role=orang_tua, sub=<guardian id>>"
+CHILD=33333333-3333-3333-3333-333333333333   # identity-service student user id
+curl "http://localhost:8083/parent/children/$CHILD/attendance?from=2026-08-01&to=2026-08-31" \
+  -H "Authorization: Bearer $PARENT_TOKEN"
+# -> { "data": { "student_id": "...", "from": "2026-08-01", "to": "2026-08-31",
+#      "summary": {"hadir": 18, "sakit": 1, "izin": 0, "alfa": 1},
+#      "daily": [{"session_date":"2026-08-01","status":"hadir","classroom_id":"..."}] }, ... }
+```
+
 ## Endpoints
 
 | Method | Path | Role | Notes |
@@ -189,6 +207,7 @@ of the internal key — see Assumptions below.
 | GET | `/dashboard/student-attendance-summary` | admin | chart data |
 | GET | `/dashboard/teacher-attendance-summary` | admin | chart data |
 | GET | `/students/{id}/attendance-summary` | internal-key or JWT | for report-service e-raport |
+| GET | `/parent/children/{studentUserId}/attendance` | orang_tua (linked) | Portal Orang Tua: one linked child's hadir/sakit/izin/alfa recap + daily list. `?from=&to=` (YYYY-MM-DD) required, `?academic_year_id=` optional. Read-only. |
 
 All list endpoints support `?page=&per_page=`; scoping (`school_id`,
 `academic_year_id`) follows CONVENTIONS.md's multi-tenancy/academic-year
@@ -358,3 +377,21 @@ per the task instructions (no other agent to ask, working in parallel):
 - Go module uses `go 1.25` (not the exact local toolchain `1.26.4`) so the
   Docker build can use the published `golang:1.25-alpine` image without
   triggering an in-container toolchain auto-download.
+- **Portal Orang Tua reads are guardian-gated, per-child, and read-only.**
+  `GET /parent/children/{studentUserId}/attendance` forces `active_role ==
+  "orang_tua"`, then calls identity-service's
+  `/internal/guardians/{guardianUserId}/students/{studentUserId}/access` with
+  the caller's own `sub`/`school_id` (never anything from the URL/query) and
+  `X-Internal-Key`. `200` allows, `404` is a `403`; **every other outcome —
+  network failure, upstream 5xx, or an unset `IDENTITY_SERVICE_URL` — is a
+  denial (fail closed), not an allow.** The store read is hard-scoped to the
+  path's `studentUserId` and the JWT's `school_id`, so a `?school_id=`/
+  `?student_id=` query override cannot widen it. `from`/`to` (`YYYY-MM-DD`)
+  are both required, must parse, and `from` must not be after `to`; the
+  optional `academic_year_id` narrows further. No new environment variable is
+  introduced — this reuses the existing `IDENTITY_SERVICE_URL` and
+  `SEKOCI_INTERNAL_KEY`. The route lives in the JWT group under a dedicated
+  `/parent/...` subtree (no shared wildcard with existing routes) and is
+  registered as `GET` only; there is no wali write path. `belum_presensi` rows
+  appear in `daily` but are excluded from the `hadir/sakit/izin/alfa` counts
+  (they mean "not marked yet", not an absence).

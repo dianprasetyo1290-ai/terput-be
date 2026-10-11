@@ -15,16 +15,40 @@ import (
 
 	"skci/attendance/internal/client"
 	"skci/attendance/internal/common"
+	"skci/attendance/internal/model"
 	"skci/attendance/internal/store"
 )
+
+// guardianAccessChecker is the seam over identity-service's guardian-link
+// check. *client.Client implements it. A nil checker (or a configured client
+// whose identity URL is empty) makes the Portal Orang Tua endpoint fail
+// closed -- a wali can never read a child unless identity positively confirms
+// the link.
+type guardianAccessChecker interface {
+	CheckGuardianAccess(ctx context.Context, guardianUserID, studentUserID, schoolID string) error
+}
+
+// parentAttendanceReader is the seam over the store read backing the Portal
+// Orang Tua endpoint. *store.Store implements it; tests inject a fake so the
+// student-scoping and date-window behaviour can be asserted without a DB.
+type parentAttendanceReader interface {
+	ListStudentAttendanceRange(ctx context.Context, f store.ParentAttendanceFilter) ([]model.ParentAttendanceDay, error)
+}
 
 type Handler struct {
 	Store  *store.Store
 	Client *client.Client
+
+	guardianAccess   guardianAccessChecker
+	parentAttendance parentAttendanceReader
 }
 
 func New(s *store.Store, c *client.Client) *Handler {
-	return &Handler{Store: s, Client: c}
+	h := &Handler{Store: s, Client: c, parentAttendance: s}
+	if c != nil {
+		h.guardianAccess = c
+	}
+	return h
 }
 
 // ---- shared helpers --------------------------------------------------

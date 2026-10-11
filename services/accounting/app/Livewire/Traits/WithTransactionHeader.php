@@ -95,6 +95,13 @@ trait WithTransactionHeader
             ],
             'jt.trans_date' => 'required',
         ];
+        // BR-ACC-01 + BR-ACC-07. The edit path below is a query-builder update,
+        // which skips the model guards, so check explicitly.
+        \App\Support\Journals::assertEditable($this->idNya);
+        if (! empty($this->jt['trans_date'])) {
+            \App\Support\Ledger::assertOpenDate($this->jt['trans_date'], 'jt.trans_date');
+        }
+
         if ($this->idNya) {
             $valid['jt.trans_no'] = [
                 'required',

@@ -15,11 +15,11 @@ import (
 // ReportCard data").
 func (h *Handler) GetLeger(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if !isStaff(claims) {
+	classroomID := chi.URLParam(r, "id")
+	if !isStaff(claims) && !h.isWaliKelasOwner(r.Context(), claims, classroomID) {
 		common.WriteError(w, http.StatusForbidden, "leger is only available to guru/admin/superadmin")
 		return
 	}
-	classroomID := chi.URLParam(r, "id")
 	termID := r.URL.Query().Get("term_id")
 	if termID == "" {
 		common.WriteError(w, http.StatusBadRequest, "term_id query param is required")

@@ -1,4 +1,11 @@
 <form action="#" wire:submit.prevent="saveDetail">
+    @php $locked = ($jtdetail['status'] ?? 'draft') !== 'draft'; @endphp
+    @if ($locked)
+        <div class="alert alert-warning mb-4">
+            Jurnal ini berstatus <strong>{{ $jtdetail['status'] }}</strong> sehingga tidak dapat diubah.
+            Koreksi jurnal posted dilakukan melalui jurnal pembalik di menu Jurnal.
+        </div>
+    @endif
     {{-- Info Header Transaksi --}}
     <div class="p-4 mb-5 border border-blue-100 bg-blue-50 rounded-xl">
         <div class="row">
@@ -174,10 +181,12 @@
         <button type="button" class="btn btn-light border" wire:click="batal">
             <i class="mr-1 icon-arrow-left16"></i>Batal
         </button>
+        @unless ($locked)
         <button type="submit" class="btn btn-primary" wire:loading.attr="disabled">
             <i class="mr-1 icon-floppy-disk"></i>Simpan Detail
             <span wire:loading wire:target="saveDetail" class="spinner-border spinner-border-sm ml-1"></span>
         </button>
+        @endunless
     </div>
 
     {{-- Tabel Daftar Detail --}}
@@ -221,6 +230,7 @@
                             <span class="px-2 py-1 rounded-md" style="font-size: 0.75rem; font-weight: 500; color: #475569; background-color: #f1f5f9; border: 1px solid #e2e8f0;">{{ $row['curr_code'] }}</span>
                         </td>
                         <td class="text-center">
+                            @unless ($locked)
                             <div class="list-icons">
                                 <div class="dropdown">
                                     <a href="#" class="list-icons-item" data-toggle="dropdown">
@@ -238,6 +248,7 @@
                                     </div>
                                 </div>
                             </div>
+                            @endunless
                         </td>
                     </tr>
                 @empty

@@ -77,7 +77,9 @@ func (h *Handler) activeTeachersNow(r *http.Request, schoolID string) ([]model.A
 // not they've checked in yet (see activeTeachersNow).
 func (h *Handler) ActiveTeachers(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if !requireRole(w, claims, "admin", "superadmin", "walikelas") {
+	// kepala_sekolah: principal monitors which teachers are teaching right
+	// now; treated like admin below (whole school, no classroom filter).
+	if !requireRole(w, claims, "admin", "superadmin", "walikelas", "kepala_sekolah") {
 		return
 	}
 	classroomID := r.URL.Query().Get("classroom_id")
@@ -174,7 +176,10 @@ func (h *Handler) resolveTermLabels(r *http.Request, list []model.MonthlyStatusC
 // school year.
 func (h *Handler) StudentAttendanceSummaryDashboard(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if !requireRole(w, claims, "admin", "superadmin", "walikelas") {
+	// kepala_sekolah: principal sees the school-wide per-semester student
+	// attendance chart read-only; the walikelas classroom scoping below is
+	// intentionally left untouched.
+	if !requireRole(w, claims, "admin", "superadmin", "walikelas", "kepala_sekolah") {
 		return
 	}
 	classroomID := r.URL.Query().Get("classroom_id")
@@ -202,7 +207,9 @@ func (h *Handler) StudentAttendanceSummaryDashboard(w http.ResponseWriter, r *ht
 // (term) check-in counts, suitable for a chart.
 func (h *Handler) TeacherAttendanceSummaryDashboard(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if !requireRole(w, claims, "admin", "superadmin") {
+	// kepala_sekolah: principal sees the school-wide teacher attendance chart
+	// read-only, same as admin.
+	if !requireRole(w, claims, "admin", "superadmin", "kepala_sekolah") {
 		return
 	}
 	list, err := h.Store.DashboardTeacherSummary(r.Context(), scopeFromRequest(claims, r), academicYearFromRequest(r))

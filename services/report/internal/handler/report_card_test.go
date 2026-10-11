@@ -1,6 +1,10 @@
 package handler
 
-import "testing"
+import (
+	"testing"
+
+	"skci/report/internal/common"
+)
 
 func TestClassifyMapping(t *testing.T) {
 	cases := map[string]string{
@@ -93,5 +97,22 @@ func TestFaseOfClassroomNames(t *testing.T) {
 		if got := faseOf(s(in)); got != want {
 			t.Errorf("faseOf(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestSiswaSeesFinalizedOwnRaporOnly(t *testing.T) {
+	siswa := &common.Claims{UserID: "s1", ActiveRole: "siswa"}
+	if authorizeReportCardAccess(siswa, "x", "s1", "draft") {
+		t.Fatal("siswa must not see a draft rapor")
+	}
+	if !authorizeReportCardAccess(siswa, "x", "s1", "finalized") {
+		t.Fatal("siswa must see own finalized rapor")
+	}
+	if authorizeReportCardAccess(siswa, "x", "s2", "finalized") {
+		t.Fatal("siswa must not see another student's rapor")
+	}
+	guru := &common.Claims{UserID: "g", SchoolID: "x", ActiveRole: "guru"}
+	if !authorizeReportCardAccess(guru, "x", "s1", "draft") {
+		t.Fatal("staff still sees drafts")
 	}
 }

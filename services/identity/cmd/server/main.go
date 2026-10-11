@@ -110,6 +110,8 @@ func main() {
 		pr.Post("/auth/switch-role", app.SwitchRole)
 		pr.Get("/auth/me", app.Me)
 		pr.Post("/auth/change-password", app.ChangePassword) // Admin's self-service "Ubah Password"
+		pr.Get("/me/children", app.MyChildren)
+		pr.Post("/me/children/claim", app.ClaimChild)
 
 		// Superadmin dashboard.
 		pr.Get("/dashboard", app.Dashboard)
@@ -181,6 +183,14 @@ func main() {
 		pr.Post("/teachers/{id}/activate", app.ActivateTeacher)
 		pr.Post("/teachers/{id}/deactivate", app.DeactivateTeacher)
 
+		pr.Route("/guardian-links", func(gr chi.Router) {
+			gr.Get("/", app.ListGuardianLinks)
+			gr.Post("/", app.CreateGuardianLink)
+			gr.Put("/{id}", app.UpdateGuardianLink)
+			gr.Delete("/{id}", app.DeleteGuardianLink)
+		})
+		pr.Post("/guardian-claim-codes", app.IssueGuardianClaim)
+
 		// Data Jabatan / Peran (same concept) + Organisasi Sekolah.
 		pr.Route("/positions", func(pos chi.Router) {
 			pos.Get("/", app.ListPositions)
@@ -228,6 +238,21 @@ func main() {
 	// docs/CONVENTIONS.md and internal/common/internal_auth.go. Still
 	// reachable with a normal user JWT too (InternalOrJWTMiddleware falls
 	// through), so browser traffic is unaffected.
+	r.Group(func(in chi.Router) {
+		in.Use(common.InternalOnlyMiddleware(internalKey))
+		in.Post("/internal/guardians/upsert", app.InternalUpsertGuardian)
+		// Guardian relation reads for sibling services (report/academic):
+		// which students a guardian is linked to, and a per-student yes/no
+		// access check. Both are tenant-scoped by a mandatory ?school_id=
+		// because an X-Internal-Key caller carries no JWT claims to derive
+		// the school from (400 when it is missing).
+		in.Get("/internal/guardians/{guardianUserId}/children", app.InternalGuardianChildren)
+		in.Get("/internal/guardians/{guardianUserId}/students/{studentUserId}/access", app.InternalGuardianStudentAccess)
+		in.Post("/internal/students/create-or-link", app.InternalCreateOrLinkStudent)
+		in.Post("/internal/guardian-links", app.InternalCreateGuardianLink)
+		in.Get("/internal/conversions/{conversionRef}", app.InternalConversionMapping)
+	})
+
 	r.Group(func(ir chi.Router) {
 		ir.Use(common.InternalOrJWTMiddleware(jwtSecret, internalKey))
 		// Safe for X-Internal-Key callers too: cacheKey falls back to a

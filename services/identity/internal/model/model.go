@@ -79,6 +79,48 @@ type UserSchoolRole struct {
 	AcademicYearID *string `json:"academic_year_id"`
 }
 
+type GuardianLink struct {
+	ID             string     `json:"id"`
+	SchoolID       string     `json:"school_id"`
+	GuardianUserID string     `json:"guardian_user_id"`
+	StudentUserID  string     `json:"student_user_id"`
+	Relationship   string     `json:"relationship"`
+	IsPrimary      bool       `json:"is_primary"`
+	Status         string     `json:"status"`
+	VerifiedAt     *time.Time `json:"verified_at"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+type LinkedChild struct {
+	GuardianLink
+	Name  string  `json:"name"`
+	Email string  `json:"email"`
+	NISN  *string `json:"nisn"`
+	Photo *string `json:"photo"`
+}
+
+// GuardianChild is the minimal student projection returned by identity's
+// service-to-service guardian reads (GET /internal/guardians/{id}/children).
+// Deliberately narrower than LinkedChild: a sibling service resolving a
+// parent's children only needs the id/name/NISN, so the internal contract
+// stays {student_user_id,name,nisn} instead of leaking link metadata or the
+// student's email onto another service's wire.
+type GuardianChild struct {
+	StudentUserID string  `json:"student_user_id"`
+	Name          string  `json:"name"`
+	NISN          *string `json:"nisn"`
+}
+
+type ConversionMapping struct {
+	SchoolID       string  `json:"school_id"`
+	Source         string  `json:"source"`
+	ConversionRef  string  `json:"conversion_ref"`
+	GuardianID     *string `json:"guardian_user_id"`
+	StudentID      *string `json:"student_user_id"`
+	GuardianLinkID *string `json:"guardian_link_id"`
+}
+
 type Position struct {
 	ID        string    `json:"id"`
 	SchoolID  string    `json:"school_id"`

@@ -1,0 +1,9 @@
+- Prefers large implementations to be split across parallel agents for speed, with explicit file ownership to prevent conflicts. Explicitly asks for maximum speed ("multiagent ya supercepat"), so favor parallel fan-out over sequential steps. Confidence: 0.98
+- Communicates in Indonesian and expects responses in Indonesian. Confidence: 0.7
+- Prefers validating changes locally first, not deploying to the server until confirmed ("dicoba dilocal dulu ... tanpa deploy ke server"). Confidence: 0.8
+- Wants autonomous, continuous execution — keep going until the whole task is finished without stopping or pausing for confirmation ("lanjut terus ... sampai selesai jangan berhenti"). Confidence: 0.85
+- Uses Playwright with Chrome on their local Mac for browser/E2E testing of the app. Confidence: 0.7
+- Wants the deployment server's Docker build cache cleaned after deploying ("docker cache diserver juga hapus ya") to reclaim disk. Confidence: 0.6
+- Treats Docker as mandatory for running the app stack — even local dev/testing must go through Docker rather than host processes ("pakai docker wajib"). Confidence: 0.85
+- Wants to visually inspect the UI himself: repeatedly asks to run Playwright headed in Chrome so the browser visibly opens, saving full-page screenshots he can browse. Confidence: 0.75
+- Expects each user role to have a genuinely distinct landing page and sidebar; treats near-identical menus/UI across roles as a defect to investigate and fix. Confidence: 0.65

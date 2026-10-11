@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -288,4 +290,52 @@ func (c *Client) ClassroomStudents(classroomID string) []ClassroomStudentDTO {
 		return nil
 	}
 	return out
+}
+
+// GuardianStudentAccess asks identity-service whether guardianUserID is really
+// linked to studentUserID within schoolID (identity's
+// GET /internal/guardians/{guardian}/students/{student}/access, X-Internal-Key).
+//
+// Unlike every other lookup in this package, this one fails CLOSED: the Portal
+// Orang Tua routes it backs expose one child's CBT results, so only a
+// definitive answer from identity is allowed to grant access. 200 -> linked
+// (true, nil); 404 -> not linked (false, nil); an unconfigured client, a
+// transport error, or any unexpected status -> (false, err), which the caller
+// turns into a 503 rather than a read. This is deliberately the opposite of the
+// fail-open convention documented at the top of this file (that convention is
+// for best-effort enrichment where a miss only means an empty field; here it
+// would mean a student's exam data leaking to an unrelated login).
+func (c *Client) GuardianStudentAccess(schoolID, guardianUserID, studentUserID string) (bool, error) {
+	if c == nil || strings.TrimSpace(c.IdentityURL) == "" || strings.TrimSpace(c.InternalKey) == "" {
+		return false, fmt.Errorf("identity-service guardian check is not configured")
+	}
+	raw := fmt.Sprintf("%s/internal/guardians/%s/students/%s/access",
+		strings.TrimRight(c.IdentityURL, "/"),
+		url.PathEscape(guardianUserID), url.PathEscape(studentUserID))
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false, err
+	}
+	q := u.Query()
+	q.Set("school_id", schoolID)
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("X-Internal-Key", c.InternalKey)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound:
+		return false, nil
+	default:
+		return false, fmt.Errorf("identity-service guardian access returned %d", resp.StatusCode)
+	}
 }

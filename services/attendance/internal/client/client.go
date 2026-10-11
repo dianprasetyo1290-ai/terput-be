@@ -13,15 +13,19 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 )
 
 type Client struct {
+	notificationURL string
 	identityBaseURL string
 	academicBaseURL string
 	internalKey     string
@@ -29,10 +33,49 @@ type Client struct {
 }
 
 func New() *Client {
+	c := NewWithBaseURLs(
+		getEnv("IDENTITY_SERVICE_URL", "http://localhost:8081"),
+		getEnv("ACADEMIC_SERVICE_URL", "http://localhost:8082"),
+		getEnv("SEKOCI_INTERNAL_KEY", "change-me"),
+	)
+	c.notificationURL = getEnv("NOTIFICATION_SERVICE_URL", "http://notification:8089")
+	return c
+}
+
+// Notify sends an in-app notification through notification-service's
+// POST /internal/notifications. idemKey makes retries converge on one row.
+func (c *Client) Notify(ctx context.Context, schoolID, userID, typ, title, body, idemKey string) error {
+	if c.notificationURL == "" {
+		return errors.New("notification service not configured")
+	}
+	payload, _ := json.Marshal(map[string]string{"school_id": schoolID, "user_id": userID, "type": typ, "title": title, "body": body})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.notificationURL+"/internal/notifications", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Internal-Key", c.internalKey)
+	req.Header.Set("Idempotency-Key", idemKey)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("notification-service returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// NewWithBaseURLs builds a Client from explicit configuration instead of the
+// environment. Used by tests, and by anything that wants to wire the URLs
+// directly. An empty identityBaseURL is meaningful for guardian checks: see
+// CheckGuardianAccess, which fails closed rather than allowing.
+func NewWithBaseURLs(identityBaseURL, academicBaseURL, internalKey string) *Client {
 	return &Client{
-		identityBaseURL: getEnv("IDENTITY_SERVICE_URL", "http://localhost:8081"),
-		academicBaseURL: getEnv("ACADEMIC_SERVICE_URL", "http://localhost:8082"),
-		internalKey:     getEnv("SEKOCI_INTERNAL_KEY", "change-me"),
+		identityBaseURL: identityBaseURL,
+		academicBaseURL: academicBaseURL,
+		internalKey:     internalKey,
 		httpClient:      &http.Client{Timeout: 2 * time.Second},
 	}
 }
@@ -123,7 +166,18 @@ func (c *Client) GetUser(ctx context.Context, id string) (*UserSummary, error) {
 type ClassroomSummary struct {
 	ID                    string  `json:"id"`
 	Name                  string  `json:"name"`
+	AcademicYearID        string  `json:"academic_year_id"`
 	HomeroomTeacherUserID *string `json:"homeroom_teacher_user_id"`
+}
+
+// GetStudentClassroomID returns the student's active classroom in the
+// school's current academic year ("" when not enrolled).
+func (c *Client) GetStudentClassroomID(ctx context.Context, studentID, schoolID string) (string, error) {
+	var out struct {
+		ClassroomID string `json:"classroom_id"`
+	}
+	err := c.get(ctx, fmt.Sprintf("%s/students/%s/classroom?school_id=%s", c.academicBaseURL, url.PathEscape(studentID), url.QueryEscape(schoolID)), &out)
+	return out.ClassroomID, err
 }
 
 func (c *Client) GetClassroom(ctx context.Context, id string) (*ClassroomSummary, error) {
@@ -301,4 +355,50 @@ func (c *Client) ListActiveSchedulesNow(ctx context.Context, schoolID string) ([
 		return nil, err
 	}
 	return out, nil
+}
+
+// ---- guardian access (portal orang tua) --------------------------------
+
+var (
+	// ErrGuardianNoAccess means identity-service positively answered that the
+	// guardian is NOT linked to the student (HTTP 404). Handlers map it to 403.
+	ErrGuardianNoAccess = errors.New("guardian is not linked to this student")
+
+	// ErrGuardianCheckUnavailable means the check could not even be attempted
+	// because the identity client is not configured. Callers MUST treat this
+	// as a denial (fail closed), never as "allowed" -- a missing
+	// IDENTITY_SERVICE_URL must not silently open every child's presensi.
+	ErrGuardianCheckUnavailable = errors.New("guardian access check is not configured")
+)
+
+// CheckGuardianAccess asks identity-service whether guardianUserID is an
+// active guardian of studentUserID at schoolID -- the same guardian_links
+// relation the portal's "anak saya" list is built from. 200 means linked
+// (nil), 404 means not linked (ErrGuardianNoAccess). Any other status, a
+// transport error, or an unconfigured client is returned as an error that
+// every caller must treat as "deny".
+func (c *Client) CheckGuardianAccess(ctx context.Context, guardianUserID, studentUserID, schoolID string) error {
+	if c.identityBaseURL == "" {
+		return ErrGuardianCheckUnavailable
+	}
+	endpoint := fmt.Sprintf("%s/internal/guardians/%s/students/%s/access?school_id=%s",
+		c.identityBaseURL, url.PathEscape(guardianUserID), url.PathEscape(studentUserID), url.QueryEscape(schoolID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Internal-Key", c.internalKey)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusNotFound:
+		return ErrGuardianNoAccess
+	default:
+		return fmt.Errorf("guardian access check: identity-service returned %d", resp.StatusCode)
+	}
 }

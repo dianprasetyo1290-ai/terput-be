@@ -38,6 +38,27 @@ func NewRouter(h *Handler, jwtSecret, internalKey string, corsOrigins []string, 
 		common.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"}, nil)
 	})
 
+	// Admission orchestration is service-to-service only; unlike report reads,
+	// user JWTs never fall through on these contracts.
+	r.Group(func(ir chi.Router) {
+		ir.Use(common.InternalOnlyMiddleware(internalKey))
+		ir.Post("/internal/admission/exams", h.InternalUpsertAdmissionExam)
+		ir.Post("/internal/admission/exams/{id}/participants", h.InternalProvisionApplicant)
+		ir.Post("/internal/admission/exams/{id}/participants/access", h.InternalIssueParticipantAccess)
+		ir.Get("/internal/admission/exams/{id}/participants/{applicantId}/result", h.InternalAdmissionResult)
+	})
+
+	// Applicant runner uses a separate, short-lived and exam-scoped token.
+	r.Group(func(ar chi.Router) {
+		ar.Use(common.ParticipantJWTMiddleware(h.ParticipantSecret))
+		ar.Post("/participant/exams/{id}/enter", h.ApplicantEnterExam)
+		ar.Get("/participant/exams/{id}/attempt", h.ApplicantAttempt)
+		ar.Get("/participant/exams/{id}/attempt/questions/{position}", h.ApplicantQuestion)
+		ar.Post("/participant/exams/{id}/attempt/answers", h.ApplicantSubmitAnswer)
+		ar.Post("/participant/exams/{id}/attempt/submit", h.ApplicantSubmitExam)
+		ar.Post("/participant/exams/{id}/attempt/focus-lost", h.ApplicantFocusLost)
+	})
+
 	r.Group(func(pr chi.Router) {
 		pr.Use(common.JWTMiddleware(jwtSecret))
 		// Client request 2026-08-29: cache GET responses in Redis.
@@ -142,6 +163,19 @@ func NewRouter(h *Handler, jwtSecret, internalKey string, corsOrigins []string, 
 		// identity-service's Export CSV joins in each student's voucher code
 		// this way (see internal/handler/tokens.go ListTokens doc comment).
 		ir.Get("/vouchers", h.ListTokens)
+	})
+
+	// Portal Orang Tua (parent/guardian SPA): read-only, JWT-authenticated,
+	// and additionally narrowed to ONE child by identity-service's
+	// guardian<->student link check (see handler/guardian.go
+	// requireGuardianAccess — it fails closed). Deliberately NOT wrapped in
+	// the response cache: a guardian's view of their child's results must
+	// never be served stale, and this is the one route family whose
+	// authorization is a per-request cross-service call.
+	r.Route("/parent", func(pg chi.Router) {
+		pg.Use(common.JWTMiddleware(jwtSecret))
+		pg.Get("/children/{studentUserId}/exams", h.ParentChildExams)
+		pg.Get("/children/{studentUserId}/exams/{examId}", h.ParentChildExamResult)
 	})
 
 	return r

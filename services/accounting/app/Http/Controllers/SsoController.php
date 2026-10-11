@@ -97,6 +97,11 @@ class SsoController extends Controller
         }
 
         $schoolId = (string) ($claims['school_id'] ?? '');
+        // Superadmin's JWT carries no school (cross-school role); like the Go
+        // services' ?school_id= override, it names the school it is browsing.
+        if ($schoolId === '' && ($claims['active_role'] ?? '') === 'superadmin') {
+            $schoolId = (string) $request->input('school_id', '');
+        }
         if (! self::accountingEnabled($schoolId)) {
             return response()->json(['message' => 'Fitur Accounting tidak aktif untuk sekolah ini'], 403);
         }

@@ -21,6 +21,13 @@ class TransDetail extends Model
 
     protected static function booted()
     {
+        // BR-ACC-01: lines of a pending/posted/reversed journal are frozen.
+        // Guarded here, in the model, so every caller (Livewire, API) hits it.
+        $guard = fn ($d) => \App\Support\Journals::assertEditable($d->getOriginal('trans_no') ?? $d->trans_no, 'jtdetail.debetnew');
+        static::creating($guard);
+        static::updating($guard);
+        static::deleting($guard);
+
         static::created(function ($transDetail) {
             $period = (int) Parameter::first()->period;
             $year = (int) Parameter::first()->year;

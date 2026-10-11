@@ -74,7 +74,9 @@ func (a *App) ListUsers(w http.ResponseWriter, r *http.Request) {
 			common.WriteError(w, http.StatusUnauthorized, "missing token")
 			return
 		}
-		directoryAllowed := role == common.RoleGuru || (role == common.RoleSiswa && claims.ActiveRole == common.RoleWalikelas)
+		// kepala_sekolah joins walikelas here: the principal's school dashboard
+		// and roster views resolve names off this same siswa directory.
+		directoryAllowed := role == common.RoleGuru || (role == common.RoleSiswa && (claims.ActiveRole == common.RoleWalikelas || claims.ActiveRole == common.RoleKepalaSekolah))
 		if !directoryAllowed {
 			common.WriteError(w, http.StatusForbidden, "forbidden: requires role admin")
 			return
@@ -92,7 +94,9 @@ func (a *App) ListUsers(w http.ResponseWriter, r *http.Request) {
 func (a *App) ListStudents(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	privileged := claims != nil && (claims.ActiveRole == common.RoleAdmin || claims.ActiveRole == common.RoleSuperadmin)
-	if !privileged && (claims == nil || claims.ActiveRole != common.RoleGuru) {
+	// walikelas (Presensi Siswa) needs the same directory-only list as guru,
+	// and kepala_sekolah's school-wide dashboard/presensi summary does too.
+	if !privileged && (claims == nil || (claims.ActiveRole != common.RoleGuru && claims.ActiveRole != common.RoleWalikelas && claims.ActiveRole != common.RoleKepalaSekolah)) {
 		common.WriteError(w, http.StatusForbidden, "forbidden: requires role admin")
 		return
 	}
@@ -111,7 +115,8 @@ func (a *App) ListStudents(w http.ResponseWriter, r *http.Request) {
 func (a *App) ListTeachers(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	privileged := claims != nil && (claims.ActiveRole == common.RoleAdmin || claims.ActiveRole == common.RoleSuperadmin)
-	if !privileged && (claims == nil || claims.ActiveRole != common.RoleGuru) {
+	// kepala_sekolah reads the teacher directory for the Presensi Guru view.
+	if !privileged && (claims == nil || (claims.ActiveRole != common.RoleGuru && claims.ActiveRole != common.RoleKepalaSekolah)) {
 		common.WriteError(w, http.StatusForbidden, "forbidden: requires role admin")
 		return
 	}
@@ -281,7 +286,7 @@ type createUserRequest struct {
 // read-only bank soal.
 func adminAssignable(role string) bool {
 	switch role {
-	case common.RoleGuru, common.RoleSiswa, common.RolePengawas:
+	case common.RoleGuru, common.RoleSiswa, common.RoleOrangTua, common.RolePengawas:
 		return true
 	}
 	return false
@@ -307,7 +312,7 @@ func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 	// picker when active_role=admin, but that's UI-only; enforce it
 	// server-side too since this is a real escalation path otherwise.
 	if claims.ActiveRole == common.RoleAdmin && !adminAssignable(req.Role) {
-		common.WriteError(w, http.StatusForbidden, "admin may only create guru, siswa or pengawas accounts")
+		common.WriteError(w, http.StatusForbidden, "admin may only create guru, siswa, orang_tua or pengawas accounts")
 		return
 	}
 	schoolID := claims.SchoolID
@@ -338,8 +343,8 @@ func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	var u model.User
 	row := tx.QueryRow(`INSERT INTO users AS u (name, email, phone, password_hash, default_password, password_changed, is_superadmin)
-		VALUES ($1,$2,$3,$4,$5,false,$6) RETURNING `+userCols,
-		req.Name, req.Email, req.Phone, hash, plainPassword, req.Role == common.RoleSuperadmin)
+		VALUES ($1,$2,$3,$4,NULL,false,$5) RETURNING `+userCols,
+		req.Name, req.Email, req.Phone, hash, req.Role == common.RoleSuperadmin)
 	u, err = scanUser(row)
 	if err != nil {
 		common.WriteError(w, http.StatusConflict, "failed to create user (email may already be in use): "+err.Error())
@@ -357,7 +362,7 @@ func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusInternalServerError, "failed to create user")
 		return
 	}
-	u.DefaultPassword = &plainPassword // return the plaintext once, at creation time
+	u.DefaultPassword = &plainPassword // response-only; never persisted
 	common.WriteJSON(w, http.StatusCreated, u, nil)
 }
 
@@ -489,9 +494,9 @@ func (a *App) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	// A non-superadmin admin may only reset passwords for users who hold a role at their own
 	// school — otherwise a School A admin could reset any user's password by ID alone.
-	query := `UPDATE users SET password_hash=$1, default_password=$2, password_changed=false, updated_at=now()
-		WHERE id=$3 AND deleted_at IS NULL`
-	args := []interface{}{hash, newPassword, id}
+	query := `UPDATE users SET password_hash=$1, default_password=NULL, password_changed=false, updated_at=now()
+		WHERE id=$2 AND deleted_at IS NULL`
+	args := []interface{}{hash, id}
 	if claims.ActiveRole != common.RoleSuperadmin {
 		args = append(args, claims.SchoolID)
 		query += ` AND EXISTS (SELECT 1 FROM user_school_roles usr WHERE usr.user_id = users.id AND usr.school_id = $` + placeholder(len(args)) + `)`
@@ -528,7 +533,7 @@ func (a *App) AssignUserRole(w http.ResponseWriter, r *http.Request) {
 	// Same privilege-escalation guard as CreateUser: an admin can't grant
 	// themselves/anyone the admin or superadmin role via this endpoint either.
 	if claims.ActiveRole == common.RoleAdmin && !adminAssignable(req.Role) {
-		common.WriteError(w, http.StatusForbidden, "admin may only assign guru, siswa or pengawas roles")
+		common.WriteError(w, http.StatusForbidden, "admin may only assign guru, siswa, orang_tua or pengawas roles")
 		return
 	}
 	schoolID := claims.SchoolID

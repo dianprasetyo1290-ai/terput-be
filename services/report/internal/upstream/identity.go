@@ -3,6 +3,8 @@ package upstream
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -38,6 +40,36 @@ func (ic *IdentityClient) GetUser(ctx context.Context, userID string) (*User, er
 		return nil, nil
 	}
 	return &u, nil
+}
+
+// GuardianStudentAccess asks identity-service whether guardianUserID (a wali
+// / orang_tua user) is linked to studentUserID at schoolID, via its
+// internal-only
+//
+//	GET /internal/guardians/{guardianUserId}/students/{studentUserId}/access?school_id=<uuid>
+//
+// (X-Internal-Key, the same internal auth every call in this package uses).
+// The endpoint answers 200 when linked and 404 when not. Returns
+// (true, nil) on 200; (false, nil) on 404 -- a genuine "not linked", which
+// is a valid answer that must NOT be treated as an upstream failure, and is
+// exactly the case the Portal Orang Tua gate has to refuse; and an error
+// wrapping ErrUnavailable for a transport failure or any other status, so
+// the caller can fail closed rather than open when identity cannot answer.
+func (ic *IdentityClient) GuardianStudentAccess(ctx context.Context, guardianUserID, studentUserID, schoolID string) (bool, error) {
+	path := fmt.Sprintf("/internal/guardians/%s/students/%s/access?school_id=%s",
+		url.PathEscape(guardianUserID), url.PathEscape(studentUserID), url.QueryEscape(schoolID))
+	status, err := ic.c.getStatus(ctx, "GuardianStudentAccess", path)
+	if err != nil {
+		return false, err
+	}
+	switch status {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound:
+		return false, nil
+	default:
+		return false, newUnavailable(ic.c.service, "GuardianStudentAccess", fmt.Errorf("status %d", status))
+	}
 }
 
 // OrgPosition mirrors one row of identity-service's GET /organization

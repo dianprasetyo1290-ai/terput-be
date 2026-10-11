@@ -19,6 +19,10 @@ class Permissions extends Component
     protected $queryString = ['foo' => ['except' => '', 'as' => 'foo']];
     public function mount()
     {
+        // Opened bare (no ?foo= from the Peran list) → back to Peran, not a 500.
+        if (!$this->foo) {
+            return $this->redirectRoute('role');
+        }
         $this->role_id = Crypt::decrypt($this->foo);
     }
     public function limits($limit)

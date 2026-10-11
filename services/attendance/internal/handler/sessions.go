@@ -629,8 +629,18 @@ func (h *Handler) BulkMarkStudents(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "student_ids is required")
 		return
 	}
+	// BR-ATT-02: "pilih semua" must not overwrite an approved izin/sakit.
+	leaves, err := h.Store.ApprovedLeaveTypes(r.Context(), cs.SchoolID, cs.SessionDate, req.StudentIDs)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to check approved leave: "+err.Error())
+		return
+	}
 	results := make([]model.StudentAttendance, 0, len(req.StudentIDs))
 	for _, sid := range req.StudentIDs {
+		status, catatan := req.Status, (*string)(nil)
+		if l, ok := leaves[sid]; ok {
+			status, catatan = l.Status, &l.Catatan
+		}
 		sa, err := h.Store.UpsertStudentAttendance(r.Context(), cs.SessionDate, store.MarkInput{
 			ClassSessionID: cs.ID,
 			SchoolID:       cs.SchoolID,
@@ -638,7 +648,8 @@ func (h *Handler) BulkMarkStudents(w http.ResponseWriter, r *http.Request) {
 			TermID:         cs.TermID,
 			ClassroomID:    cs.ClassroomID,
 			StudentID:      sid,
-			Status:         req.Status,
+			Status:         status,
+			Catatan:        catatan,
 			MarkedBy:       claims.UserID,
 		})
 		if err != nil {

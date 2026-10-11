@@ -2,6 +2,7 @@ package common
 
 import (
 	"context"
+	"crypto/subtle"
 	"net/http"
 )
 
@@ -36,4 +37,20 @@ func InternalOrJWTMiddleware(jwtSecret, internalKey string) func(http.Handler) h
 func IsInternal(r *http.Request) bool {
 	v, _ := r.Context().Value(internalCallCtxKey).(bool)
 	return v
+}
+
+// InternalOnlyMiddleware protects mutation endpoints that must never accept a
+// browser JWT. Constant-time password comparison avoids leaking key prefixes.
+func InternalOnlyMiddleware(internalKey string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			key := r.Header.Get("X-Internal-Key")
+			if internalKey == "" || subtle.ConstantTimeCompare([]byte(key), []byte(internalKey)) != 1 {
+				WriteError(w, http.StatusUnauthorized, "invalid internal key")
+				return
+			}
+			ctx := context.WithValue(r.Context(), internalCallCtxKey, true)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }

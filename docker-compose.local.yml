@@ -1,0 +1,92 @@
+# Local-only override. The root docker-compose.yml deliberately points at an
+# EXTERNAL Postgres VM (POSTGRES_HOST) and has no `postgres` service — for local
+# testing we add one here so the whole stack runs inside Docker.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml \
+#     --env-file .env.local up -d --build
+#
+# Inside the compose network Postgres listens on 5432, so .env.local must set
+# POSTGRES_PORT=5432 (all services build DATABASE_URL from it). The host port is
+# published separately via LOCAL_PG_HOST_PORT so it can dodge a local 5432.
+#
+# Never use this file in production.
+
+services:
+  # The Vue SPA is served by `web`, but its nginx also proxies the Laravel
+  # `accounting` container. Accounting is a heavy build and is NOT needed for
+  # PPDB / Portal Orang Tua local E2E, so drop that dependency here (its proxy
+  # routes simply 502 until it is started explicitly).
+  web:
+    depends_on: !reset
+      identity:
+        condition: service_started
+      academic:
+        condition: service_started
+      attendance:
+        condition: service_started
+      exam:
+        condition: service_started
+      evaluation:
+        condition: service_started
+      report:
+        condition: service_started
+      admission:
+        condition: service_started
+      notification:
+        condition: service_started
+      billing:
+        condition: service_started
+      accounting:
+        condition: service_started
+
+  # nginx resolves every proxy_pass upstream at startup, so `web` refuses to
+  # boot while `accounting` is absent. Accounting is a heavy Laravel build and
+  # is not needed for PPDB / Portal E2E, so locally we satisfy the hostname with
+  # a tiny stub. Its routes return a plain 404 and are never exercised here.
+  accounting:
+    build: !reset null
+    image: nginx:alpine
+
+  # Root compose assumes an already-running external Postgres, so its migrate
+  # sidecars have no dependency on it. Locally Postgres boots inside compose and
+  # its db-init script needs a moment, so gate every migration on readiness.
+  identity-migrate:
+    depends_on: { postgres: { condition: service_healthy } }
+  academic-migrate:
+    depends_on: { postgres: { condition: service_healthy } }
+  attendance-migrate:
+    depends_on: { postgres: { condition: service_healthy } }
+  exam-migrate:
+    depends_on: { postgres: { condition: service_healthy } }
+  evaluation-migrate:
+    depends_on: { postgres: { condition: service_healthy } }
+  report-migrate:
+    depends_on: { postgres: { condition: service_healthy } }
+  admission-migrate:
+    depends_on: { postgres: { condition: service_healthy } }
+  notification-migrate:
+    depends_on: { postgres: { condition: service_healthy } }
+  billing-migrate:
+    depends_on: { postgres: { condition: service_healthy } }
+
+  postgres:
+    image: postgres:14-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+      # Consumed by db-init/init-multiple-dbs.sh on first boot.
+      POSTGRES_MULTIPLE_DATABASES: ${IDENTITY_DB_NAME},${ACADEMIC_DB_NAME},${ATTENDANCE_DB_NAME},${EXAM_DB_NAME},${EVALUATION_DB_NAME},${REPORT_DB_NAME},${ADMISSION_DB_NAME},${NOTIFICATION_DB_NAME:-teratai_notification},${BILLING_DB_NAME:-teratai_billing}
+    volumes:
+      - local_pg_data:/var/lib/postgresql/data
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    ports: ["${LOCAL_PG_HOST_PORT:-55432}:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  local_pg_data:

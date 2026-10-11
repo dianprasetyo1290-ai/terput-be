@@ -51,7 +51,6 @@ const (
 var genericStagedSheets = []struct{ sheet, kind string }{
 	{sheetKelas, "kelas"},
 	{sheetMataPelajaran, "mata_pelajaran"},
-	{sheetOrangTua, "orang_tua"},
 	{sheetEkstrakurikuler, "ekstrakurikuler"},
 }
 
@@ -76,15 +75,16 @@ type parsedImport struct {
 		registrationNumber, yearFounded, phoneNumber, email  string
 		logo                                                 string
 	}
-	guru              []map[string]string // fields incl. name/email/phone/birth_date/birth_place/address/religion + extra
-	guruOrder         []string
-	guruEmailByName   map[string]string // lowercased trimmed guru name -> email, for Struktur Organisasi lookup
-	siswa             []map[string]string
-	siswaOrder        []string
-	org               []map[string]string // jabatan, name (Struktur Organisasi's "Nama" column)
-	staged            map[string][]map[string]string // kind -> raw rows, see genericStagedSheets
-	report            importReport
-	existingSchoolID  string // "school_id" form field: add data to this school instead of creating a new one
+	guru             []map[string]string // fields incl. name/email/phone/birth_date/birth_place/address/religion + extra
+	guruOrder        []string
+	guruEmailByName  map[string]string // lowercased trimmed guru name -> email, for Struktur Organisasi lookup
+	siswa            []map[string]string
+	siswaOrder       []string
+	org              []map[string]string            // jabatan, name (Struktur Organisasi's "Nama" column)
+	staged           map[string][]map[string]string // kind -> raw rows, see genericStagedSheets
+	guardians        []map[string]string
+	report           importReport
+	existingSchoolID string // "school_id" form field: add data to this school instead of creating a new one
 }
 
 func parseImportFile(f *excelize.File, schoolNameOverride string, existingSchool bool) *parsedImport {
@@ -156,7 +156,7 @@ func parseImportFile(f *excelize.File, schoolNameOverride string, existingSchool
 				"address": cell(row, hdr, "alamat"), "religion": cell(row, hdr, "agama"),
 				"nuptk": cell(row, hdr, "nuptk"), "tahun_akademik": cell(row, hdr, "tahun akademik"),
 				"pendidikan_terakhir": cell(row, hdr, "pendidikan terakhir"),
-				"row_number": fmt.Sprintf("%d", i+1),
+				"row_number":          fmt.Sprintf("%d", i+1),
 			})
 			pi.guruOrder = append(pi.guruOrder, email)
 			if name != "" {
@@ -192,12 +192,37 @@ func parseImportFile(f *excelize.File, schoolNameOverride string, existingSchool
 				"nisn": cell(row, hdr, "nisn"), "kelas": cell(row, hdr, "kelas"),
 				"tahun_akademik": cell(row, hdr, "tahun akademik"), "asal_sekolah": cell(row, hdr, "asal sekolah"),
 				"nama_orang_tua": cell(row, hdr, "nama orang tua"),
-				"row_number": fmt.Sprintf("%d", i+1),
+				"row_number":     fmt.Sprintf("%d", i+1),
 			})
 			pi.siswaOrder = append(pi.siswaOrder, email)
 		}
 	}
 	pi.report.Counts[sheetSiswa] = len(pi.siswa)
+
+	// Data Orang Tua is identity-owned. Email is the account key; links are
+	// resolved safely by matching guardian name to Data Siswa's Nama Orang Tua.
+	seenEmail = map[string]bool{}
+	if rows, err := f.GetRows(sheetOrangTua); err == nil && len(rows) >= 1 {
+		hdr := indexHeader(rows[0])
+		for i, row := range rows[1:] {
+			name := cell(row, hdr, "nama")
+			email := strings.ToLower(strings.TrimSpace(cell(row, hdr, "email")))
+			if name == "" && email == "" {
+				continue
+			}
+			if name == "" || email == "" {
+				pi.report.Errors = append(pi.report.Errors, importRowError{Sheet: sheetOrangTua, Row: i + 1, Issue: "nama and email are required"})
+				continue
+			}
+			if seenEmail[email] {
+				pi.report.DuplicatesDropped[sheetOrangTua]++
+				continue
+			}
+			seenEmail[email] = true
+			pi.guardians = append(pi.guardians, map[string]string{"name": name, "email": email, "phone": cell(row, hdr, "no telepon"), "address": cell(row, hdr, "alamat"), "row_number": fmt.Sprintf("%d", i+1)})
+		}
+	}
+	pi.report.Counts[sheetOrangTua] = len(pi.guardians)
 
 	// Struktur Organisasi: Jabatan | Nama. Dedup by (jabatan, name) pair.
 	// "Nama" is matched against Data Guru's names in Import() below.
@@ -343,9 +368,9 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "academic_year is required")
 		return
 	}
-	
+
 	a.checkExistingEmails(pi)
-	
+
 	if !pi.report.OK {
 		common.WriteValidationError(w, http.StatusUnprocessableEntity, "dry run found problems; fix them before importing", pi.report.Errors)
 		return
@@ -438,6 +463,35 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 		siswaCreated++
 	}
 
+	guardianCreated := 0
+	guardianLinked := 0
+	guardianIDByName := map[string]string{}
+	for _, g := range pi.guardians {
+		userID, _, err := createImportedUser(tx, g["name"], g["email"], g["phone"], "", "", g["address"], "", nil)
+		if err != nil {
+			common.WriteError(w, http.StatusInternalServerError, "failed to create guardian "+g["email"]+": "+err.Error())
+			return
+		}
+		if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id,school_id,role) VALUES ($1,$2,'orang_tua')`, userID, schoolID); err != nil {
+			common.WriteError(w, http.StatusInternalServerError, "failed to assign guardian role")
+			return
+		}
+		guardianIDByName[strings.ToLower(strings.TrimSpace(g["name"]))] = userID
+		guardianCreated++
+	}
+	for _, s := range pi.siswa {
+		guardianID := guardianIDByName[strings.ToLower(strings.TrimSpace(s["nama_orang_tua"]))]
+		studentID := siswaUserIDByEmail[s["email"]]
+		if guardianID == "" || studentID == "" {
+			continue
+		}
+		if _, err := tx.Exec(`INSERT INTO guardian_links (school_id,guardian_user_id,student_user_id,relationship,status,verified_at) VALUES ($1,$2,$3,'orang_tua','active',now()) ON CONFLICT DO NOTHING`, schoolID, guardianID, studentID); err != nil {
+			common.WriteError(w, http.StatusInternalServerError, "failed to create guardian link")
+			return
+		}
+		guardianLinked++
+	}
+
 	positionsAssigned := 0
 	for _, o := range pi.org {
 		email, found := pi.guruEmailByName[strings.ToLower(strings.TrimSpace(o["name"]))]
@@ -504,6 +558,8 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 		"academic_year_id":       academicYearID,
 		"guru_created":           guruCreated,
 		"siswa_created":          siswaCreated,
+		"guardians_created":      guardianCreated,
+		"guardian_links_created": guardianLinked,
 		"positions_assigned":     positionsAssigned,
 		"classroom_errors":       classroomErrors,
 		"kelas_staged":           stagedCounts["kelas"],
@@ -675,8 +731,8 @@ func createImportedUser(tx *sql.Tx, name, email, phone, birthDate, birthPlace, a
 	}
 	err = tx.QueryRow(`INSERT INTO users (name, email, phone, password_hash, default_password, password_changed,
 			birth_date, birth_place, address, religion, extra)
-		VALUES ($1,$2,$3,$4,$5,false,$6,$7,$8,$9,$10) RETURNING id`,
-		name, email, nullable(phone), hash, plainPassword,
+		VALUES ($1,$2,$3,$4,NULL,false,$5,$6,$7,$8,$9) RETURNING id`,
+		name, email, nullable(phone), hash,
 		nullable(birthDate), nullable(birthPlace), nullable(address), nullable(religion), extraPtr).Scan(&userID)
 	return userID, plainPassword, err
 }
@@ -703,7 +759,7 @@ func (a *App) readImportUpload(r *http.Request) (*parsedImport, error) {
 }
 
 func (a *App) checkExistingEmails(pi *parsedImport) {
-	if len(pi.guru) == 0 && len(pi.siswa) == 0 {
+	if len(pi.guru) == 0 && len(pi.siswa) == 0 && len(pi.guardians) == 0 {
 		return
 	}
 
@@ -735,6 +791,9 @@ func (a *App) checkExistingEmails(pi *parsedImport) {
 	}
 	for _, s := range pi.siswa {
 		addEmail(s["email"], sheetSiswa, s["row_number"])
+	}
+	for _, g := range pi.guardians {
+		addEmail(g["email"], sheetOrangTua, g["row_number"])
 	}
 
 	if len(args) == 0 {

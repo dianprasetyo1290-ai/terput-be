@@ -56,13 +56,23 @@ const passwordAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz234567
 
 // GenDefaultPassword generates a random default password (e.g. for newly
 // imported/created accounts and admin-triggered resets).
-func GenDefaultPassword() string {
-	b := make([]byte, 8)
+func randomString(length int, alphabet string) string {
+	b := make([]byte, length)
 	for i := range b {
-		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(passwordAlphabet))))
-		b[i] = passwordAlphabet[n.Int64()]
+		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
+		b[i] = alphabet[n.Int64()]
 	}
 	return string(b)
+}
+
+func GenDefaultPassword() string {
+	return randomString(12, passwordAlphabet)
+}
+
+// GenClaimCode creates a high-entropy human-readable code. Only its bcrypt
+// hash is persisted; the plaintext is returned once by the issue endpoint.
+func GenClaimCode() string {
+	return randomString(16, "ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
 }
 
 // System roles. The 4 dashboard roles have their own dashboard; the 3
@@ -73,6 +83,7 @@ const (
 	RoleAdmin         = "admin"
 	RoleGuru          = "guru"
 	RoleSiswa         = "siswa"
+	RoleOrangTua      = "orang_tua"
 	RoleWalikelas     = "walikelas"
 	RoleKepalaSekolah = "kepala_sekolah"
 	RoleKepalaYayasan = "kepala_yayasan"
@@ -84,13 +95,14 @@ const (
 	RolePengawas = "pengawas"
 )
 
-var AllRoles = []string{RoleSuperadmin, RoleAdmin, RoleGuru, RoleSiswa, RoleWalikelas, RoleKepalaSekolah, RoleKepalaYayasan, RolePengawas}
+var AllRoles = []string{RoleSuperadmin, RoleAdmin, RoleGuru, RoleSiswa, RoleOrangTua, RoleWalikelas, RoleKepalaSekolah, RoleKepalaYayasan, RolePengawas}
 
 var DashboardRoles = map[string]bool{
 	RoleSuperadmin: true,
 	RoleAdmin:      true,
 	RoleGuru:       true,
 	RoleSiswa:      true,
+	RoleOrangTua:   true,
 }
 
 func IsValidRole(role string) bool {

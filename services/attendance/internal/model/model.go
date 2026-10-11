@@ -121,6 +121,19 @@ type AttendanceSummary struct {
 	TanpaKeterangan int `json:"tanpa_keterangan"`
 }
 
+// ParentAttendanceDay is one day of a single student's presensi as read by
+// the Portal Orang Tua endpoint. StudentAttendance is the raw per-session row
+// and doesn't surface session_date (the admin queries never needed it); the
+// parent screen is keyed on the day, so this carries the denormalized
+// student_attendances.session_date (migration 0003) plus the status/catatan
+// the wali is allowed to see.
+type ParentAttendanceDay struct {
+	SessionDate string  `json:"session_date"`
+	Status      string  `json:"status"`
+	Catatan     *string `json:"catatan,omitempty"`
+	ClassroomID string  `json:"classroom_id"`
+}
+
 // StudentMonthlyAttendance is one row in the "Presensi Siswa" admin default
 // view (client revision V4, item 1): one row per student (per classroom),
 // Hadir/Sakit/Izin/Tanpa Keterangan counts aggregated for one month — no

@@ -18,6 +18,12 @@ import (
 func main() {
 	_ = godotenv.Load()
 	cfg := config.Load()
+	// Fail closed on a missing/dev-default EXAM_PARTICIPANT_SECRET (see
+	// config.Validate): the applicant CBT routes are only as trustworthy as
+	// the key signing their tokens.
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("invalid configuration: %v", err)
+	}
 
 	if err := common.InitSentry(cfg.SentryDSN, cfg.SentryEnvironment, "exam-service"); err != nil {
 		log.Printf("sentry init failed (continuing without error tracking): %v", err)
@@ -35,7 +41,7 @@ func main() {
 
 	s := store.New(db)
 	ic := httpclient.New(cfg.IdentityURL, cfg.AcademicURL, cfg.InternalKey)
-	h := handler.New(s, ic)
+	h := handler.New(s, ic, cfg.ParticipantSecret, cfg.ParticipantTokenTTL)
 
 	// Redis response cache (client request 2026-08-29): fails open if
 	// REDIS_URL is unset/unreachable, see internal/cache's doc comment.

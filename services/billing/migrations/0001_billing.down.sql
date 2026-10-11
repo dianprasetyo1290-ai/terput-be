@@ -1,0 +1,10 @@
+DROP TABLE IF EXISTS billing_audit_events;
+DROP TABLE IF EXISTS bill_payment_reversals;
+DROP TABLE IF EXISTS bill_payment_allocations;
+DROP TABLE IF EXISTS bill_payments;
+DROP TABLE IF EXISTS bill_discount_steps;
+DROP TABLE IF EXISTS bill_discounts;
+DROP TABLE IF EXISTS bill_items;
+DROP TABLE IF EXISTS student_bills;
+DROP TABLE IF EXISTS billing_scheme_components;
+DROP TABLE IF EXISTS billing_schemes;

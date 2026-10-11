@@ -10,7 +10,9 @@ import (
 
 type Claims struct {
 	UserID     string   `json:"sub"`
+	Name       string   `json:"name,omitempty"`
 	SchoolID   string   `json:"school_id"`
+	SchoolName string   `json:"school_name,omitempty"`
 	ActiveRole string   `json:"active_role"`
 	Roles      []string `json:"roles"`
 	jwt.RegisteredClaims

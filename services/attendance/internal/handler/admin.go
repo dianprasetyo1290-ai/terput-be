@@ -20,7 +20,10 @@ import (
 // record).
 func (h *Handler) StudentAttendanceAdmin(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if !requireRole(w, claims, "admin", "superadmin", "walikelas") {
+	// kepala_sekolah: the principal gets a read-only, school-wide presensi
+	// recap for oversight; falls through to the admin branch below (no
+	// walikelas classroom scoping).
+	if !requireRole(w, claims, "admin", "superadmin", "walikelas", "kepala_sekolah") {
 		return
 	}
 	q := r.URL.Query()
@@ -55,7 +58,10 @@ func (h *Handler) StudentAttendanceAdmin(w http.ResponseWriter, r *http.Request)
 // duplicate student rows, re-aggregates when the month filter changes.
 func (h *Handler) StudentAttendanceSummaryAdmin(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if !requireRole(w, claims, "admin", "superadmin", "walikelas") {
+	// kepala_sekolah: the principal gets a read-only, school-wide presensi
+	// recap for oversight; falls through to the admin branch below (no
+	// walikelas classroom scoping).
+	if !requireRole(w, claims, "admin", "superadmin", "walikelas", "kepala_sekolah") {
 		return
 	}
 	q := r.URL.Query()
@@ -79,7 +85,10 @@ func (h *Handler) StudentAttendanceSummaryAdmin(w http.ResponseWriter, r *http.R
 // roster merge below needs one classroom to enumerate students from.
 func (h *Handler) StudentAttendanceMonthlyGridAdmin(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if !requireRole(w, claims, "admin", "superadmin", "walikelas") {
+	// kepala_sekolah: the principal gets a read-only, school-wide presensi
+	// recap for oversight; falls through to the admin branch below (no
+	// walikelas classroom scoping).
+	if !requireRole(w, claims, "admin", "superadmin", "walikelas", "kepala_sekolah") {
 		return
 	}
 	q := r.URL.Query()
@@ -170,7 +179,9 @@ func (h *Handler) StudentAttendanceExport(w http.ResponseWriter, r *http.Request
 // sessions scoped by guru_id.
 func (h *Handler) TeacherAttendanceAdmin(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if !requireRole(w, claims, "admin", "superadmin") {
+	// kepala_sekolah: principal views the school-wide teacher attendance
+	// recap (read-only oversight), same as admin.
+	if !requireRole(w, claims, "admin", "superadmin", "kepala_sekolah") {
 		return
 	}
 	page, perPage := pageParams(r)

@@ -72,35 +72,59 @@ func newClient(baseURL, internalKey, service string, timeout time.Duration) *cli
 	}
 }
 
-// getJSON performs GET path, unwraps the {"data": ...} envelope, and
-// decodes .data into out. Returns an *UnavailableError (wrapping
-// ErrUnavailable) for any network error, timeout, or non-2xx status other
-// than 404 (404 decodes into out as-is left zero-valued and returns nil,
-// since "not found upstream" is a valid, non-degraded answer for lookups).
-func (c *client) getJSON(ctx context.Context, op, path string, out interface{}) error {
+// doGet performs the shared GET + X-Internal-Key plumbing every client call
+// goes through and returns the upstream's HTTP status alongside the raw
+// body. Every error here is a transport-level failure (request build,
+// network, timeout, body read) and is wrapped as *UnavailableError.
+func (c *client) doGet(ctx context.Context, op, path string) (int, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
-		return newUnavailable(c.service, op, err)
+		return 0, nil, newUnavailable(c.service, op, err)
 	}
 	req.Header.Set("X-Internal-Key", c.internalKey)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return newUnavailable(c.service, op, err)
+		return 0, nil, newUnavailable(c.service, op, err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return newUnavailable(c.service, op, err)
+		return 0, nil, newUnavailable(c.service, op, err)
+	}
+	return resp.StatusCode, body, nil
+}
+
+// getStatus performs GET path and reports the upstream's HTTP status code,
+// treating every status (404 included) as a valid answer. Unlike getJSON it
+// does not collapse "not found" into "empty success", so a caller that must
+// tell 200 from 404 apart -- an authorization probe answering "linked" vs
+// "not linked" -- can switch on the code. Transport failures still wrap
+// ErrUnavailable so the caller can fail closed on a service that cannot
+// answer at all.
+func (c *client) getStatus(ctx context.Context, op, path string) (int, error) {
+	status, _, err := c.doGet(ctx, op, path)
+	return status, err
+}
+
+// getJSON performs GET path, unwraps the {"data": ...} envelope, and
+// decodes .data into out. Returns an *UnavailableError (wrapping
+// ErrUnavailable) for any network error, timeout, or non-2xx status other
+// than 404 (404 decodes into out as-is left zero-valued and returns nil,
+// since "not found upstream" is a valid, non-degraded answer for lookups).
+func (c *client) getJSON(ctx context.Context, op, path string, out interface{}) error {
+	status, body, err := c.doGet(ctx, op, path)
+	if err != nil {
+		return err
 	}
 
-	if resp.StatusCode == http.StatusNotFound {
+	if status == http.StatusNotFound {
 		return nil
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return newUnavailable(c.service, op, fmt.Errorf("status %d: %s", resp.StatusCode, string(body)))
+	if status < 200 || status >= 300 {
+		return newUnavailable(c.service, op, fmt.Errorf("status %d: %s", status, string(body)))
 	}
 
 	var env envelope

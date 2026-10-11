@@ -160,6 +160,28 @@ func main() {
 		r.Get("/dashboard/counts", h.DashboardCounts)
 	})
 
+	// Materi & Tugas (PRD menus 57/58/70/71, internal/handler/learning*.go).
+	// Deliberately NOT behind respCache: lists must reflect a submit/publish
+	// immediately and file downloads must never be copied into Redis.
+	r.Group(func(r chi.Router) {
+		r.Use(common.JWTMiddleware(jwtSecret))
+		r.Get("/learning/materials", h.ListLearningMaterials)
+		r.Post("/learning/materials", h.CreateLearningMaterial)
+		r.Put("/learning/materials/{id}", h.UpdateLearningMaterial)
+		r.Delete("/learning/materials/{id}", h.DeleteLearningMaterial)
+		r.Get("/learning/materials/{id}/file", h.DownloadLearningMaterialFile)
+
+		r.Get("/learning/assignments", h.ListLearningAssignments)
+		r.Post("/learning/assignments", h.CreateLearningAssignment)
+		r.Put("/learning/assignments/{id}", h.UpdateLearningAssignment)
+		r.Delete("/learning/assignments/{id}", h.DeleteLearningAssignment)
+		r.Get("/learning/assignments/{id}/file", h.DownloadLearningAssignmentFile)
+		r.Get("/learning/assignments/{id}/submissions", h.ListAssignmentSubmissions)
+		r.Post("/learning/assignments/{id}/submission", h.SubmitAssignment)
+		r.Get("/learning/submissions/{id}/file", h.DownloadSubmissionFile)
+		r.Post("/learning/submissions/{id}/grade", h.GradeSubmission)
+	})
+
 	// Read-only endpoints other services (report, exam, evaluation) fetch
 	// over internal HTTP using X-Internal-Key — see docs/CONVENTIONS.md and
 	// internal/common/internal_auth.go. Still reachable with a normal user
@@ -206,6 +228,11 @@ func main() {
 		r.Post("/classrooms/{id}/students", h.AddStudentToClassroom)
 		// identity-service's DeleteUser cascade — see RemoveStudentEnrollments.
 		r.Delete("/students/{student_user_id}/enrollments", h.RemoveStudentEnrollments)
+		// admission-service's applicant->student conversion saga enrollment
+		// step (see services/admission/internal/handler/conversion.go
+		// academicAdapter.Enroll). Idempotent; see
+		// internal/handler/admission_enrollment.go.
+		r.Post("/internal/admission/enrollments/upsert", h.UpsertAdmissionEnrollment)
 	})
 
 	log.Printf("academic-service listening on :%s", port)

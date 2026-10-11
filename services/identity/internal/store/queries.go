@@ -42,9 +42,9 @@ func FindUserByEmail(db *sql.DB, email string) (model.User, string, error) {
 
 func FindUserByID(db *sql.DB, id string) (model.User, error) {
 	var u model.User
-	err := db.QueryRow(`SELECT id, name, email, phone, password_changed, photo, birth_date, birth_place, address, is_superadmin, created_at, updated_at
+	err := db.QueryRow(`SELECT id, name, email, phone, password_changed, photo, birth_date, birth_place, address, religion, nisn, is_superadmin, created_at, updated_at
 		FROM users WHERE id = $1 AND deleted_at IS NULL`, id).
-		Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.PasswordChanged, &u.Photo, &u.BirthDate, &u.BirthPlace, &u.Address, &u.IsSuperadmin, &u.CreatedAt, &u.UpdatedAt)
+		Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.PasswordChanged, &u.Photo, &u.BirthDate, &u.BirthPlace, &u.Address, &u.Religion, &u.NISN, &u.IsSuperadmin, &u.CreatedAt, &u.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return u, ErrNotFound
 	}
@@ -77,7 +77,13 @@ func PickActiveRole(roles []model.UserSchoolRole) (activeRole, schoolID string, 
 	// every walikelas/kepala_sekolah in production also holds guru; the
 	// first pengawas-only account exposed it. The fallback below means a
 	// role added later never has to be remembered here again.
-	priority := []string{"superadmin", "admin", "guru", "siswa"}
+	// Jabatan roles rank ABOVE guru: an account that holds guru plus
+	// walikelas/kepala_sekolah/kepala_yayasan used to log straight into the
+	// classroom (active_role=guru), so Kepala Sekolah and Wali Kelas landed on
+	// exactly the guru UI and looked identical to a plain teacher until the
+	// user manually switched. Leadership/duty role wins so each account lands
+	// on its own dashboard.
+	priority := []string{"superadmin", "admin", "kepala_yayasan", "kepala_sekolah", "walikelas", "guru", "siswa", "orang_tua"}
 	byRole := map[string]model.UserSchoolRole{}
 	// roles is ordered by created_at ascending (see UserRoles) — a user can hold the same
 	// role at more than one school (unique constraint is user_id+school_id+role, not

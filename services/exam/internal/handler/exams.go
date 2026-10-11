@@ -25,11 +25,11 @@ type classroomSubjectPair struct {
 }
 
 type examReq struct {
-	AcademicYearID string  `json:"academic_year_id"`
-	TermID         string  `json:"term_id"`      // Semester/Tahun Ajaran
-	ExamTypeID     string  `json:"exam_type_id"` // Tipe Ujian
-	Title          string  `json:"title"`        // Judul Ujian
-	Description    *string `json:"description"`  // Deskripsi/catatan (optional)
+	AcademicYearID string   `json:"academic_year_id"`
+	TermID         string   `json:"term_id"`       // Semester/Tahun Ajaran
+	ExamTypeID     string   `json:"exam_type_id"`  // Tipe Ujian
+	Title          string   `json:"title"`         // Judul Ujian
+	Description    *string  `json:"description"`   // Deskripsi/catatan (optional)
 	ClassroomID    string   `json:"classroom_id"`  // Mata Pelajaran: kelas (single-classroom path)
 	ClassroomIDs   []string `json:"classroom_ids"` // for multi select update
 	SubjectID      string   `json:"subject_id"`    // Mata Pelajaran: mapel (single-classroom path)

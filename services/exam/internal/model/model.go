@@ -3,14 +3,14 @@ package model
 import "time"
 
 type ExamType struct {
-	ID              string    `json:"id"`
-	SchoolID        string    `json:"school_id"`
-	AcademicYearID  string    `json:"academic_year_id"`
-	Name            string    `json:"name"`
-	MappingRapor    string    `json:"mapping_rapor"`
-	CreatedBy       string    `json:"created_by"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID             string    `json:"id"`
+	SchoolID       string    `json:"school_id"`
+	AcademicYearID string    `json:"academic_year_id"`
+	Name           string    `json:"name"`
+	MappingRapor   string    `json:"mapping_rapor"`
+	CreatedBy      string    `json:"created_by"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type QuestionFolder struct {
@@ -40,54 +40,80 @@ type EssayAnswerOption struct {
 }
 
 type Question struct {
-	ID                   string              `json:"id"`
-	SchoolID             string              `json:"school_id"`
-	AcademicYearID       string              `json:"academic_year_id"`
-	FolderID             string              `json:"folder_id"`
-	CreatedBy            string              `json:"created_by"`
-	QuestionType         string              `json:"question_type"`
-	Content              string              `json:"content"`
-	ImageURL             *string             `json:"image_url,omitempty"`
-	NoKD                 *string             `json:"no_kd,omitempty"`
-	KontenKD             *string             `json:"konten_kd,omitempty"`
-	IndikatorPencapaian  *string             `json:"indikator_pencapaian,omitempty"`
-	LevelKognitif        *string             `json:"level_kognitif,omitempty"`
-	Poin                 float64             `json:"poin"`
-	IsPublished          bool                `json:"is_published"`
-	CreatedAt            time.Time           `json:"created_at"`
-	UpdatedAt            time.Time           `json:"updated_at"`
-	AnswerOptions        []AnswerOption      `json:"answer_options,omitempty"`
-	EssayOptions         []EssayAnswerOption `json:"essay_options,omitempty"`
+	ID                  string              `json:"id"`
+	SchoolID            string              `json:"school_id"`
+	AcademicYearID      string              `json:"academic_year_id"`
+	FolderID            string              `json:"folder_id"`
+	CreatedBy           string              `json:"created_by"`
+	QuestionType        string              `json:"question_type"`
+	Content             string              `json:"content"`
+	ImageURL            *string             `json:"image_url,omitempty"`
+	NoKD                *string             `json:"no_kd,omitempty"`
+	KontenKD            *string             `json:"konten_kd,omitempty"`
+	IndikatorPencapaian *string             `json:"indikator_pencapaian,omitempty"`
+	LevelKognitif       *string             `json:"level_kognitif,omitempty"`
+	Poin                float64             `json:"poin"`
+	IsPublished         bool                `json:"is_published"`
+	CreatedAt           time.Time           `json:"created_at"`
+	UpdatedAt           time.Time           `json:"updated_at"`
+	AnswerOptions       []AnswerOption      `json:"answer_options,omitempty"`
+	EssayOptions        []EssayAnswerOption `json:"essay_options,omitempty"`
+}
+
+const (
+	AudienceAcademic     = "academic"
+	AudienceAdmission    = "admission"
+	ParticipantStudent   = "student"
+	ParticipantApplicant = "applicant"
+)
+
+// ParticipantTypeLen is the length of the longest legal participant_type
+// ("applicant"). participant_type is a closed two-value union, never free
+// text: migration 0008 pins it in the DB with
+// `CHECK (participant_type IN ('student','applicant'))` (so 7 or 9 characters,
+// nothing else) and ValidParticipantType is the Go-side twin. Callers that
+// take a participant type from a token claim (internal/common's
+// ParticipantJWTMiddleware, handler/admission.go's participant()) go through
+// this rather than trusting/trimming the claim, so an over-long, padded or
+// differently-cased value can never reach a query as if it were a real type.
+const ParticipantTypeLen = len(ParticipantApplicant)
+
+// ValidParticipantType reports whether t is exactly one of the two legal
+// participant kinds.
+func ValidParticipantType(t string) bool {
+	return t == ParticipantStudent || t == ParticipantApplicant
 }
 
 type Exam struct {
-	ID             string     `json:"id"`
-	SchoolID       string     `json:"school_id"`
-	AcademicYearID string     `json:"academic_year_id"`
-	TermID         string     `json:"term_id"`
-	ExamTypeID     string     `json:"exam_type_id"`
-	Title          string     `json:"title"`
-	Description    *string    `json:"description,omitempty"`
+	ID               string                 `json:"id"`
+	SchoolID         string                 `json:"school_id"`
+	Audience         string                 `json:"audience"`
+	AdmissionContext map[string]interface{} `json:"admission_context,omitempty"`
+	AcademicYearID   string                 `json:"academic_year_id,omitempty"`
+	TermID           string                 `json:"term_id"`
+	ExamTypeID       string                 `json:"exam_type_id"`
+	Title            string                 `json:"title"`
+	Description      *string                `json:"description,omitempty"`
 	// ClassroomID is the "primary" classroom, kept for backward compat with
 	// existing callers (report-service's upstream.ExamClient.Exam decodes
 	// this field, the ?classroom_id= list filter matches against it). The
 	// real target audience — one exam can now cover several classrooms — is
 	// ClassroomIDs; on create it's always ClassroomIDs[0].
-	ClassroomID    string     `json:"classroom_id"`
-	ClassroomIDs   []string   `json:"classroom_ids,omitempty"`
-	SubjectID      string     `json:"subject_id"`
-	TeacherID      string     `json:"teacher_id"`
-	StartAt        time.Time  `json:"start_at"`
-	EndAt          time.Time  `json:"end_at"`
-	IsShuffled     bool       `json:"is_shuffled"`
-	IsPublished    bool       `json:"is_published"`
-	PublishedAt    *time.Time `json:"published_at,omitempty"`
-	CreatedBy      string     `json:"created_by"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
-	TotalPoints    float64    `json:"total_points,omitempty"`
-	QuestionCount  int        `json:"question_count,omitempty"`
-	FolderID       *string    `json:"folder_id,omitempty"`
+	ClassroomID   string     `json:"classroom_id"`
+	ClassroomIDs  []string   `json:"classroom_ids,omitempty"`
+	SubjectID     string     `json:"subject_id"`
+	TeacherID     string     `json:"teacher_id"`
+	StartAt       time.Time  `json:"start_at"`
+	EndAt         time.Time  `json:"end_at"`
+	IsShuffled    bool       `json:"is_shuffled"`
+	IsPublished   bool       `json:"is_published"`
+	PublishedAt   *time.Time `json:"published_at,omitempty"`
+	CreatedBy     string     `json:"created_by"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+	TotalPoints   float64    `json:"total_points,omitempty"`
+	QuestionCount int        `json:"question_count,omitempty"`
+	FolderID      *string    `json:"folder_id,omitempty"`
 }
 
 type ExamQuestion struct {
@@ -125,37 +151,51 @@ const (
 	StatusSelesai    = "selesai"
 )
 
+type ExamParticipant struct {
+	ID                string    `json:"id"`
+	SchoolID          string    `json:"school_id"`
+	ExamID            string    `json:"exam_id"`
+	ParticipantType   string    `json:"participant_type"`
+	ParticipantID     string    `json:"participant_id"`
+	DisplayName       *string   `json:"display_name,omitempty"`
+	ExternalReference *string   `json:"external_reference,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
 type ExamAttempt struct {
-	ID               string     `json:"id"`
-	SchoolID         string     `json:"school_id"`
-	AcademicYearID   string     `json:"academic_year_id"`
-	ExamID           string     `json:"exam_id"`
-	UserID           string     `json:"user_id"`
-	ClassroomID      string     `json:"classroom_id"`
-	TokenID          *string    `json:"token_id,omitempty"`
-	Status           string     `json:"status"`
-	QuestionOrder    []string   `json:"question_order,omitempty"`
-	CurrentPosition  int        `json:"current_position"`
-	FocusLostCount   int        `json:"focus_lost_count"`
-	StartedAt        *time.Time `json:"started_at,omitempty"`
-	SubmittedAt      *time.Time `json:"submitted_at,omitempty"`
-	BlockedAt        *time.Time `json:"blocked_at,omitempty"`
-	BlockedReason    *string    `json:"blocked_reason,omitempty"`
-	BlockedBy        *string    `json:"blocked_by,omitempty"`
-	BannedAt         *time.Time `json:"banned_at,omitempty"`
-	BannedReason     *string    `json:"banned_reason,omitempty"`
-	BannedBy         *string    `json:"banned_by,omitempty"`
-	Score            *float64   `json:"score,omitempty"`
-	CorrectCount     *int       `json:"correct_count,omitempty"`
-	GradedAt         *time.Time `json:"graded_at,omitempty"`
+	ID              string     `json:"id"`
+	SchoolID        string     `json:"school_id"`
+	AcademicYearID  string     `json:"academic_year_id,omitempty"`
+	ExamID          string     `json:"exam_id"`
+	ParticipantType string     `json:"participant_type"`
+	ParticipantID   string     `json:"participant_id"`
+	UserID          string     `json:"user_id,omitempty"`
+	ClassroomID     string     `json:"classroom_id,omitempty"`
+	TokenID         *string    `json:"token_id,omitempty"`
+	Status          string     `json:"status"`
+	QuestionOrder   []string   `json:"question_order,omitempty"`
+	CurrentPosition int        `json:"current_position"`
+	FocusLostCount  int        `json:"focus_lost_count"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	SubmittedAt     *time.Time `json:"submitted_at,omitempty"`
+	BlockedAt       *time.Time `json:"blocked_at,omitempty"`
+	BlockedReason   *string    `json:"blocked_reason,omitempty"`
+	BlockedBy       *string    `json:"blocked_by,omitempty"`
+	BannedAt        *time.Time `json:"banned_at,omitempty"`
+	BannedReason    *string    `json:"banned_reason,omitempty"`
+	BannedBy        *string    `json:"banned_by,omitempty"`
+	Score           *float64   `json:"score,omitempty"`
+	CorrectCount    *int       `json:"correct_count,omitempty"`
+	GradedAt        *time.Time `json:"graded_at,omitempty"`
 	// FinalScore (Yadika13 item 6): the score a guru approved ("ACC").
 	// Once set it is what counts, however many ujian susulan follow, until
 	// the guru ACCs again. NULL = never approved, so Score wins.
-	FinalScore       *float64   `json:"final_score,omitempty"`
-	FinalAccAt       *time.Time `json:"final_acc_at,omitempty"`
-	FinalAccBy       *string    `json:"final_acc_by,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	FinalScore *float64   `json:"final_score,omitempty"`
+	FinalAccAt *time.Time `json:"final_acc_at,omitempty"`
+	FinalAccBy *string    `json:"final_acc_by,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 // AttemptSitting is one archived ujian-susulan sitting (Yadika13 item 6:
@@ -176,15 +216,15 @@ type AttemptSitting struct {
 }
 
 type ExamAttemptAnswer struct {
-	ID               string     `json:"id"`
-	AttemptID        string     `json:"attempt_id"`
-	ExamQuestionID   string     `json:"exam_question_id"`
-	SelectedOptionID *string    `json:"selected_option_id,omitempty"`
-	EssayAnswer      *string    `json:"essay_answer,omitempty"`
-	IsCorrect        *bool      `json:"is_correct,omitempty"`
-	PointsAwarded    *float64   `json:"points_awarded,omitempty"`
-	ManuallyGraded   bool       `json:"manually_graded"`
-	AnsweredAt       time.Time  `json:"answered_at"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	ID               string    `json:"id"`
+	AttemptID        string    `json:"attempt_id"`
+	ExamQuestionID   string    `json:"exam_question_id"`
+	SelectedOptionID *string   `json:"selected_option_id,omitempty"`
+	EssayAnswer      *string   `json:"essay_answer,omitempty"`
+	IsCorrect        *bool     `json:"is_correct,omitempty"`
+	PointsAwarded    *float64  `json:"points_awarded,omitempty"`
+	ManuallyGraded   bool      `json:"manually_graded"`
+	AnsweredAt       time.Time `json:"answered_at"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }

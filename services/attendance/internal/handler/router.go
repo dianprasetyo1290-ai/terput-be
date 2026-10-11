@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -43,6 +44,11 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 		// dashboards excluded -- caching them defeats their purpose (they
 		// exist to show live state, e.g. who's teaching this exact moment).
 		pr.Use(cfg.Cache.Middleware(func(r *http.Request) bool {
+			// Leave requests change on every submit/review; a 15s stale
+			// list would hide the action the user just took.
+			if strings.Contains(r.URL.Path, "leave-requests") {
+				return true
+			}
 			switch r.URL.Path {
 			case "/me/sessions/today", "/dashboard/active-teachers":
 				return true
@@ -85,6 +91,21 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 		pr.Get("/dashboard/teaching-stats", h.TeachingStats)
 		pr.Get("/dashboard/student-attendance-summary", h.StudentAttendanceSummaryDashboard)
 		pr.Get("/dashboard/teacher-attendance-summary", h.TeacherAttendanceSummaryDashboard)
+
+		// Portal Orang Tua (wali) — read-only presensi for one linked child.
+		// A distinct /parent/children/{studentUserId} subtree (no shared
+		// wildcard segment with anything above), so chi's static-vs-wildcard
+		// precedence is never in play. The only wali write is leave-requests below.
+		pr.Get("/parent/children/{studentUserId}/attendance", h.ParentChildAttendance)
+
+		// Izin / sakit (PRD menu 42 + 48): orang tua submits, wali kelas /
+		// admin reviews; approval applies BR-ATT-02.
+		pr.Post("/parent/children/{studentUserId}/leave-requests", h.CreateLeaveRequest)
+		pr.Get("/parent/children/{studentUserId}/leave-requests", h.ListChildLeaveRequests)
+		pr.Get("/leave-requests", h.ListLeaveRequests)
+		pr.Post("/leave-requests/{id}/approve", h.ApproveLeaveRequest)
+		pr.Post("/leave-requests/{id}/reject", h.RejectLeaveRequest)
+		pr.Get("/leave-requests/{id}/attachment", h.LeaveAttachment)
 	})
 
 	// report-service integration: reachable either via internal service key

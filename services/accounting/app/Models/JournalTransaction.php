@@ -27,6 +27,18 @@ class JournalTransaction extends Model
         ];
     }
 
+    protected static function booted()
+    {
+        // BR-ACC-01: header fields of a non-draft journal are frozen; workflow
+        // columns (status, status_by, status_at) and recomputed totals may change.
+        static::updating(function ($h) {
+            if ($h->isDirty(['trans_code', 'trans_no', 'trans_date'])) {
+                \App\Support\Journals::assertEditable($h->getOriginal('trans_no'));
+            }
+        });
+        static::deleting(fn ($h) => \App\Support\Journals::assertEditable($h->trans_no));
+    }
+
     public function transType()
     {
         return $this->belongsTo(TransactionType::class, 'trans_code');
@@ -52,31 +64,33 @@ class JournalTransaction extends Model
 
     public function scopeWithEqualDebetAndCredit($query)
     {
-        return $query->select('trans_head.trans_no', 'trans_head.trans_code', 'trans_head.trans_date')
+        return $query->select('trans_head.trans_no', 'trans_head.trans_code', 'trans_head.trans_date', 'trans_head.status')
             ->join('trans_detail', 'trans_head.trans_no', '=', 'trans_detail.trans_no')
             ->select(
                 'trans_head.trans_no',
                 'trans_head.trans_code',
                 'trans_head.trans_date',
+                'trans_head.status',
                 DB::raw('SUM(trans_detail.debet) as total_debet'),
                 DB::raw('SUM(trans_detail.credit) as total_credit')
             )
-            ->groupBy('trans_head.trans_no', 'trans_head.trans_code', 'trans_head.trans_date')
+            ->groupBy('trans_head.trans_no', 'trans_head.trans_code', 'trans_head.trans_date', 'trans_head.status')
             ->havingRaw('SUM(trans_detail.debet) = SUM(trans_detail.credit)');
     }
 
     public function scopeWithNotEqualDebetAndCredit($query)
     {
-        return $query->select('trans_head.trans_no', 'trans_head.trans_code', 'trans_head.trans_date')
+        return $query->select('trans_head.trans_no', 'trans_head.trans_code', 'trans_head.trans_date', 'trans_head.status')
             ->join('trans_detail', 'trans_head.trans_no', '=', 'trans_detail.trans_no')
             ->select(
                 'trans_head.trans_no',
                 'trans_head.trans_code',
                 'trans_head.trans_date',
+                'trans_head.status',
                 DB::raw('SUM(trans_detail.debet) as total_debet'),
                 DB::raw('SUM(trans_detail.credit) as total_credit')
             )
-            ->groupBy('trans_head.trans_no', 'trans_head.trans_code', 'trans_head.trans_date')
+            ->groupBy('trans_head.trans_no', 'trans_head.trans_code', 'trans_head.trans_date', 'trans_head.status')
             ->havingRaw('SUM(trans_detail.debet) != SUM(trans_detail.credit)');
     }
 }

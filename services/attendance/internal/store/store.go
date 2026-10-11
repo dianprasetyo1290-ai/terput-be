@@ -657,13 +657,23 @@ func (s *Store) UpsertStudentAttendance(ctx context.Context, sessionDate string,
 // the guru already set (e.g. re-checkin, or roster fetched after marking
 // started). Loops one insert per student, same style as BulkMarkStudents.
 func (s *Store) InitStudentAttendances(ctx context.Context, cs *model.ClassSession, studentIDs []string) error {
+	// BR-ATT-02: a student with an approved izin/sakit covering this date
+	// starts at that status instead of belum_presensi.
+	leaves, err := s.ApprovedLeaveTypes(ctx, cs.SchoolID, cs.SessionDate, studentIDs)
+	if err != nil {
+		return err
+	}
 	for _, sid := range studentIDs {
+		status, catatan := "belum_presensi", (*string)(nil)
+		if l, ok := leaves[sid]; ok {
+			status, catatan = l.Status, &l.Catatan
+		}
 		_, err := s.DB.ExecContext(ctx, `
 			INSERT INTO student_attendances (
-				class_session_id, school_id, academic_year_id, term_id, classroom_id, session_date, student_id, status
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,'belum_presensi')
+				class_session_id, school_id, academic_year_id, term_id, classroom_id, session_date, student_id, status, catatan
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 			ON CONFLICT (classroom_id, session_date, student_id) DO NOTHING
-		`, cs.ID, cs.SchoolID, cs.AcademicYearID, cs.TermID, cs.ClassroomID, cs.SessionDate, sid)
+		`, cs.ID, cs.SchoolID, cs.AcademicYearID, cs.TermID, cs.ClassroomID, cs.SessionDate, sid, status, catatan)
 		if err != nil {
 			return err
 		}
@@ -786,6 +796,72 @@ func (s *Store) ListStudentAttendanceForAdmin(ctx context.Context, f StudentAtte
 		out = append(out, sa)
 	}
 	return out, total, rows.Err()
+}
+
+// ParentAttendanceFilter scopes the portal-orang-tua read to exactly one
+// student and one school over an inclusive session_date window. There is
+// deliberately no way to widen that scope: the handler fills StudentID from
+// the URL path and SchoolID from the JWT, never from caller-supplied query
+// params.
+type ParentAttendanceFilter struct {
+	StudentID      string
+	SchoolID       string
+	AcademicYearID string
+	From           string // inclusive, YYYY-MM-DD
+	To             string // inclusive, YYYY-MM-DD
+}
+
+// ListStudentAttendanceRange returns one student's day-by-day presensi over
+// [From, To], oldest first, for the Portal Orang Tua endpoint. It reads the
+// same student_attendances table the admin "Presensi Siswa" views use --
+// student_attendances already carries a denormalized session_date (migration
+// 0003), so no join to class_sessions is needed for a plain per-student,
+// per-day read.
+func (s *Store) ListStudentAttendanceRange(ctx context.Context, f ParentAttendanceFilter) ([]model.ParentAttendanceDay, error) {
+	where := []string{"student_id = $1"}
+	args := []interface{}{f.StudentID}
+	add := func(cond string, val interface{}) {
+		args = append(args, val)
+		where = append(where, fmt.Sprintf(cond, len(args)))
+	}
+	if f.SchoolID != "" {
+		add("school_id = $%d", f.SchoolID)
+	}
+	if f.AcademicYearID != "" {
+		add("academic_year_id = $%d", f.AcademicYearID)
+	}
+	if f.From != "" {
+		add("session_date >= $%d::date", f.From)
+	}
+	if f.To != "" {
+		add("session_date <= $%d::date", f.To)
+	}
+	query := fmt.Sprintf(`
+		SELECT session_date, status, catatan, classroom_id
+		FROM student_attendances
+		WHERE %s
+		ORDER BY session_date ASC, created_at ASC
+	`, strings.Join(where, " AND "))
+	rows, err := s.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.ParentAttendanceDay{}
+	for rows.Next() {
+		var d model.ParentAttendanceDay
+		var sessionDate time.Time
+		var catatan sql.NullString
+		if err := rows.Scan(&sessionDate, &d.Status, &catatan, &d.ClassroomID); err != nil {
+			return nil, err
+		}
+		d.SessionDate = sessionDate.Format("2006-01-02")
+		if catatan.Valid {
+			d.Catatan = &catatan.String
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }
 
 // StudentAttendanceMonthlySummary backs the "Presensi Siswa" admin default

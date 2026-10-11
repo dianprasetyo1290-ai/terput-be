@@ -1,0 +1,67 @@
+services:
+  admission-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "${DB_HOST_PORT}:5432" # standalone dev host port; Teratai admission uses 5487
+    volumes:
+      - admission_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  admission-migrate:
+    image: migrate/migrate:v4.18.1
+    depends_on:
+      admission-db:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations
+    entrypoint:
+      - migrate
+      - -path
+      - /migrations
+      - -database
+      - postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@admission-db:5432/${DB_NAME}?sslmode=disable
+      - up
+    restart: "no"
+
+  admission-service:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      admission-migrate:
+        condition: service_completed_successfully
+    environment:
+      PORT: ${PORT}
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@admission-db:5432/${DB_NAME}?sslmode=disable
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      ADMISSION_GUARDIAN_JWT_SECRET: ${ADMISSION_GUARDIAN_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      OTP_PROVIDER: ${OTP_PROVIDER:-dev}
+      STORAGE_ROOT: ${STORAGE_ROOT:-/data/private}
+      ADMISSION_SCHOOL_ID: ${ADMISSION_SCHOOL_ID}
+      SCHOOL_NAME: ${SCHOOL_NAME}
+      SCHOOL_HEADLINE: ${SCHOOL_HEADLINE}
+      SCHOOL_DESCRIPTION: ${SCHOOL_DESCRIPTION}
+      SCHOOL_CONTACT: ${SCHOOL_CONTACT}
+      IDENTITY_URL: ${IDENTITY_URL}
+      EXAM_URL: ${EXAM_URL}
+      ACADEMIC_URL: ${ACADEMIC_URL}
+      EXAM_PUBLIC_URL: ${EXAM_PUBLIC_URL}
+    volumes:
+      - admission_files:/data/private
+    ports:
+      - "${PORT}:${PORT}"
+
+volumes:
+  admission_pgdata:
+  admission_files:

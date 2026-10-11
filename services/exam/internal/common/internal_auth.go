@@ -43,3 +43,18 @@ func IsInternal(r *http.Request) bool {
 	v, _ := r.Context().Value(internalCallCtxKey).(bool)
 	return v
 }
+
+// InternalOnlyMiddleware protects mutation/result contracts that must never
+// fall through to a user JWT.
+func InternalOnlyMiddleware(internalKey string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if internalKey == "" || r.Header.Get("X-Internal-Key") != internalKey {
+				WriteError(w, http.StatusUnauthorized, "invalid internal key")
+				return
+			}
+			ctx := context.WithValue(r.Context(), internalCallCtxKey, true)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}

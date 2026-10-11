@@ -68,12 +68,25 @@ func main() {
 	}
 
 	timeout := 3 * time.Second
+	identity := upstream.NewIdentityClient(identityURL, internalKey, timeout)
 	deps := &handler.Deps{
 		Store:      store.New(db),
-		Identity:   upstream.NewIdentityClient(identityURL, internalKey, timeout),
+		Identity:   identity,
 		Academic:   upstream.NewAcademicClient(academicURL, internalKey, timeout),
 		Attendance: upstream.NewAttendanceClient(attendanceURL, internalKey, timeout),
 		Exam:       upstream.NewExamClient(examURL, internalKey, timeout),
+	}
+	// Portal Orang Tua: the guardian<->student link check is a hard gate on
+	// every /parent/* read, so it must fail closed. Only wire the checker
+	// when IDENTITY_SERVICE_URL is actually configured -- unlike the other
+	// upstreams (which degrade to partial data), an unset identity URL here
+	// would otherwise leave the gate unable to authorize anyone, and the
+	// handler must answer 503 rather than open up. See
+	// handler.RequireGuardianStudent.
+	if os.Getenv("IDENTITY_SERVICE_URL") != "" {
+		deps.GuardianAuth = identity
+	} else {
+		log.Printf("IDENTITY_SERVICE_URL not set: /parent/* guardian endpoints will fail closed with 503")
 	}
 
 	// Redis response cache (client request 2026-08-29): fails open if

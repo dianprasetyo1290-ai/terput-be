@@ -1,0 +1,24 @@
+{
+  "name": "sekoci-multiagent",
+  "displayName": "Sekoci Multi-Agent System",
+  "version": "1.0.0",
+  "description": "Multi-agent architecture and specialized autonomous subagents for SEKOCI LMS Teratai Putih Global: Frontend Vue, Backend Go Microservices, Laravel Accounting, and Playwright QA Automation.",
+  "author": {
+    "name": "Sekoci Core Team"
+  },
+  "keywords": [
+    "sekoci",
+    "multiagent",
+    "subagents",
+    "go",
+    "vue3",
+    "laravel",
+    "playwright"
+  ],
+  "suggestedPrompts": [
+    "Jalankan review menyeluruh dengan semua subagent",
+    "Delegasikan implementasi fitur baru secara paralel",
+    "Lakukan pengujian E2E Playwright dengan QA Agent",
+    "Verifikasi konsistensi API antara backend Go dan frontend Vue"
+  ]
+}

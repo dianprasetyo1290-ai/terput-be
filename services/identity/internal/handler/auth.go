@@ -189,8 +189,16 @@ func (a *App) ChangePassword(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) issueToken(userID, schoolID, activeRole string, roles []string) (string, error) {
+	// Display names ride in the token so the header shows them instead of UUIDs.
+	var name, schoolName string
+	_ = a.DB.QueryRow(`SELECT name FROM users WHERE id=$1`, userID).Scan(&name)
+	if schoolID != "" {
+		_ = a.DB.QueryRow(`SELECT name FROM schools WHERE id::text=$1`, schoolID).Scan(&schoolName)
+	}
 	claims := common.Claims{
 		UserID:     userID,
+		Name:       name,
+		SchoolName: schoolName,
 		SchoolID:   schoolID,
 		ActiveRole: activeRole,
 		Roles:      roles,

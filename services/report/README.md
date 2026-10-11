@@ -367,6 +367,11 @@ did not yet have a scores endpoint), and are flagged `[guess]` where not.
   on the internal path). identity-service should adopt the same pattern
   for `GET /users/{id}` (or expose an `/internal/users/{id}` variant) for
   this integration to actually work end-to-end.
+- `GET /internal/guardians/{guardianUserId}/students/{studentUserId}/access?school_id=<uuid>`
+  → **200 when the guardian is linked to the student, 404 when not.** Used by
+  the Portal Orang Tua gate (`IdentityClient.GuardianStudentAccess`); the
+  response body is not read, only the status. Any other status/transport
+  failure makes the gate answer 503 (fail closed). See "Portal Orang Tua" above.
 
 **academic-service** (`ACADEMIC_SERVICE_URL`, default `:8082`) — confirmed
 against real code (`academic/internal/handler/classroom.go`, `term.go`):
@@ -656,6 +661,51 @@ re-checks `classrooms.homeroom_teacher_user_id` against academic-service's
 new needed on the academic side). `finalize`/`unlock`/`PATCH override`
 remain admin/superadmin-only — the spec only asks wali kelas to generate and
 write descriptions, not lock/override scores.
+
+## Portal Orang Tua (wali) — read-only rapor endpoints
+
+The Parent Portal SPA reads a child's rapor through guardian-scoped routes,
+gated by a live check that the caller's JWT is actually linked to the student
+in the URL. Both live in the JWT group (`handler/router.go`), static
+`/parent/...` prefix, so they never collide with the `{id}` wildcards above:
+
+```
+GET /parent/children/{studentUserId}/report-cards                     -- optional ?academic_year_id= & ?term_id=
+GET /parent/children/{studentUserId}/report-cards/{reportCardId}
+```
+
+- **Gate** (`handler/parent_report_card.go`, `RequireGuardianStudent`): takes
+  `guardianUserId = claims.sub` and `school_id = claims.school_id` from the
+  token (never from a query param), requires `active_role == "orang_tua"`,
+  then calls identity-service's internal
+  `GET /internal/guardians/{guardianUserId}/students/{studentUserId}/access?school_id=<uuid>`
+  (`upstream.IdentityClient.GuardianStudentAccess`, `X-Internal-Key`). 200 →
+  proceed; 404 → **403**; identity unreachable/other status → **503**. It runs
+  on **every** request, which is why `/parent/*` opts out of the Redis
+  response cache (`router.go`): a cache hit must never answer before the link
+  check, or a revoked link / swapped `studentUserId` would be served stale.
+- **Scoping**: the gate is per-student, so a wali linked to their own child
+  cannot swap in a classmate's `studentUserId` (403). The single-card read
+  additionally 404s when `reportCardId` belongs to a different student than
+  the path claims, so it can't be used to probe other students' card ids.
+  Rows from another school are filtered out too.
+- **Read-only**: only `GET` is registered under `/parent/`; nothing there
+  writes (no generate/finalize/override/attendance/extras endpoints), so a
+  wali can never mutate a rapor.
+- **Fail closed**: if `IDENTITY_SERVICE_URL` is unset, `main.go` leaves
+  `Deps.GuardianAuth` nil and the gate answers **503** — never open. No new
+  env vars: the parent endpoints reuse `IDENTITY_SERVICE_URL` and
+  `SEKOCI_INTERNAL_KEY`, but unlike every other upstream (which degrades to
+  partial data) an unset identity URL makes `/parent/*` refuse rather than
+  serve.
+
+```bash
+WALI_TOKEN=$(go run ./cmd/mintjwt orang_tua 44444444-4444-4444-4444-444444444444 22222222-2222-2222-2222-222222222222)
+curl -s "http://localhost:8086/parent/children/<student_id>/report-cards?term_id=$TERM" \
+  -H "Authorization: Bearer $WALI_TOKEN"      # 403 if this wali is not linked to <student_id>
+curl -s "http://localhost:8086/parent/children/<student_id>/report-cards/<report_card_id>" \
+  -H "Authorization: Bearer $WALI_TOKEN"
+```
 
 ## Assumptions
 

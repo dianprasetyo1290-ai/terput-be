@@ -41,6 +41,12 @@ services:
       IDENTITY_URL: ${IDENTITY_URL}
       ACADEMIC_URL: ${ACADEMIC_URL}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      # Applicant CBT participant tokens: own HMAC key, never the user JWT
+      # secret (see internal/config). APP_ENV=production makes config.Validate
+      # refuse the committed dev default.
+      EXAM_PARTICIPANT_SECRET: ${EXAM_PARTICIPANT_SECRET:-change-me}
+      PARTICIPANT_TOKEN_TTL_SECONDS: ${PARTICIPANT_TOKEN_TTL_SECONDS:-900}
+      APP_ENV: ${APP_ENV:-development}
     ports:
       - "${PORT}:${PORT}"
     depends_on:

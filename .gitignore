@@ -3,6 +3,8 @@ node_modules/
 dist/
 *.log
 .env
+.env.local
+.env.*.local
 .DS_Store
 tmp/
 vendor/
@@ -11,4 +13,5 @@ vendor/
 *.tar.gz
 web/playwright-report/
 web/test-results/
+web/screenshots/
 .claude-flow/

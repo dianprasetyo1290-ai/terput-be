@@ -159,13 +159,9 @@ func (s *Store) ListExams(ctx context.Context, f ExamFilter, page, perPage int) 
 
 	args = append(args, perPage, (page-1)*perPage)
 	q := fmt.Sprintf(`
-		SELECT e.id, e.school_id, e.academic_year_id, e.term_id, e.exam_type_id, e.title, e.description,
-			e.classroom_id, e.subject_id, e.teacher_id, e.start_at, e.end_at, e.is_shuffled, e.is_published,
-			e.published_at, e.created_by, e.created_at, e.updated_at, e.folder_id,
-			COALESCE((SELECT SUM(points) FROM exam_questions eq WHERE eq.exam_id = e.id), 0),
-			COALESCE((SELECT COUNT(*) FROM exam_questions eq WHERE eq.exam_id = e.id), 0)
+		SELECT %s
 		FROM exams e WHERE %s ORDER BY e.created_at DESC LIMIT $%d OFFSET $%d`,
-		where, len(args)-1, len(args))
+		examCols, where, len(args)-1, len(args))
 
 	rows, err := s.DB.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -174,13 +170,11 @@ func (s *Store) ListExams(ctx context.Context, f ExamFilter, page, perPage int) 
 	defer rows.Close()
 	var out []model.Exam
 	for rows.Next() {
-		var e model.Exam
-		if err := rows.Scan(&e.ID, &e.SchoolID, &e.AcademicYearID, &e.TermID, &e.ExamTypeID, &e.Title, &e.Description,
-			&e.ClassroomID, &e.SubjectID, &e.TeacherID, &e.StartAt, &e.EndAt, &e.IsShuffled, &e.IsPublished,
-			&e.PublishedAt, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt, &e.FolderID, &e.TotalPoints, &e.QuestionCount); err != nil {
+		e, err := scanExam(rows)
+		if err != nil {
 			return nil, 0, err
 		}
-		out = append(out, e)
+		out = append(out, *e)
 	}
 	if len(out) > 0 {
 		ids := make([]string, len(out))
@@ -198,18 +192,49 @@ func (s *Store) ListExams(ctx context.Context, f ExamFilter, page, perPage int) 
 	return out, total, rows.Err()
 }
 
-func (s *Store) GetExam(ctx context.Context, id, schoolID string) (*model.Exam, error) {
+// examCols is the shared exam projection used by GetExam and ListExams: the
+// exams row plus the two computed question aggregates and the migration-0008
+// audience columns. Kept as one constant so the scan below cannot drift from
+// the SELECT.
+const examCols = `e.id, e.school_id, e.academic_year_id, e.term_id, e.exam_type_id, e.title, e.description,
+	e.classroom_id, e.subject_id, e.teacher_id, e.start_at, e.end_at, e.is_shuffled, e.is_published,
+	e.published_at, e.created_by, e.created_at, e.updated_at, e.folder_id,
+	COALESCE((SELECT SUM(points) FROM exam_questions eq WHERE eq.exam_id = e.id), 0),
+	COALESCE((SELECT COUNT(*) FROM exam_questions eq WHERE eq.exam_id = e.id), 0),
+	e.audience, e.admission_context`
+
+type rowScanner interface {
+	Scan(dest ...interface{}) error
+}
+
+// scanExam reads examCols. Since migration 0008 an admission exam legitimately
+// has NULL academic_year_id/term_id/exam_type_id/classroom_id/subject_id/
+// teacher_id (exams_audience_context_check pins them NULL for
+// audience='admission'), so those six columns are scanned through sql.NullString
+// and folded to "" — scanning them into plain strings made every read of an
+// admission exam fail with "converting NULL to string is unsupported", which
+// broke GET of the exam this service had just created.
+func scanExam(row rowScanner) (*model.Exam, error) {
 	var e model.Exam
-	err := s.DB.QueryRowContext(ctx, `
-		SELECT e.id, e.school_id, e.academic_year_id, e.term_id, e.exam_type_id, e.title, e.description,
-			e.classroom_id, e.subject_id, e.teacher_id, e.start_at, e.end_at, e.is_shuffled, e.is_published,
-			e.published_at, e.created_by, e.created_at, e.updated_at, e.folder_id,
-			COALESCE((SELECT SUM(points) FROM exam_questions eq WHERE eq.exam_id = e.id), 0),
-			COALESCE((SELECT COUNT(*) FROM exam_questions eq WHERE eq.exam_id = e.id), 0)
-		FROM exams e WHERE e.id=$1 AND ($2 = '' OR e.school_id::text=$2) AND e.deleted_at IS NULL`, id, schoolID,
-	).Scan(&e.ID, &e.SchoolID, &e.AcademicYearID, &e.TermID, &e.ExamTypeID, &e.Title, &e.Description,
-		&e.ClassroomID, &e.SubjectID, &e.TeacherID, &e.StartAt, &e.EndAt, &e.IsShuffled, &e.IsPublished,
-		&e.PublishedAt, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt, &e.FolderID, &e.TotalPoints, &e.QuestionCount)
+	var academicYearID, termID, examTypeID, classroomID, subjectID, teacherID sql.NullString
+	var admissionContext []byte
+	if err := row.Scan(&e.ID, &e.SchoolID, &academicYearID, &termID, &examTypeID, &e.Title, &e.Description,
+		&classroomID, &subjectID, &teacherID, &e.StartAt, &e.EndAt, &e.IsShuffled, &e.IsPublished,
+		&e.PublishedAt, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt, &e.FolderID, &e.TotalPoints, &e.QuestionCount,
+		&e.Audience, &admissionContext); err != nil {
+		return nil, err
+	}
+	e.AcademicYearID, e.TermID, e.ExamTypeID = academicYearID.String, termID.String, examTypeID.String
+	e.ClassroomID, e.SubjectID, e.TeacherID = classroomID.String, subjectID.String, teacherID.String
+	if len(admissionContext) > 0 {
+		_ = json.Unmarshal(admissionContext, &e.AdmissionContext)
+	}
+	return &e, nil
+}
+
+func (s *Store) GetExam(ctx context.Context, id, schoolID string) (*model.Exam, error) {
+	e, err := scanExam(s.DB.QueryRowContext(ctx, `SELECT `+examCols+`
+		FROM exams e WHERE e.id=$1 AND ($2 = '' OR e.school_id::text=$2) AND e.deleted_at IS NULL`, id, schoolID))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -221,7 +246,7 @@ func (s *Store) GetExam(ctx context.Context, id, schoolID string) (*model.Exam, 
 		return nil, err
 	}
 	e.ClassroomIDs = ids
-	return &e, nil
+	return e, nil
 }
 
 func (s *Store) UpdateExam(ctx context.Context, e *model.Exam) error {
@@ -458,8 +483,11 @@ func (s *Store) ListMyExams(ctx context.Context, userID, classroomID, bucket str
 	// exam_classrooms (migration 0005) is the real target-audience set for a
 	// multi-classroom exam -- e.classroom_id alone is only the "primary"
 	// classroom and would hide the exam from students in any OTHER selected
-	// classroom.
-	where := "EXISTS (SELECT 1 FROM exam_classrooms ec WHERE ec.exam_id = e.id AND ec.classroom_id::text = $1) AND e.is_published = true AND e.deleted_at IS NULL"
+	// classroom. audience='academic' is explicit even though an admission exam
+	// never has an exam_classrooms row: the scan below reads the (nullable for
+	// admission) academic columns as plain strings, and a student dashboard
+	// must never list an admission exam under any circumstance.
+	where := "EXISTS (SELECT 1 FROM exam_classrooms ec WHERE ec.exam_id = e.id AND ec.classroom_id::text = $1) AND e.audience = 'academic' AND e.is_published = true AND e.deleted_at IS NULL"
 	switch bucket {
 	case "today":
 		where += " AND e.start_at::date = now()::date AND (ea.status IS NULL OR ea.status != 'selesai') AND e.end_at >= now()"
@@ -562,6 +590,192 @@ func (s *Store) ListMyExams(ctx context.Context, userID, classroomID, bucket str
 		out = append(out, row)
 	}
 	return out, rows.Err()
+}
+
+// StudentExamAttemptView is the ONLY view of a student's attempt the Portal
+// Orang Tua (parent/guardian) may ever receive: a status + score summary. It
+// deliberately omits token_id, question_order, and every exam_attempt_answers
+// field, so a guardian can never see a voucher reference, the shuffled
+// question set, or any answer/answer-key signal — see handler/guardian.go.
+type StudentExamAttemptView struct {
+	Status       string     `json:"status"`
+	Score        *float64   `json:"score,omitempty"`
+	CorrectCount *int       `json:"correct_count,omitempty"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	SubmittedAt  *time.Time `json:"submitted_at,omitempty"`
+	GradedAt     *time.Time `json:"graded_at,omitempty"`
+}
+
+// ChildExamRow is one academic exam plus the linked student's own (sanitized)
+// attempt, as the parent portal sees it. Kept separate from StudentExamRow —
+// the siswa dashboard's own row carries the full model.ExamAttempt — precisely
+// so the wider shape can never be reused on a guardian-facing endpoint.
+type ChildExamRow struct {
+	Exam    model.Exam              `json:"exam"`
+	Attempt *StudentExamAttemptView `json:"attempt"`
+	// Status is always set: the student's attempt status when one exists, or
+	// "belum_mulai" when they have not entered the exam yet — so the list is
+	// self-contained schedule+status for a UI without reaching into attempt.
+	Status string `json:"status"`
+}
+
+// ListChildExams lists the ACADEMIC exams belonging to one student (their
+// resolved classroom, or an exam they already have a student attempt on),
+// each joined with that student's own attempt summary. It is the parent-portal
+// twin of ListMyExams, with two hard differences:
+//
+//   - it is keyed on an explicit studentUserID rather than the caller, because
+//     the guardian's own subject is not the child's (handler verifies the link
+//     separately, see handler/guardian.go);
+//   - it filters audience='academic' AND participant_type='student' explicitly,
+//     so a PPDB/admission applicant — whose attempt has user_id NULL and whose
+//     exam never appears in exam_classrooms — can never surface here.
+//
+// classroomID may be "" when academic-service could not resolve it; the query
+// then falls back to "exams this student already has an attempt row on", which
+// is still safe because the attempt is pinned to this exact student id.
+func (s *Store) ListChildExams(ctx context.Context, schoolID, studentUserID, classroomID string) ([]ChildExamRow, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT `+examCols+`
+		FROM exams e
+		WHERE e.audience='academic' AND e.is_published=true AND e.deleted_at IS NULL
+			AND ($2 = '' OR e.school_id::text = $2)
+			AND (
+				($3 <> '' AND EXISTS (SELECT 1 FROM exam_classrooms ec WHERE ec.exam_id = e.id AND ec.classroom_id::text = $3))
+				OR EXISTS (SELECT 1 FROM exam_attempts ea WHERE ea.exam_id = e.id
+					AND ea.participant_type='student' AND ea.participant_id = $1)
+			)
+		ORDER BY e.start_at`, studentUserID, schoolID, classroomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var exams []model.Exam
+	for rows.Next() {
+		e, err := scanExam(rows)
+		if err != nil {
+			return nil, err
+		}
+		exams = append(exams, *e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(exams) == 0 {
+		return nil, nil
+	}
+	examIDs := make([]string, len(exams))
+	for i := range exams {
+		examIDs[i] = exams[i].ID
+	}
+	attempts, err := s.studentAttemptViews(ctx, studentUserID, examIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ChildExamRow, len(exams))
+	for i := range exams {
+		view := attempts[exams[i].ID]
+		status := model.StatusBelumMulai
+		if view != nil {
+			status = view.Status
+		}
+		out[i] = ChildExamRow{Exam: exams[i], Attempt: view, Status: status}
+	}
+	return out, nil
+}
+
+// studentAttemptViews batch-loads one student's attempt summary per exam (no
+// N+1) for ListChildExams. COALESCE(final_score, score) matches the academic
+// report surface (ExamScores): once a guru ACCs a sitting, that is the score.
+func (s *Store) studentAttemptViews(ctx context.Context, studentUserID string, examIDs []string) (map[string]*StudentExamAttemptView, error) {
+	out := make(map[string]*StudentExamAttemptView, len(examIDs))
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT exam_id, status, COALESCE(final_score, score), correct_count, started_at, submitted_at, graded_at
+		FROM exam_attempts
+		WHERE participant_type='student' AND participant_id=$1 AND exam_id = ANY($2)`, studentUserID, examIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var examID string
+		view := &StudentExamAttemptView{}
+		var score sql.NullFloat64
+		var correctCount sql.NullInt64
+		var startedAt, submittedAt, gradedAt sql.NullTime
+		if err := rows.Scan(&examID, &view.Status, &score, &correctCount, &startedAt, &submittedAt, &gradedAt); err != nil {
+			return nil, err
+		}
+		if score.Valid {
+			view.Score = &score.Float64
+		}
+		if correctCount.Valid {
+			c := int(correctCount.Int64)
+			view.CorrectCount = &c
+		}
+		if startedAt.Valid {
+			view.StartedAt = &startedAt.Time
+		}
+		if submittedAt.Valid {
+			view.SubmittedAt = &submittedAt.Time
+		}
+		if gradedAt.Valid {
+			view.GradedAt = &gradedAt.Time
+		}
+		out[examID] = view
+	}
+	return out, rows.Err()
+}
+
+// GetChildExamResult returns one ACADEMIC exam plus the linked student's own
+// attempt summary, or (nil, nil) when there is nothing this guardian may see.
+//
+// The student's attempt row IS the scoping check: without a
+// participant_type='student' / participant_id=studentUserID row there is no
+// result to show, so the handler answers 404. That keeps one guardian from
+// reading another student's exam metadata by guessing a UUID, and the explicit
+// audience='academic' guard (via model.AudienceAcademic) keeps an admission
+// exam out of the parent portal entirely.
+func (s *Store) GetChildExamResult(ctx context.Context, schoolID, studentUserID, examID string) (*ChildExamRow, error) {
+	e, err := s.GetExam(ctx, examID, schoolID)
+	if err != nil {
+		return nil, err
+	}
+	if e == nil || e.Audience != model.AudienceAcademic {
+		return nil, nil
+	}
+	view := &StudentExamAttemptView{}
+	var score sql.NullFloat64
+	var correctCount sql.NullInt64
+	var startedAt, submittedAt, gradedAt sql.NullTime
+	err = s.DB.QueryRowContext(ctx, `
+		SELECT status, COALESCE(final_score, score), correct_count, started_at, submitted_at, graded_at
+		FROM exam_attempts
+		WHERE exam_id=$1 AND participant_type='student' AND participant_id=$2`, examID, studentUserID).
+		Scan(&view.Status, &score, &correctCount, &startedAt, &submittedAt, &gradedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if score.Valid {
+		view.Score = &score.Float64
+	}
+	if correctCount.Valid {
+		c := int(correctCount.Int64)
+		view.CorrectCount = &c
+	}
+	if startedAt.Valid {
+		view.StartedAt = &startedAt.Time
+	}
+	if submittedAt.Valid {
+		view.SubmittedAt = &submittedAt.Time
+	}
+	if gradedAt.Valid {
+		view.GradedAt = &gradedAt.Time
+	}
+	return &ChildExamRow{Exam: *e, Attempt: view, Status: view.Status}, nil
 }
 
 // GetExamQuestion fetches one exam_questions row joined with its question

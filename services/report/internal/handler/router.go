@@ -40,8 +40,12 @@ func NewRouter(d *Deps, jwtSecret string, corsOrigins []string, respCache *cache
 		// The .docx/.zip mail-merge downloads also opt out: they are binary
 		// bodies sized in megabytes, and a rapor must never be served from
 		// a cache that could hand one student's document to another.
+		// /parent/* opts out for the same reason: the guardian link check
+		// must run on every request, and a cache hit would answer before it
+		// (revoked link or swapped studentUserId served from a stale entry).
 		pr.Use(respCache.Middleware(func(r *http.Request) bool {
 			return strings.HasPrefix(r.URL.Path, "/settings/") ||
+				strings.HasPrefix(r.URL.Path, "/parent/") ||
 				strings.HasSuffix(r.URL.Path, "/docx")
 		}))
 
@@ -64,6 +68,18 @@ func NewRouter(d *Deps, jwtSecret string, corsOrigins []string, respCache *cache
 		pr.Put("/report-cards/{id}/unlock", h.UnlockReportCard)
 
 		pr.Get("/students/{id}/report-cards", h.ListStudentReportCards)
+
+		// Portal Orang Tua: read-only rapor reads for a wali (guardian),
+		// keyed by the student the SPA is viewing. The nested group applies
+		// RequireGuardianStudent to both routes, so every request re-checks
+		// the identity-service guardian<->student link before any rapor data
+		// is loaded. The /parent/... prefix is static, so it cannot collide
+		// with the wildcards above (/report-cards/{id}, /students/{id}/...).
+		pr.Group(func(pg chi.Router) {
+			pg.Use(h.RequireGuardianStudent)
+			pg.Get("/parent/children/{studentUserId}/report-cards", h.ListParentReportCards)
+			pg.Get("/parent/children/{studentUserId}/report-cards/{reportCardId}", h.GetParentReportCard)
+		})
 
 		pr.Get("/classrooms/{id}/leger", h.GetLeger)
 		pr.Get("/classrooms/{id}/subjects/{subject_id}/description", h.GetSubjectDescriptionGrid)

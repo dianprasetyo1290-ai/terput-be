@@ -89,6 +89,7 @@
                 <th class="text-right">Total Debit</th>
                 <th class="text-right">Total Kredit</th>
                 <th class="text-center">Status Saldo</th>
+                <th class="text-center">Status Jurnal</th>
                 <th class="text-center">Detail</th>
                 <th class="text-center" style="width: 60px">Aksi</th>
             </tr>
@@ -118,12 +119,20 @@
                         @endif
                     </td>
                     <td class="text-center">
+                        @php $st = $row->status ?? 'draft'; @endphp
+                        <span class="badge {{ ['draft' => 'badge-secondary', 'pending' => 'badge-warning', 'posted' => 'badge-success', 'reversed' => 'badge-danger'][$st] ?? 'badge-secondary' }}">
+                            {{ ['draft' => 'Draft', 'pending' => 'Menunggu Approval', 'posted' => 'Posted', 'reversed' => 'Dibalik'][$st] ?? $st }}
+                        </span>
+                    </td>
+                    <td class="text-center">
                         <a href="#" wire:click.prevent='detail("{{ Crypt::encrypt($row->trans_no) }}")'
                             class="btn btn-sm btn-outline-info">
                             <i class="mr-1 icon-list-unordered"></i> Lihat
                         </a>
                     </td>
                     <td class="text-center">
+                        {{-- BR-ACC-01: only drafts are editable; approval/posting/reversal live on the Jurnal page. --}}
+                        @if (($row->status ?? 'draft') === 'draft')
                         <div class="list-icons">
                             <div class="dropdown">
                                 <a href="#" class="list-icons-item" data-toggle="dropdown">
@@ -141,11 +150,14 @@
                                 </div>
                             </div>
                         </div>
+                        @else
+                            <span class="text-muted" title="Jurnal non-draft tidak dapat diubah">&mdash;</span>
+                        @endif
                     </td>
                 </tr>
             @empty
                 <tr>
-                    <td colspan="9" class="py-8 text-center">
+                    <td colspan="10" class="py-8 text-center">
                         <div class="flex flex-col items-center justify-center">
                             <i class="mb-3 icon-file-empty2" style="font-size: 2.5rem; color: #cbd5e1"></i>
                             <p class="text-sm text-gray-400">Tidak ada data transaksi jurnal yang ditemukan.</p>

@@ -1,0 +1,60 @@
+services:
+  notification-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "${DB_HOST_PORT}:5432" # standalone dev host port; teratai_notification uses 5489
+    volumes:
+      - notification_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  notification-migrate:
+    image: migrate/migrate:v4.18.1
+    depends_on:
+      notification-db:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations
+    entrypoint:
+      - migrate
+      - -path
+      - /migrations
+      - -database
+      - postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@notification-db:5432/${DB_NAME}?sslmode=disable
+      - up
+    restart: "no"
+
+  notification-service:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      notification-migrate:
+        condition: service_completed_successfully
+    environment:
+      PORT: ${PORT}
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@notification-db:5432/${DB_NAME}?sslmode=disable
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      NOTIFICATION_PROVIDER: ${NOTIFICATION_PROVIDER:-dev}
+      # host.docker.internal reaches sibling services published on the host by
+      # their own standalone compose stacks (see extra_hosts below).
+      IDENTITY_URL: http://host.docker.internal:8081
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${PORT}:${PORT}"
+
+volumes:
+  notification_pgdata:
