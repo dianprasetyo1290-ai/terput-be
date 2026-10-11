@@ -8,6 +8,7 @@ import (
 
 	"skci/hr/internal/ats"
 	"skci/hr/internal/common"
+	"skci/hr/internal/payroll"
 	"skci/hr/internal/training"
 )
 
@@ -16,6 +17,7 @@ func (a *App) Router() http.Handler {
 
 	trHandler := training.NewHandler(training.NewStore(a.DB))
 	atsHandler := ats.NewHandler(ats.NewStore(a.DB))
+	payHandler := payroll.NewHandler(payroll.NewStore(a.DB))
 
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -72,6 +74,9 @@ func (a *App) Router() http.Handler {
 
 		// ATS Panel Interviews
 		api.Get("/ats/interviews/mine", atsHandler.MyInterviews)
+
+		// ESS Payslips
+		api.Get("/me/payslips", payHandler.MyPayslips)
 
 		// 2. HR Management routes: HR Admin, HR Manager, Superadmin
 		api.Group(func(hr chi.Router) {
@@ -216,6 +221,19 @@ func (a *App) Router() http.Handler {
 			hr.Post("/ats/offers", atsHandler.CreateOffer)
 			hr.Get("/ats/settings", atsHandler.GetSettings)
 			hr.Get("/ats/talent-pool", atsHandler.ListTalentPool)
+
+			// Payroll Management
+			hr.Get("/payroll/components", payHandler.ListComponents)
+			hr.Post("/payroll/components", payHandler.CreateComponent)
+			hr.Get("/payroll/runs", payHandler.ListRuns)
+			hr.Post("/payroll/runs", payHandler.CreateRun)
+			hr.Get("/payroll/runs/{id}", payHandler.GetRun)
+			hr.Post("/payroll/runs/{id}/calculate", payHandler.CalculateRun)
+			hr.Post("/payroll/runs/{id}/submit", payHandler.SubmitRun)
+			hr.Post("/payroll/runs/{id}/finalize", payHandler.FinalizeRun)
+			hr.Get("/payroll/runs/{id}/lines", payHandler.ListLines)
+			hr.Get("/payroll/payslips", payHandler.ListPayslips)
+			hr.Get("/payroll/journals", payHandler.ListJournals)
 		})
 	})
 
