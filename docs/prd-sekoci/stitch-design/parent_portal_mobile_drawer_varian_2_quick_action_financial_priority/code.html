@@ -1,0 +1,224 @@
+<!DOCTYPE html><html lang="id"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Parent Portal — Mobile Drawer (Varian 2: Quick Action &amp; Financial Priority)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #0F172A; }
+    .drawer-shadow { box-shadow: 4px 0 24px rgba(15, 23, 42, 0.22); }
+    .custom-scroll::-webkit-scrollbar { width: 4px; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }
+  </style>
+</head>
+<body class="bg-slate-900 min-h-screen flex items-center justify-center p-0 sm:p-4">
+
+  <!-- Mobile Device Simulation Frame (390px x 844px) -->
+  <div class="relative w-full max-w-[390px] h-[844px] bg-[#F8FAFC] overflow-hidden rounded-none sm:rounded-[36px] shadow-2xl border-0 sm:border-8 border-slate-800 flex flex-col">
+    
+    <!-- Background Parent App Blur View -->
+    <div class="absolute inset-0 bg-[#F8FAFC] flex flex-col pointer-events-none filter blur-[2px]">
+      <div class="h-14 bg-white border-b border-slate-200 px-4 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <button class="w-9 h-9 rounded-md bg-slate-100 flex items-center justify-center text-slate-700">
+            <i class="fa-solid fa-bars text-sm"></i>
+          </button>
+          <span class="font-bold text-slate-800 text-sm">Portal Wali Murid</span>
+        </div>
+        <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 font-bold text-xs flex items-center justify-center">DR</div>
+      </div>
+      <div class="p-4 space-y-3 opacity-60">
+        <div class="h-28 bg-white rounded-lg border border-slate-200 p-3"></div>
+        <div class="h-36 bg-white rounded-lg border border-slate-200 p-3"></div>
+      </div>
+    </div>
+
+    <!-- Backdrop Dimmer Overlay -->
+    <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-[1px] z-10"></div>
+
+    <!-- Mobile Navigation Drawer Panel (Variant 2: Action & Billing Focused) -->
+    <aside class="relative z-20 w-[340px] h-full bg-white flex flex-col drawer-shadow border-r border-slate-200">
+      
+      <!-- Drawer Header with Active Child Badge -->
+      <div class="px-5 pt-4 pb-3.5 bg-gradient-to-r from-blue-900 to-[#1E40AF] text-white">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <div class="w-7 h-7 rounded bg-white/10 backdrop-blur flex items-center justify-center text-white text-xs font-bold">
+              <i class="fa-solid fa-graduation-cap"></i>
+            </div>
+            <span class="text-xs font-bold tracking-wide uppercase text-blue-100">SEKOCI Parent Portal</span>
+          </div>
+          <button class="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors">
+            <i class="fa-solid fa-xmark text-xs"></i>
+          </button>
+        </div>
+
+        <!-- Compact Child Context Pill Switcher -->
+        <div class="bg-white/10 backdrop-blur-md rounded-lg p-2.5 border border-white/15 flex items-center justify-between">
+          <div class="flex items-center gap-2 min-w-0">
+            <div class="w-8 h-8 rounded-full bg-white text-blue-900 font-bold text-xs flex items-center justify-center flex-shrink-0">
+              AP
+            </div>
+            <div class="truncate">
+              <div class="flex items-center gap-1.5">
+                <span class="text-xs font-bold text-white truncate">Aisyah Putri R.</span>
+                <span class="text-[9px] bg-blue-500/50 text-white px-1.5 py-0.2 rounded font-semibold">SMP</span>
+              </div>
+              <p class="text-[10px] text-blue-200 truncate">Kelas 7-A · Reguler Unggulan</p>
+            </div>
+          </div>
+          <button class="px-2 py-1 bg-white/20 hover:bg-white/30 rounded text-[10px] font-semibold text-white flex items-center gap-1 transition-colors flex-shrink-0">
+            <span>Ubah</span>
+            <i class="fa-solid fa-chevron-down text-[8px]"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Core Differentiator: Quick Action Bar (Bayar SPP & Ajukan Izin - Menu 44 & 49) -->
+      <div class="px-4 py-3 bg-blue-50/60 border-b border-blue-100">
+        <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">
+          AKSI CEPAT PRIORITAS
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <!-- Quick Action 1: Bayar Tagihan (Menu 49 + 27 Checkout) -->
+          <a href="#" class="p-2.5 rounded-lg bg-white border border-blue-200 shadow-xs hover:border-[#2563EB] transition-all flex flex-col justify-between group">
+            <div class="flex items-center justify-between mb-1">
+              <div class="w-7 h-7 rounded-md bg-blue-100 text-[#2563EB] flex items-center justify-center text-xs group-hover:bg-[#2563EB] group-hover:text-white transition-colors">
+                <i class="fa-solid fa-credit-card"></i>
+              </div>
+              <span class="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-700">Lunas</span>
+            </div>
+            <div>
+              <div class="text-[11px] font-bold text-slate-900">Bayar Tagihan</div>
+              <div class="text-[10px] text-slate-500">SPP &amp; DSP Berjalan</div>
+            </div>
+          </a>
+
+          <!-- Quick Action 2: Ajukan Izin (Menu 48 + 42 Leave) -->
+          <a href="#" class="p-2.5 rounded-lg bg-white border border-slate-200 shadow-xs hover:border-[#2563EB] transition-all flex flex-col justify-between group">
+            <div class="flex items-center justify-between mb-1">
+              <div class="w-7 h-7 rounded-md bg-amber-100 text-amber-700 flex items-center justify-center text-xs group-hover:bg-amber-600 group-hover:text-white transition-colors">
+                <i class="fa-solid fa-envelope-open-text"></i>
+              </div>
+              <span class="text-[9px] font-bold text-slate-400">Hari ini</span>
+            </div>
+            <div>
+              <div class="text-[11px] font-bold text-slate-900">Ajukan Izin</div>
+              <div class="text-[10px] text-slate-500">Sakit / Keperluan</div>
+            </div>
+          </a>
+        </div>
+      </div>
+
+      <!-- Financial Status Summary Card (Menu 49 Parent Finance) -->
+      <div class="mx-4 mt-3 p-3 bg-slate-900 text-white rounded-xl shadow-xs">
+        <div class="flex items-center justify-between text-[11px] text-slate-300 mb-1">
+          <span>Status Keuangan Semester Ganjil</span>
+          <i class="fa-solid fa-shield-halved text-emerald-400 text-xs"></i>
+        </div>
+        <div class="flex items-baseline justify-between">
+          <div>
+            <div class="text-sm font-bold text-white">Rp 0 <span class="text-[11px] font-normal text-emerald-300">(Nihil Tunggakan)</span></div>
+            <div class="text-[10px] text-slate-400">Terbayar penuh s.d. Oktober 2026</div>
+          </div>
+          <a href="#" class="text-[10px] font-semibold text-blue-300 hover:text-white underline">Riwayat</a>
+        </div>
+      </div>
+
+      <!-- Categorized Navigation Links (PRD Clean List) -->
+      <nav class="flex-1 overflow-y-auto custom-scroll px-4 py-3 space-y-4">
+        
+        <!-- Group 1: Informasi Akademik & Kehadiran -->
+        <div>
+          <div class="px-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            AKADEMIK &amp; KEHADIRAN
+          </div>
+          <div class="space-y-0.5">
+            <a href="#" class="flex items-center justify-between px-2.5 py-2 rounded-lg text-slate-700 hover:bg-slate-100 font-medium text-xs transition-colors">
+              <div class="flex items-center gap-2.5">
+                <i class="fa-solid fa-clock-rotate-left text-sm w-4 text-center text-slate-400"></i>
+                <span>Riwayat Presensi Harian</span>
+              </div>
+              <span class="text-[10px] font-semibold text-emerald-600">98.2% Hadir</span>
+            </a>
+            <a href="#" class="flex items-center justify-between px-2.5 py-2 rounded-lg text-slate-700 hover:bg-slate-100 font-medium text-xs transition-colors">
+              <div class="flex items-center gap-2.5">
+                <i class="fa-solid fa-calendar-days text-sm w-4 text-center text-slate-400"></i>
+                <span>Jadwal Pelajaran &amp; Ujian</span>
+              </div>
+              <span class="text-[9px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-500 font-medium">Add-on</span>
+            </a>
+            <a href="#" class="flex items-center justify-between px-2.5 py-2 rounded-lg text-slate-700 hover:bg-slate-100 font-medium text-xs transition-colors">
+              <div class="flex items-center gap-2.5">
+                <i class="fa-solid fa-graduation-cap text-sm w-4 text-center text-slate-400"></i>
+                <span>Rapor &amp; Capaian Belajar</span>
+              </div>
+              <i class="fa-solid fa-chevron-right text-[10px] text-slate-300"></i>
+            </a>
+          </div>
+        </div>
+
+        <!-- Group 2: Layanan & Administrasi Sekolah -->
+        <div>
+          <div class="px-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            LAYANAN &amp; PENDAFTARAN
+          </div>
+          <div class="space-y-0.5">
+            <!-- Menu 81 Permintaan Layanan -->
+            <a href="#" class="flex items-center justify-between px-2.5 py-2 rounded-lg text-slate-700 hover:bg-slate-100 font-medium text-xs transition-colors">
+              <div class="flex items-center gap-2.5">
+                <i class="fa-solid fa-file-signature text-sm w-4 text-center text-slate-400"></i>
+                <span>Permohonan Surat &amp; Legalisir</span>
+              </div>
+              <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+            </a>
+            <!-- Menu 16 PPDB -->
+            <a href="#" class="flex items-center justify-between px-2.5 py-2 rounded-lg text-slate-700 hover:bg-slate-100 font-medium text-xs transition-colors">
+              <div class="flex items-center gap-2.5">
+                <i class="fa-solid fa-user-plus text-sm w-4 text-center text-slate-400"></i>
+                <span>PPDB (Daftar Calon Siswa Baru)</span>
+              </div>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">Dibuka</span>
+            </a>
+            <!-- Menu 50 Pengumuman -->
+            <a href="#" class="flex items-center justify-between px-2.5 py-2 rounded-lg text-slate-700 hover:bg-slate-100 font-medium text-xs transition-colors">
+              <div class="flex items-center gap-2.5">
+                <i class="fa-solid fa-bell text-sm w-4 text-center text-slate-400"></i>
+                <span>Pusat Notifikasi &amp; Agenda</span>
+              </div>
+              <span class="text-[10px] px-1.5 py-0.2 rounded bg-rose-100 text-rose-700 font-bold">2 Baru</span>
+            </a>
+          </div>
+        </div>
+
+      </nav>
+
+      <!-- Drawer Bottom: User Account & WhatsApp Support (Menu 50) -->
+      <div class="p-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div class="w-9 h-9 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-blue-700 font-bold text-xs flex-shrink-0">
+            DR
+          </div>
+          <div class="truncate">
+            <h5 class="text-xs font-bold text-slate-900 truncate">Dewi Rahmadani, S.Pd</h5>
+            <p class="text-[10px] text-slate-500 truncate">Akun Terverifikasi · 0812-8821-xxxx</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-1">
+          <a href="https://wa.me/" class="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 flex items-center justify-center transition-colors" title="Bantuan WhatsApp">
+            <i class="fa-brands fa-whatsapp text-sm"></i>
+          </a>
+          <button class="w-8 h-8 rounded-lg hover:bg-slate-200 text-slate-400 hover:text-slate-700 flex items-center justify-center transition-colors" title="Keluar">
+            <i class="fa-solid fa-power-off text-xs"></i>
+          </button>
+        </div>
+      </div>
+
+    </aside>
+
+  </div>
+
+
+
+</body></html>

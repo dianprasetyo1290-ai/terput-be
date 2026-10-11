@@ -57,10 +57,12 @@ type User struct {
 	BirthPlace      *string   `json:"birth_place"`
 	Address         *string   `json:"address"`
 	Religion        *string   `json:"religion"`
-	NISN            *string   `json:"nisn"`
-	IsSuperadmin    bool      `json:"is_superadmin"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	NISN            *string    `json:"nisn"`
+	IsSuperadmin    bool       `json:"is_superadmin"`
+	ManagedByHR     bool       `json:"managed_by_hr"`
+	DeactivateAt    *time.Time `json:"deactivate_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 // UserWithRoles is what list/detail endpoints return: a user plus its
