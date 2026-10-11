@@ -26,9 +26,21 @@ func WriteJSON(w http.ResponseWriter, status int, data, meta any) {
 	_ = json.NewEncoder(w).Encode(Envelope{Data: data, Meta: meta, Message: "", Errors: nil})
 }
 
+// WriteSuccess writes a 200 OK success envelope.
+func WriteSuccess(w http.ResponseWriter, data, meta any) {
+	WriteJSON(w, http.StatusOK, data, meta)
+}
+
 // WriteError writes an error envelope.
 func WriteError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(Envelope{Data: nil, Message: msg, Errors: map[string]string{"message": msg}})
+}
+
+// Meta is the pagination metadata in list envelopes.
+type Meta struct {
+	Page    int `json:"page"`
+	PerPage int `json:"per_page"`
+	Total   int `json:"total"`
 }
