@@ -1,0 +1,545 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta content="width=device-width, initial-scale=1.0" name="viewport"><meta content="web_dashboard" name="shell-type"><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"><link href="https://fonts.googleapis.com" rel="preconnect"><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{"colors":{"on-tertiary-fixed-variant":"#173bab","on-secondary-fixed":"#0b1c30","success":"#16A34A","on-error-container":"#93000a","surface-bright":"#faf8ff","on-tertiary-container":"#eff0ff","primary-light":"#EFF6FF","tertiary-container":"#4865d4","on-primary":"#ffffff","primary-container":"#2563eb","surface-container-low":"#f2f3ff","border":"#E2E8F0","on-primary-container":"#eeefff","surface-variant":"#dae2fd","outline-variant":"#c3c6d7","inverse-primary":"#b4c5ff","surface-container":"#eaedff","on-primary-fixed":"#00174b","inverse-on-surface":"#eef0ff","primary-fixed":"#dbe1ff","on-tertiary-fixed":"#001453","secondary":"#505f76","success-light":"#F0FDF4","on-secondary":"#ffffff","surface-tint":"#0053db","info":"#0284C7","on-surface-variant":"#434655","outline":"#737686","inverse-surface":"#283044","surface-container-lowest":"#ffffff","on-background":"#131b2e","tertiary":"#2c4bb9","warning-light":"#FFFBEB","secondary-fixed-dim":"#b7c8e1","on-secondary-fixed-variant":"#38485d","error-light":"#FEF2F2","on-surface":"#131b2e","tertiary-fixed":"#dde1ff","secondary-fixed":"#d3e4fe","on-primary-fixed-variant":"#003ea8","surface-dim":"#d2d9f4","secondary-container":"#d0e1fb","error-container":"#ffdad6","info-light":"#F0F9FF","primary-fixed-dim":"#b4c5ff","background":"#F8FAFC","surface":"#FFFFFF","on-secondary-container":"#54647a","warning":"#D97706","on-tertiary":"#ffffff","tertiary-fixed-dim":"#b8c4ff","surface-container-high":"#e2e7ff","error":"#DC2626","on-error":"#ffffff","muted":"#94A3B8","surface-container-highest":"#dae2fd","primary":"#004ac6"},"borderRadius":{"DEFAULT":"0.125rem","lg":"0.25rem","xl":"0.5rem","full":"0.75rem"},"spacing":{"space-xs":"0.5rem","gutter-mobile":"1rem","space-sm":"0.75rem","gutter":"1.5rem","space-3xl":"2.5rem","margin-mobile":"1rem","margin":"2rem","space-xl":"1.5rem","space-4xl":"3rem","space-2xs":"0.25rem","space-lg":"1.25rem","space-md":"1rem","space-2xl":"2rem"},"fontFamily":{"page-title-mobile":["Inter"],"section-title":["Inter"],"display-mobile":["Inter"],"caption":["Inter"],"body-medium":["Inter"],"body-small":["Inter"],"body-default":["Inter"],"label":["Inter"],"card-title":["Inter"],"display":["Inter"],"page-title":["Inter"]},"fontSize":{"page-title-mobile":["20px",{"lineHeight":"28px","letterSpacing":"-0.01em","fontWeight":"600"}],"section-title":["18px",{"lineHeight":"24px","letterSpacing":"-0.01em","fontWeight":"600"}],"display-mobile":["24px",{"lineHeight":"32px","letterSpacing":"-0.015em","fontWeight":"700"}],"caption":["11px",{"lineHeight":"14px","letterSpacing":"0.01em","fontWeight":"400"}],"body-medium":["14px",{"lineHeight":"20px","fontWeight":"500"}],"body-small":["13px",{"lineHeight":"18px","fontWeight":"400"}],"body-default":["14px",{"lineHeight":"20px","fontWeight":"400"}],"label":["12px",{"lineHeight":"16px","letterSpacing":"0.01em","fontWeight":"500"}],"card-title":["16px",{"lineHeight":"24px","letterSpacing":"-0.005em","fontWeight":"600"}],"display":["32px",{"lineHeight":"40px","letterSpacing":"-0.02em","fontWeight":"700"}],"page-title":["24px",{"lineHeight":"32px","letterSpacing":"-0.015em","fontWeight":"600"}]}}}}</script></head><body class="bg-background font-body-default text-body-default text-on-surface antialiased selection:bg-primary selection:text-on-primary"><aside class="fixed left-0 top-0 bottom-0 w-72 bg-surface border-r border-border z-50 flex flex-col"><div class="h-16 px-space-lg border-b border-border flex items-center justify-between shrink-0"><div class="flex items-center gap-space-xs"><div class="w-8 h-8 rounded-xl bg-primary-container text-on-primary flex items-center justify-center font-display text-card-title font-bold shadow-sm">S</div><div class="flex flex-col"><div class="flex items-center gap-space-2xs"><span class="font-page-title text-card-title font-bold tracking-tight text-on-surface">SEKOCI</span><span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-primary-light text-primary border border-primary/20 leading-none uppercase">SaaS</span></div><span class="font-caption text-caption text-muted">School Operating OS</span></div></div><div class="w-2 h-2 rounded-full bg-success ring-4 ring-success-light" title="System Operational"></div></div><div class="p-space-md border-b border-border bg-surface-bright/50 shrink-0"><div class="p-space-sm rounded-xl border border-border bg-surface flex flex-col gap-1.5 shadow-sm"><div class="flex items-center justify-between"><span class="font-caption text-[10px] font-semibold uppercase tracking-wider text-muted">Tenant Context</span><span class="px-1.5 py-0.2 rounded text-[10px] font-medium bg-secondary-container text-on-secondary-container">Active</span></div><div class="flex items-center gap-2"><span class="material-symbols-outlined text-[18px] text-primary shrink-0">corporate_fare</span><span class="font-body-small text-body-small font-semibold text-on-surface truncate" title="Yayasan Pendidikan Nusantara">Yayasan Pend. Nusantara</span></div><div class="flex items-center gap-1.5 text-secondary pl-0.5"><span class="material-symbols-outlined text-[14px] text-muted">subdirectory_arrow_right</span><span class="font-label text-label text-on-surface-variant truncate font-medium">SMP Nusantara</span></div></div></div><div class="flex-1 overflow-y-auto px-space-md py-space-sm space-y-space-md"><nav class="space-y-space-md" data-active-classes="bg-primary-container text-on-primary font-body-medium"><div class="space-y-1"><div class="px-space-xs py-1 font-caption text-caption uppercase tracking-wider font-semibold text-muted">Overview</div><a class="flex items-center gap-space-xs px-space-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-small text-body-small" data-path="dashboard-beranda" href="#"><span class="material-symbols-outlined text-[18px]">dashboard</span><span>Dashboard Beranda</span></a></div><div class="space-y-1"><div class="px-space-xs py-1 font-caption text-caption uppercase tracking-wider font-semibold text-muted flex items-center justify-between"><span>Platform Foundation</span><span class="w-1.5 h-1.5 rounded-full bg-primary"></span></div><a class="flex items-center gap-space-xs px-space-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-small text-body-small" data-path="organization-unit" href="#"><span class="material-symbols-outlined text-[18px]">account_balance</span><span>01 Org &amp; Unit</span></a><a class="flex items-center gap-space-xs px-space-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-small text-body-small" data-path="academic-year" href="#"><span class="material-symbols-outlined text-[18px]">calendar_month</span><span>02 Academic Year</span></a><a class="flex items-center gap-space-xs px-space-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-small text-body-small" data-path="master-data" href="#"><span class="material-symbols-outlined text-[18px]">database</span><span>03 Master Data</span></a><a class="flex items-center gap-space-xs px-space-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-small text-body-small" data-path="data-import-migration" href="#"><span class="material-symbols-outlined text-[18px]">swap_horiz</span><span>04 Import &amp; Migration</span></a><a class="flex items-center gap-space-xs px-space-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-small text-body-small" data-path="user-access" href="#"><span class="material-symbols-outlined text-[18px]">admin_panel_settings</span><span>05 User &amp; Access</span></a><a class="flex items-center gap-space-xs px-space-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-small text-body-small" data-path="audit-trail" href="#"><span class="material-symbols-outlined text-[18px]">history_edu</span><span>06 Audit Trail</span></a><a class="flex items-center gap-space-xs px-space-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-small text-body-small" data-path="notifications-setting" href="#"><span class="material-symbols-outlined text-[18px]">campaign</span><span>07 Notifications</span></a></div><div class="space-y-1"><div class="px-space-xs py-1 font-caption text-caption uppercase tracking-wider font-semibold text-muted">PPDB (Admission)</div><a class="flex items-center gap-space-xs px-space-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-small text-body-small" data-path="ppdb-dashboard" href="#"><span class="material-symbols-outlined text-[18px]">analytics</span><span>08 PPDB Dashboard</span></a><a class="flex items-center gap-space-xs px-space-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-small text-body-small" data-path="konfigurasi-ppdb" href="#"><span class="material-symbols-outlined text-[18px]">tune</span><span>09 Konfigurasi PPDB</span></a><a class="flex items-center gap-space-xs px-space-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-small text-body-small" data-path="applicant-list" href="#"><span class="material-symbols-outlined text-[18px]">badge</span><span>10 Data Pendaftar</span></a><a aria-current="page" class="flex items-center gap-space-xs px-space-sm py-2 rounded-lg transition-colors shadow-sm bg-primary-container text-on-primary font-body-medium" data-path="verifikasi-berkas" href="#"><span class="material-symbols-outlined text-[18px]">fact_check</span><span>12 Verifikasi Berkas</span></a><a class="flex items-center gap-space-xs px-space-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-small text-body-small" data-path="seleksi-pengumuman" href="#"><span class="material-symbols-outlined text-[18px]">how_to_reg</span><span>13/14 Seleksi &amp; Pengumuman</span></a><a class="flex items-center gap-space-xs px-space-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-small text-body-small" data-path="daftar-ulang" href="#"><span class="material-symbols-outlined text-[18px]">assignment_turned_in</span><span>15 Daftar Ulang</span></a></div><div class="space-y-1"><div class="px-space-xs py-1 font-caption text-caption uppercase tracking-wider font-semibold text-muted">Core Extensions</div><a class="flex items-center gap-space-xs px-space-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-small text-body-small" data-path="approval-center" href="#"><span class="material-symbols-outlined text-[18px]">verified</span><span>79 Approval Center</span></a><a class="flex items-center gap-space-xs px-space-sm py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-small text-body-small" data-path="integration-exception-queue" href="#"><span class="material-symbols-outlined text-[18px]">sync_problem</span><span>80 Exception Queue</span></a></div></nav></div><div class="p-space-sm border-t border-border bg-surface shrink-0"><div class="px-space-xs py-1.5 rounded bg-surface-container-low border border-border flex items-center justify-between"><div class="flex items-center gap-1.5 truncate"><span class="material-symbols-outlined text-[14px] text-primary">dns</span><span class="font-caption text-[11px] text-on-surface font-medium truncate">Single-Tenant Dedicated</span></div><span class="px-1 py-0.5 rounded text-[9px] font-bold uppercase bg-surface text-secondary border border-border shrink-0">DB Isolated</span></div></div></aside><div class="pl-72 flex flex-col min-h-screen"><header class="fixed top-0 left-72 right-0 h-16 bg-surface/95 backdrop-blur-md border-b border-border z-40 px-space-xl flex items-center justify-between"><div class="flex items-center gap-space-md"><div class="flex items-center gap-space-xs bg-surface-bright border border-border rounded-lg px-2.5 py-1.5 shadow-sm"><div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[16px] text-muted">domain</span><span class="font-caption text-caption font-semibold text-on-surface-variant uppercase tracking-wider">Unit:</span><button class="font-body-small text-body-small font-semibold text-on-surface flex items-center gap-1 hover:text-primary transition-colors"><span>SMP Nusantara</span><span class="material-symbols-outlined text-[16px] text-muted">keyboard_arrow_down</span></button></div><span class="w-[1px] h-3.5 bg-border"></span><div class="flex items-center gap-1"><span class="material-symbols-outlined text-[16px] text-muted">event</span><button class="font-body-small text-body-small font-medium text-on-surface-variant flex items-center gap-1 hover:text-primary transition-colors"><span>2026/2027 Ganjil</span><span class="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-semibold bg-success-light text-success border border-success/30">Aktif</span><span class="material-symbols-outlined text-[16px] text-muted">keyboard_arrow_down</span></button></div></div></div><div class="flex items-center gap-space-sm"><button class="flex items-center gap-space-sm bg-surface-container-low border border-border hover:border-outline text-muted hover:text-on-surface-variant px-space-sm py-1.5 rounded-lg text-body-small transition-all w-60"><div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[16px]">search</span><span class="font-body-small text-body-small">Cari menu, berkas...</span></div><kbd class="ml-auto font-caption text-[10px] uppercase font-bold bg-surface border border-border text-on-surface-variant px-1.5 py-0.5 rounded shadow-2xs">Ctrl+K</kbd></button><div class="flex items-center gap-1"><button class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors" title="Dokumentasi &amp; Bantuan"><span class="material-symbols-outlined text-[20px]">help_outline</span></button><button class="relative w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors" title="Notifikasi"><span class="material-symbols-outlined text-[20px]">notifications</span><span class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-error ring-2 ring-surface"></span></button></div><span class="w-[1px] h-6 bg-border mx-1"></span><div class="flex items-center gap-space-xs pl-1"><div class="relative"><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div><span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-success ring-2 ring-surface"></span></div><div class="flex flex-col text-left"><span class="font-body-small text-body-small font-semibold text-on-surface leading-tight">David Pambudi</span><span class="font-caption text-caption text-muted leading-tight">Super Admin</span></div><button class="text-on-surface-variant hover:text-on-surface ml-0.5"><span class="material-symbols-outlined text-[18px]">expand_more</span></button></div></div></header><main class="relative pt-16 flex-1 w-full"><div class="flex flex-col w-full">
+<!-- Sub-header / Traceability Banner -->
+<div class="px-space-xl py-space-sm bg-surface border-b border-border flex flex-wrap items-center justify-between gap-space-sm">
+<div class="flex items-center gap-space-xs text-body-small">
+<span class="font-label text-muted">PPDB Online</span>
+<span class="material-symbols-outlined text-[14px] text-muted">chevron_right</span>
+<span class="font-label text-muted">Alur Masuk Siswa</span>
+<span class="material-symbols-outlined text-[14px] text-muted">chevron_right</span>
+<span class="font-body-medium text-on-surface font-semibold">04. Verifikasi Berkas (Menu 12)</span>
+<span class="ml-space-xs px-2 py-0.5 rounded text-[11px] font-semibold bg-primary-light text-primary border border-primary/20">FR-12-001 / AC-12-01</span>
+<span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-surface-container text-on-surface-variant">BR-PPDB-06 Ruleset</span>
+</div>
+<div class="flex items-center gap-space-sm">
+<div class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-warning-light border border-warning/30 text-warning text-caption font-semibold">
+<span class="w-2 h-2 rounded-full bg-warning animate-pulse"></span>
+<span>Antrean Aktif: 18 Berkas Menunggu</span>
+</div>
+<span class="text-caption text-muted">SLA Auto-escalate: 24 Jam</span>
+</div>
+</div>
+<!-- Primary Page Header -->
+<div class="px-space-xl py-space-lg bg-surface border-b border-border flex flex-col md:flex-row md:items-center md:justify-between gap-space-md">
+<div class="space-y-1">
+<div class="flex items-center gap-space-sm">
+<h1 class="font-page-title text-page-title text-on-surface tracking-tight">Verifikasi Berkas Persyaratan</h1>
+<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-caption font-medium bg-secondary-container text-on-secondary-container">
+<span class="material-symbols-outlined text-[14px]">shield_person</span>
+<span>Role: PPDB Verifikator</span>
+</span>
+</div>
+<p class="font-body-default text-body-default text-secondary max-w-3xl">
+        Workbench inspeksi keabsahan dokumen calon peserta didik, audit metadata berkas, permintaan revisi via WhatsApp otomatis, dan validasi kelayakan seleksi.
+      </p>
+</div>
+<div class="flex items-center gap-space-xs shrink-0">
+<button class="h-9 px-space-md rounded-lg border border-border bg-surface hover:bg-surface-container-low text-on-surface font-body-medium text-body-small flex items-center gap-1.5 transition-colors shadow-sm">
+<span class="material-symbols-outlined text-[18px] text-secondary">history_edu</span>
+<span>Riwayat Audit Verifikasi</span>
+</button>
+<button class="h-9 px-space-md rounded-lg bg-primary hover:bg-on-tertiary-fixed-variant text-on-primary font-body-medium text-body-small flex items-center gap-1.5 shadow-sm transition-all hover:shadow">
+<span class="material-symbols-outlined text-[18px]">document_scanner</span>
+<span>Validasi Otomatis AI OCR</span>
+</button>
+</div>
+</div>
+<div class="p-space-xl space-y-space-xl">
+<!-- KPI Metric Cards Grid -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-space-md">
+<!-- KPI 1 -->
+<div class="p-space-md rounded-xl border border-border bg-surface flex flex-col justify-between shadow-sm">
+<div class="flex items-center justify-between text-muted">
+<span class="font-caption uppercase tracking-wider font-semibold text-secondary">Total Berkas Masuk</span>
+<span class="material-symbols-outlined text-[20px] text-secondary">folder_supervised</span>
+</div>
+<div class="mt-2 flex items-baseline justify-between">
+<span class="font-display text-display font-bold text-on-surface">482</span>
+<span class="text-caption font-semibold text-secondary">100% Pendaftar</span>
+</div>
+<div class="mt-2.5 w-full bg-surface-container-low rounded-full h-1.5 overflow-hidden">
+<div class="bg-primary h-full rounded-full" style="width: 100%"></div>
+</div>
+</div>
+<!-- KPI 2 -->
+<div class="p-space-md rounded-xl border border-border bg-surface flex flex-col justify-between shadow-sm">
+<div class="flex items-center justify-between">
+<span class="font-caption uppercase tracking-wider font-semibold text-secondary">Menunggu Verifikasi</span>
+<span class="material-symbols-outlined text-[20px] text-warning">pending_actions</span>
+</div>
+<div class="mt-2 flex items-baseline justify-between">
+<span class="font-display text-display font-bold text-on-surface">18</span>
+<span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-warning-light text-warning border border-warning/30">SLA &lt; 24 Jam</span>
+</div>
+<div class="mt-2 text-caption text-secondary flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px] text-warning">warning</span>
+<span>Perlu tindakan verifikator hari ini</span>
+</div>
+</div>
+<!-- KPI 3 -->
+<div class="p-space-md rounded-xl border border-border bg-surface flex flex-col justify-between shadow-sm">
+<div class="flex items-center justify-between">
+<span class="font-caption uppercase tracking-wider font-semibold text-secondary">Perlu Revisi / Buram</span>
+<span class="material-symbols-outlined text-[20px] text-error">assignment_late</span>
+</div>
+<div class="mt-2 flex items-baseline justify-between">
+<span class="font-display text-display font-bold text-on-surface">38</span>
+<span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-error-light text-error border border-error/30">WA Notified</span>
+</div>
+<div class="mt-2 text-caption text-secondary flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px] text-info">chat</span>
+<span>Notifikasi via Menu 07 terkirim</span>
+</div>
+</div>
+<!-- KPI 4 -->
+<div class="p-space-md rounded-xl border border-border bg-surface flex flex-col justify-between shadow-sm">
+<div class="flex items-center justify-between">
+<span class="font-caption uppercase tracking-wider font-semibold text-secondary">Terverifikasi Penuh</span>
+<span class="material-symbols-outlined text-[20px] text-success">verified</span>
+</div>
+<div class="mt-2 flex items-baseline justify-between">
+<span class="font-display text-display font-bold text-on-surface">376</span>
+<span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-success-light text-success border border-success/30">87.8% Valid</span>
+</div>
+<div class="mt-2 text-caption text-secondary flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px] text-success">check_circle</span>
+<span>Siap diteruskan ke Menu 13 Seleksi</span>
+</div>
+</div>
+</div>
+<!-- Main Two-Column Split Screen Workbench Layout -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-space-lg items-start">
+<!-- LEFT COLUMN: Queue & Document Checklist Panel (Approx 32% - 4 of 12 cols) -->
+<div class="lg:col-span-4 space-y-space-md">
+<!-- Queue Search & Filters -->
+<div class="p-space-md rounded-xl border border-border bg-surface shadow-sm space-y-space-sm">
+<div class="relative">
+<span class="material-symbols-outlined absolute left-2.5 top-2.5 text-[18px] text-muted">search</span>
+<input class="w-full h-9 pl-9 pr-8 rounded-lg bg-surface-container-low border border-border text-body-small text-on-surface focus:outline-none focus:border-primary focus:bg-surface font-body-default" placeholder="Cari nomor daftar atau nama calon siswa... (Ctrl+K)" type="text" value="PPDB-2026-0158">
+<button class="absolute right-2 top-2 text-muted hover:text-on-surface text-[14px]">
+<span class="material-symbols-outlined text-[16px]">cancel</span>
+</button>
+</div>
+<!-- Filter Chips -->
+<div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-caption font-semibold">
+<button class="px-2.5 py-1 rounded-md bg-surface-container-low text-secondary hover:text-on-surface shrink-0">Semua Jalur</button>
+<button class="px-2.5 py-1 rounded-md bg-warning-light text-warning border border-warning/30 shrink-0">Menunggu (18)</button>
+<button class="px-2.5 py-1 rounded-md bg-primary-light text-primary border border-primary/20 shrink-0">Revisi (38)</button>
+<button class="px-2.5 py-1 rounded-md bg-surface-container-low text-secondary hover:text-on-surface shrink-0">Lolos (376)</button>
+</div>
+</div>
+<!-- Selected Active Applicant Detail Card -->
+<div class="rounded-xl border-2 border-primary/30 bg-surface shadow-sm overflow-hidden">
+<div class="p-space-md bg-primary-light/40 border-b border-border flex items-start justify-between">
+<div class="flex items-center gap-space-sm">
+<div class="w-11 h-11 rounded-lg bg-surface border border-border flex items-center justify-center font-display text-card-title font-bold text-primary shrink-0 shadow-2xs">
+                AP
+              </div>
+<div class="min-w-0">
+<div class="flex items-center gap-1.5">
+<h3 class="font-card-title text-card-title font-semibold text-on-surface truncate">Aisyah Putri Permata</h3>
+<span class="px-1.5 py-0.2 rounded text-[10px] font-bold bg-primary text-on-primary">Aktif</span>
+</div>
+<div class="text-caption text-secondary flex items-center gap-2 mt-0.5">
+<span class="font-mono font-medium text-on-surface">PPDB-2026-0158</span>
+<span>•</span>
+<span class="truncate">Jalur Tahfizh Qur'an (Asrama)</span>
+</div>
+</div>
+</div>
+<span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-warning-light text-warning border border-warning/30 shrink-0">
+              Revisi Akta
+            </span>
+</div>
+<div class="p-space-md space-y-space-sm text-body-small border-b border-border bg-surface-container-low/30">
+<div class="grid grid-cols-2 gap-2 text-caption">
+<div>
+<span class="text-muted block">Wali Murid</span>
+<span class="font-body-medium text-on-surface">Hendra Permata (Ayah)</span>
+<span class="text-secondary block font-mono text-[11px]">0878-4421-9983</span>
+</div>
+<div>
+<span class="text-muted block">Asal Sekolah</span>
+<span class="font-body-medium text-on-surface truncate block" title="SD Muhammadiyah 01 Jakarta">SD Muhammadiyah 01</span>
+<span class="text-success text-[11px] font-semibold flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px]">check_circle</span> Form Lunas QRIS
+                </span>
+</div>
+</div>
+</div>
+<!-- Document Requirements Checklist (Interactive Items) -->
+<div class="p-space-md space-y-space-xs">
+<div class="flex items-center justify-between pb-1">
+<span class="font-label text-caption font-bold text-secondary uppercase tracking-wider">Berkas Wajib Calon (4/5 Lolos)</span>
+<span class="text-caption font-semibold text-primary">Progress: 80%</span>
+</div>
+<!-- Doc 1: KK -->
+<div class="p-2.5 rounded-lg border border-border hover:border-outline hover:bg-surface-container-low/50 flex items-center justify-between cursor-pointer transition-colors bg-surface">
+<div class="flex items-center gap-2.5 min-w-0">
+<span class="material-symbols-outlined text-[20px] text-success">check_circle</span>
+<div class="min-w-0">
+<p class="font-body-medium text-body-small text-on-surface font-semibold truncate">1. Kartu Keluarga (KK)</p>
+<p class="text-caption text-secondary">PDF • 2.4 MB • NIK &amp; Cap Disdukcapil Valid</p>
+</div>
+</div>
+<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-success-light text-success border border-success/30 shrink-0">Disetujui</span>
+</div>
+<!-- Doc 2: Akta Kelahiran (Active/Selected Item) -->
+<div class="p-2.5 rounded-lg border-2 border-primary bg-primary-light/30 flex items-center justify-between cursor-pointer transition-all shadow-2xs">
+<div class="flex items-center gap-2.5 min-w-0">
+<span class="material-symbols-outlined text-[20px] text-warning">warning</span>
+<div class="min-w-0">
+<p class="font-body-medium text-body-small text-primary font-bold truncate">2. Akta Kelahiran</p>
+<p class="text-caption text-on-surface-variant font-medium">JPG • 1.8 MB • Teks Buram (Versi 2)</p>
+</div>
+</div>
+<div class="flex items-center gap-1.5 shrink-0">
+<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-warning-light text-warning border border-warning/30">Revisi Aktif</span>
+<span class="material-symbols-outlined text-[16px] text-primary">arrow_forward_ios</span>
+</div>
+</div>
+<!-- Doc 3: Rapor -->
+<div class="p-2.5 rounded-lg border border-border hover:border-outline hover:bg-surface-container-low/50 flex items-center justify-between cursor-pointer transition-colors bg-surface">
+<div class="flex items-center gap-2.5 min-w-0">
+<span class="material-symbols-outlined text-[20px] text-success">check_circle</span>
+<div class="min-w-0">
+<p class="font-body-medium text-body-small text-on-surface font-semibold truncate">3. Rapor Semester 1-2 (Kls 4-5)</p>
+<p class="text-caption text-secondary">PDF • 4.1 MB • Rerata 87.2 (Memenuhi)</p>
+</div>
+</div>
+<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-success-light text-success border border-success/30 shrink-0">Disetujui</span>
+</div>
+<!-- Doc 4: Pas Foto -->
+<div class="p-2.5 rounded-lg border border-border hover:border-outline hover:bg-surface-container-low/50 flex items-center justify-between cursor-pointer transition-colors bg-surface">
+<div class="flex items-center gap-2.5 min-w-0">
+<span class="material-symbols-outlined text-[20px] text-success">check_circle</span>
+<div class="min-w-0">
+<p class="font-body-medium text-body-small text-on-surface font-semibold truncate">4. Pas Foto Resmi Siswa (3x4)</p>
+<p class="text-caption text-secondary">PNG • 850 KB • Background Merah</p>
+</div>
+</div>
+<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-success-light text-success border border-success/30 shrink-0">Disetujui</span>
+</div>
+<!-- Doc 5: Syahadah Tahfizh -->
+<div class="p-2.5 rounded-lg border border-border hover:border-outline hover:bg-surface-container-low/50 flex items-center justify-between cursor-pointer transition-colors bg-surface">
+<div class="flex items-center gap-2.5 min-w-0">
+<span class="material-symbols-outlined text-[20px] text-info">schedule</span>
+<div class="min-w-0">
+<p class="font-body-medium text-body-small text-on-surface font-semibold truncate">5. Sertifikat Syahadah Tahfizh</p>
+<p class="text-caption text-secondary">PDF • 3.2 MB • Menunggu Penguji Tahfizh</p>
+</div>
+</div>
+<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-info-light text-info border border-info/30 shrink-0">Review Guru</span>
+</div>
+</div>
+</div>
+<!-- Next in Queue Snippet -->
+<div class="p-space-md rounded-xl border border-border bg-surface shadow-sm space-y-space-sm">
+<div class="flex items-center justify-between">
+<span class="font-label text-caption font-bold text-secondary uppercase tracking-wider">Antrean Berikutnya</span>
+<a class="text-caption text-primary hover:underline font-semibold" href="#">Buka Semua (18)</a>
+</div>
+<div class="space-y-2">
+<!-- Queue item 1 -->
+<div class="p-2 rounded-lg border border-border hover:bg-surface-container-low flex items-center justify-between transition-colors cursor-pointer">
+<div class="min-w-0">
+<div class="flex items-center gap-1.5">
+<span class="font-body-medium text-body-small font-semibold text-on-surface truncate">Raditya Santoso</span>
+<span class="text-caption text-muted font-mono">0159</span>
+</div>
+<p class="text-caption text-secondary">Jalur Reguler • 5/5 Dokumen Lengkap</p>
+</div>
+<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-success-light text-success border border-success/30">Siap Verif</span>
+</div>
+<!-- Queue item 2 -->
+<div class="p-2 rounded-lg border border-border hover:bg-surface-container-low flex items-center justify-between transition-colors cursor-pointer">
+<div class="min-w-0">
+<div class="flex items-center gap-1.5">
+<span class="font-body-medium text-body-small font-semibold text-on-surface truncate">Fajar Maulana</span>
+<span class="text-caption text-muted font-mono">0160</span>
+</div>
+<p class="text-caption text-secondary">Jalur Afirmasi • Menunggu KK Asli</p>
+</div>
+<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-warning-light text-warning border border-warning/30">Review</span>
+</div>
+<!-- Queue item 3 -->
+<div class="p-2 rounded-lg border border-border hover:bg-surface-container-low flex items-center justify-between transition-colors cursor-pointer">
+<div class="min-w-0">
+<div class="flex items-center gap-1.5">
+<span class="font-body-medium text-body-small font-semibold text-on-surface truncate">Nabila Rahma</span>
+<span class="text-caption text-muted font-mono">0161</span>
+</div>
+<p class="text-caption text-secondary">Jalur Prestasi Akademik • 5/5 Valid</p>
+</div>
+<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-success-light text-success border border-success/30">Siap Verif</span>
+</div>
+</div>
+</div>
+</div>
+<!-- RIGHT COLUMN: Document Inspection Workspace (Approx 68% - 8 of 12 cols) -->
+<div class="lg:col-span-8 space-y-space-md">
+<!-- Viewer & Verification Card -->
+<div class="rounded-xl border border-border bg-surface shadow-sm overflow-hidden flex flex-col">
+<!-- Document Inspection Toolbar -->
+<div class="px-space-md py-space-sm bg-surface-container-low border-b border-border flex flex-wrap items-center justify-between gap-space-sm">
+<div class="flex items-center gap-space-sm min-w-0">
+<span class="material-symbols-outlined text-[22px] text-primary">image</span>
+<div class="min-w-0">
+<div class="flex items-center gap-2">
+<h4 class="font-body-medium text-body-small font-bold text-on-surface truncate">Akta_Kelahiran_Aisyah_Putri.jpg</h4>
+<span class="px-1.5 py-0.2 rounded text-[10px] font-bold bg-secondary-container text-on-secondary-container">Unggahan Versi 2</span>
+</div>
+<p class="text-caption text-secondary">Diunggah: 14 Okt 2026, 13:10 WIB • File Size: 1.84 MB • Dimensi: 1920x1080</p>
+</div>
+</div>
+<!-- Viewer Manipulation Controls -->
+<div class="flex items-center gap-1 bg-surface border border-border rounded-lg p-1 shadow-2xs">
+<button class="w-7 h-7 rounded hover:bg-surface-container-low text-secondary hover:text-on-surface flex items-center justify-center transition-colors" title="Zoom Out (-)">
+<span class="material-symbols-outlined text-[16px]">zoom_out</span>
+</button>
+<span class="text-caption font-mono font-semibold px-1 text-on-surface">125%</span>
+<button class="w-7 h-7 rounded hover:bg-surface-container-low text-secondary hover:text-on-surface flex items-center justify-center transition-colors" title="Zoom In (+)">
+<span class="material-symbols-outlined text-[16px]">zoom_in</span>
+</button>
+<span class="w-[1px] h-4 bg-border mx-0.5"></span>
+<button class="w-7 h-7 rounded hover:bg-surface-container-low text-secondary hover:text-on-surface flex items-center justify-center transition-colors" title="Putar 90 Derajat">
+<span class="material-symbols-outlined text-[16px]">rotate_right</span>
+</button>
+<button class="w-7 h-7 rounded hover:bg-surface-container-low text-secondary hover:text-on-surface flex items-center justify-center transition-colors" title="Buka Layar Penuh">
+<span class="material-symbols-outlined text-[16px]">fullscreen</span>
+</button>
+<button class="w-7 h-7 rounded hover:bg-surface-container-low text-secondary hover:text-on-surface flex items-center justify-center transition-colors" title="Download File Asli">
+<span class="material-symbols-outlined text-[16px]">download</span>
+</button>
+<span class="w-[1px] h-4 bg-border mx-0.5"></span>
+<button class="px-2 h-7 rounded bg-primary-light text-primary hover:bg-primary-container hover:text-on-primary text-caption font-semibold flex items-center gap-1 transition-colors">
+<span class="material-symbols-outlined text-[14px]">smart_toy</span>
+<span>OCR View</span>
+</button>
+</div>
+</div>
+<!-- Document Preview Canvas (Indonesian Birth Certificate Realistic Inspection UI) -->
+<div class="relative bg-slate-900/5 p-space-lg flex items-center justify-center min-h-[460px] overflow-hidden select-none border-b border-border">
+<!-- Simulated Birth Certificate Sheet -->
+<div class="w-full max-w-[620px] bg-[#FFFDF9] rounded-lg shadow-md border border-[#E8DFC8] p-space-lg text-slate-800 relative font-serif">
+<!-- Certificate Border Filigree Simulation -->
+<div class="border-2 border-[#C5B358]/50 p-4 rounded bg-gradient-to-b from-amber-50/20 via-white to-amber-50/30">
+<!-- Emblem & Header -->
+<div class="text-center space-y-1 mb-4">
+<div class="w-10 h-10 mx-auto rounded-full bg-amber-100 border border-amber-300 flex items-center justify-center text-amber-700 shadow-2xs font-sans">
+<span class="material-symbols-outlined text-[24px]">verified</span>
+</div>
+<h5 class="text-[13px] tracking-widest uppercase font-bold text-slate-900 font-sans">REPUBLIK INDONESIA</h5>
+<h6 class="text-[11px] tracking-wider uppercase font-semibold text-slate-600 font-sans">DINAS KEPENDUDUKAN DAN PENCATATAN SIPIL</h6>
+<div class="text-[16px] font-bold text-slate-900 tracking-wide underline decoration-amber-600/50">PENCATATAN SIPIL WARGA NEGARA INDONESIA</div>
+<p class="text-[11px] font-sans text-slate-600">KUTIPAN AKTA KELAHIRAN</p>
+<p class="text-[10px] font-mono text-slate-500 font-sans">Nomor: 3275-LT-14052013-0042</p>
+</div>
+<!-- Certificate Body Fields -->
+<div class="space-y-2 text-[12px] leading-relaxed font-sans text-slate-800">
+<p class="text-[11px] text-slate-600 italic">Bahwa di Jakarta, pada tanggal empat belas Mei tahun dua ribu tiga belas, telah lahir:</p>
+<div class="my-2 p-2 bg-blue-50/50 rounded border border-blue-200/50">
+<span class="text-[10px] text-blue-700 font-bold uppercase tracking-wide block">Nama Anak:</span>
+<span class="text-[15px] font-bold text-slate-950 font-serif tracking-wide">AISYAH PUTRI PERMATA</span>
+</div>
+<div class="grid grid-cols-2 gap-2 text-[11px]">
+<div>
+<span class="text-slate-500 block">Jenis Kelamin:</span>
+<span class="font-semibold text-slate-900">Perempuan</span>
+</div>
+<div>
+<span class="text-slate-500 block">Anak Ke:</span>
+<span class="font-semibold text-slate-900">1 (Pertama)</span>
+</div>
+</div>
+<div class="pt-1 text-[11px]">
+<span class="text-slate-500 block">Dari Orang Tua:</span>
+<span class="font-semibold text-slate-900">HENDRA PERMATA</span> &amp; <span class="font-semibold text-slate-900">SITI AMINAH</span>
+</div>
+</div>
+<!-- Footer Signatures & Blur Warning Box -->
+<div class="mt-6 pt-4 border-t border-slate-200 flex items-end justify-between font-sans">
+<div class="text-[10px] text-slate-500">
+<p>Diterbitkan di: Jakarta</p>
+<p>Pada tanggal: 20 Mei 2013</p>
+</div>
+<!-- Problem Area: Blurred Stamp with Annotation Box -->
+<div class="relative p-2 rounded border border-dashed border-error bg-error-light/50 text-right w-48">
+<div class="filter blur-[1.5px] opacity-75">
+<div class="w-16 h-16 rounded-full border-2 border-blue-700 ml-auto flex items-center justify-center text-[8px] text-blue-700 font-bold text-center">
+                        CAP RESMI<br>DISDUKCAPIL
+                      </div>
+<p class="text-[9px] font-bold text-slate-700 mt-1">Drs. H. Mulyadi, M.Si</p>
+<p class="text-[8px] font-mono text-slate-500">NIP. 19680312 199403 1 003</p>
+</div>
+<!-- Defect Inspection Tag Overlay -->
+<div class="absolute -top-3 -left-12 bg-error text-on-error px-2 py-0.5 rounded text-[10px] font-bold shadow-md flex items-center gap-1 z-10 animate-bounce">
+<span class="material-symbols-outlined text-[12px]">warning</span>
+<span>Area Teks &amp; Cap Buram</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Floating OCR Floating Insight Bubble -->
+<div class="absolute bottom-4 left-4 bg-surface/95 backdrop-blur border border-border p-2.5 rounded-lg shadow-md max-w-xs text-caption">
+<div class="flex items-center gap-1.5 text-primary font-semibold mb-1">
+<span class="material-symbols-outlined text-[16px]">psychology</span>
+<span>Hasil Ekstraksi OCR Otomatis</span>
+</div>
+<p class="text-secondary text-[11px] leading-tight">
+                Confidence score: <span class="font-semibold text-warning">64% (Di bawah ambang 85%)</span>. Nomor registrasi dan stempel dinas tidak terbaca dengan presisi.
+              </p>
+</div>
+</div>
+<!-- Inspection Verification Checklist & Audit Grid -->
+<div class="p-space-md bg-surface border-b border-border space-y-space-md">
+<div>
+<h5 class="font-section-title text-card-title text-on-surface font-semibold">Lembar Periksa Standar (Standard Verification Checklist)</h5>
+<p class="text-caption text-secondary">Tentukan validitas parameter dokumen sesuai regulasi Permendikbud &amp; Yayasan</p>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-space-sm">
+<!-- Item 1 -->
+<div class="p-space-sm rounded-lg border border-border bg-surface-container-low/40 flex items-start justify-between gap-space-xs">
+<div class="flex items-start gap-2">
+<span class="material-symbols-outlined text-[18px] text-success mt-0.5">check_circle</span>
+<div>
+<p class="font-body-medium text-body-small text-on-surface font-semibold">Kesesuaian Nama &amp; NIK Siswa</p>
+<p class="text-caption text-secondary">Nama "Aisyah Putri Permata" persis sama dengan kartu keluarga dan NISN.</p>
+</div>
+</div>
+<span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-success-light text-success shrink-0">Valid</span>
+</div>
+<!-- Item 2 -->
+<div class="p-space-sm rounded-lg border border-border bg-surface-container-low/40 flex items-start justify-between gap-space-xs">
+<div class="flex items-start gap-2">
+<span class="material-symbols-outlined text-[18px] text-success mt-0.5">check_circle</span>
+<div>
+<p class="font-body-medium text-body-small text-on-surface font-semibold">Kesesuaian Orang Tua / Wali</p>
+<p class="text-caption text-secondary">Hendra Permata &amp; Siti Aminah terdaftar sebagai orang tua kandung.</p>
+</div>
+</div>
+<span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-success-light text-success shrink-0">Valid</span>
+</div>
+<!-- Item 3 -->
+<div class="p-space-sm rounded-lg border border-warning/40 bg-warning-light/30 flex items-start justify-between gap-space-xs">
+<div class="flex items-start gap-2">
+<span class="material-symbols-outlined text-[18px] text-warning mt-0.5">error</span>
+<div>
+<p class="font-body-medium text-body-small text-on-surface font-semibold">Kejelasan Cap / Tanda Tangan / QR Code</p>
+<p class="text-caption text-warning font-medium">Resolusi rendah (&lt; 150 DPI), cap dinas kabur tidak dapat diverifikasi keasliannya.</p>
+</div>
+</div>
+<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-warning text-on-warning shrink-0">Buram</span>
+</div>
+<!-- Item 4 -->
+<div class="p-space-sm rounded-lg border border-border bg-surface-container-low/40 flex items-start justify-between gap-space-xs">
+<div class="flex items-start gap-2">
+<span class="material-symbols-outlined text-[18px] text-success mt-0.5">check_circle</span>
+<div>
+<p class="font-body-medium text-body-small text-on-surface font-semibold">Kesesuaian Batas Usia Masuk SMP</p>
+<p class="text-caption text-secondary">Lahir 14 Mei 2013 (Usia: 13 Thn 4 Bln per 1 Juli 2026). Syarat: Maks 15 Thn.</p>
+</div>
+</div>
+<span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-success-light text-success shrink-0">Lolos Usia</span>
+</div>
+</div>
+</div>
+<!-- Reviewer Decision Form Panel -->
+<div class="p-space-md bg-surface-bright space-y-space-sm">
+<div class="flex items-center justify-between">
+<label class="font-body-medium text-body-small text-on-surface font-bold flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[18px] text-secondary">rate_review</span>
+<span>Instruksi Catatan Revisi untuk Orang Tua (Terkirim via WhatsApp &amp; Email Calon Siswa)</span>
+</label>
+<span class="text-caption text-muted">Format WA Auto-template terpasang</span>
+</div>
+<!-- Quick Preset Chips -->
+<div class="flex flex-wrap items-center gap-1.5 text-caption">
+<span class="text-secondary font-medium">Template Cepat:</span>
+<button class="px-2 py-0.5 rounded-full bg-surface border border-border text-on-surface hover:border-primary text-[11px] transition-colors">
+                Foto Buram / Tidak Jelas
+              </button>
+<button class="px-2 py-0.5 rounded-full bg-surface border border-border text-on-surface hover:border-primary text-[11px] transition-colors">
+                Dokumen Terpotong Sudut
+              </button>
+<button class="px-2 py-0.5 rounded-full bg-surface border border-border text-on-surface hover:border-primary text-[11px] transition-colors">
+                Salah Jenis Berkas
+              </button>
+<button class="px-2 py-0.5 rounded-full bg-surface border border-border text-on-surface hover:border-primary text-[11px] transition-colors">
+                Masa Berlaku Berkas Habis
+              </button>
+</div>
+<textarea class="w-full p-2.5 rounded-lg border border-border bg-surface text-body-small text-on-surface focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary font-body-default" rows="2">Mohon unggah ulang foto Akta Kelahiran asli dengan pencahayaan terang dan seluruh sudut terbaca jelas (terutama stempel dinas dan nomor registrasi di bagian bawah). Jangan gunakan hasil foto copy buram.</textarea>
+<!-- Bottom Sticky Action Buttons -->
+<div class="pt-2 flex flex-col sm:flex-row items-center justify-between gap-space-sm">
+<div class="flex items-center gap-2 text-caption text-secondary">
+<span class="material-symbols-outlined text-[16px] text-success">send_to_mobile</span>
+<span>Pesan WhatsApp akan dikirim ke <strong>0878-4421-9983</strong> (Bpk. Hendra Permata)</span>
+</div>
+<div class="flex items-center gap-space-xs shrink-0 w-full sm:w-auto justify-end">
+<button class="h-9 px-space-sm rounded-lg border border-error/50 text-error hover:bg-error-light text-body-small font-body-medium flex items-center gap-1.5 transition-colors">
+<span class="material-symbols-outlined text-[18px]">close</span>
+<span>Tolak Berkas</span>
+</button>
+<button class="h-9 px-space-md rounded-lg bg-warning hover:bg-warning/90 text-on-warning text-body-small font-body-medium flex items-center gap-1.5 shadow-sm transition-colors">
+<span class="material-symbols-outlined text-[18px]">cached</span>
+<span>Minta Revisi ke Orang Tua</span>
+</button>
+<button class="h-9 px-space-md rounded-lg bg-success hover:bg-success/90 text-on-success text-body-small font-body-medium flex items-center gap-1.5 shadow-sm transition-colors">
+<span class="material-symbols-outlined text-[18px]">check_circle</span>
+<span>Setujui Dokumen Ini</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Document Audit Trail Logs (FR-12-002, AC-12-01) -->
+<div class="p-space-md bg-surface border-t border-border">
+<div class="flex items-center justify-between mb-2">
+<h6 class="font-label text-caption font-bold text-secondary uppercase tracking-wider flex items-center gap-1">
+<span class="material-symbols-outlined text-[15px]">timeline</span>
+<span>Riwayat Audit Verifikasi Berkas (FR-12-002 / AC-12-01)</span>
+</h6>
+<span class="text-caption text-muted">ID Log: LOG-DOC-2026-9041</span>
+</div>
+<div class="space-y-2">
+<div class="flex items-start gap-2.5 text-caption">
+<div class="w-1.5 h-1.5 rounded-full bg-secondary mt-1.5 shrink-0"></div>
+<div class="flex-1">
+<div class="flex items-center gap-2">
+<span class="font-mono text-muted">14 Okt 2026, 11:20 WIB</span>
+<span class="font-semibold text-on-surface">Unggahan Pertama oleh Wali Siswa</span>
+<span class="text-muted">(IP: 180.252.88.14)</span>
+</div>
+<p class="text-secondary text-[11px]">Unggahan awal melalui portal pendaftaran orang tua.</p>
+</div>
+</div>
+<div class="flex items-start gap-2.5 text-caption">
+<div class="w-1.5 h-1.5 rounded-full bg-warning mt-1.5 shrink-0"></div>
+<div class="flex-1">
+<div class="flex items-center gap-2">
+<span class="font-mono text-muted">14 Okt 2026, 11:45 WIB</span>
+<span class="font-semibold text-warning">Permintaan Revisi Dikirim</span>
+<span class="text-on-surface-variant font-medium">oleh Verifikator 01 (Dian Safitri, S.Pd)</span>
+</div>
+<p class="text-secondary text-[11px]">Catatan: "Foto pudar dan resolusi tidak terbaca sistem". Notifikasi WhatsApp tersampaikan.</p>
+</div>
+</div>
+<div class="flex items-start gap-2.5 text-caption">
+<div class="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 shrink-0"></div>
+<div class="flex-1">
+<div class="flex items-center gap-2">
+<span class="font-mono text-muted">14 Okt 2026, 13:10 WIB</span>
+<span class="font-semibold text-primary">Unggahan Ulang (Versi 2) oleh Wali Siswa</span>
+<span class="text-muted">(Ukuran file 1.84 MB)</span>
+</div>
+<p class="text-secondary text-[11px]">Sedang dalam pemeriksaan inspeksi oleh Super Admin David Pambudi.</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div></main></div></body></html>
