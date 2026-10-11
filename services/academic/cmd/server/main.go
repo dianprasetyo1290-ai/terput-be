@@ -156,6 +156,15 @@ func main() {
 		// Kenaikan Kelas
 		r.Post("/grade-promotion", h.GradePromotion)
 
+		// Transfer & Withdrawal Siswa (Menu 78)
+		r.Post("/student-status-requests", h.CreateStudentStatusRequest)
+		r.Get("/student-status-requests", h.ListStudentStatusRequests)
+		r.Get("/student-status-requests/{id}", h.GetStudentStatusRequest)
+		r.Post("/student-status-requests/{id}/apply", h.ApplyStudentStatusRequest)
+		r.Get("/student-status-requests/financial-summary", h.GetStudentFinancialSummaryProxy)
+		r.Get("/academic-settings", h.GetAcademicSettings)
+		r.Put("/academic-settings", h.UpdateAcademicSettings)
+
 		// Dashboard
 		r.Get("/dashboard/counts", h.DashboardCounts)
 	})
@@ -233,6 +242,10 @@ func main() {
 		// academicAdapter.Enroll). Idempotent; see
 		// internal/handler/admission_enrollment.go.
 		r.Post("/internal/admission/enrollments/upsert", h.UpsertAdmissionEnrollment)
+
+		// Status Request Approval Callback & Apply Job
+		r.Post("/internal/student-status-requests/approval-callback", h.ApprovalCallback)
+		r.Post("/internal/student-status-requests/apply-pending", h.ApplyPendingRequestsJob)
 	})
 
 	log.Printf("academic-service listening on :%s", port)

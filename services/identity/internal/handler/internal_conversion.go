@@ -205,3 +205,4 @@ func (a *App) InternalConversionMapping(w http.ResponseWriter, r *http.Request) 
 	}
 	common.WriteJSON(w, http.StatusOK, m, nil)
 }
+

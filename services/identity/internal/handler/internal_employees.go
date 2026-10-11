@@ -96,14 +96,13 @@ func (a *App) InternalCreateOrLinkEmployee(w http.ResponseWriter, r *http.Reques
 
 type internalDeactivateRequest struct {
 	SchoolID    string     `json:"school_id"`
-	EffectiveAt *time.Time `json:"effective_at"`
+	Reason      string     `json:"reason,omitempty"`
+	EffectiveAt *time.Time `json:"effective_at,omitempty"`
 }
 
-// InternalDeactivateUser is POST /internal/users/{id}/deactivate (AC-83-03).
-// It only records users.deactivate_at: Login rejects once that moment has
-// passed, so "today or earlier" takes effect immediately and a future exit
-// date needs no scheduler. Only an account holding a role in the calling
-// school can be deactivated by it.
+// InternalDeactivateUser is POST /internal/users/{id}/deactivate (AC-83-03 & T7a student exit).
+// It records users.deactivate_at when effective_at is provided, and deactivates active roles
+// and guardian links for the user in the school when reason or immediate deactivation is requested.
 func (a *App) InternalDeactivateUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var req internalDeactivateRequest
@@ -111,21 +110,76 @@ func (a *App) InternalDeactivateUser(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if id == "" || strings.TrimSpace(req.SchoolID) == "" || req.EffectiveAt == nil {
-		common.WriteError(w, http.StatusBadRequest, "id, school_id and effective_at are required")
+	req.SchoolID = strings.TrimSpace(req.SchoolID)
+	req.Reason = strings.TrimSpace(req.Reason)
+	if id == "" || req.SchoolID == "" || (req.EffectiveAt == nil && req.Reason == "") {
+		common.WriteError(w, http.StatusBadRequest, "id, school_id and effective_at (or reason) are required")
 		return
 	}
-	res, err := a.DB.ExecContext(r.Context(), `UPDATE users SET deactivate_at = $1, updated_at = now()
-		WHERE id = $2 AND deleted_at IS NULL
-		  AND EXISTS (SELECT 1 FROM user_school_roles WHERE user_id = $2 AND school_id = $3)`,
-		*req.EffectiveAt, id, req.SchoolID)
+
+	ctx := r.Context()
+	tx, err := a.DB.BeginTx(ctx, nil)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to set deactivation date")
+		common.WriteError(w, http.StatusInternalServerError, "failed to start transaction")
 		return
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	defer tx.Rollback()
+
+	// Ensure user exists and has a role in the school
+	var exists bool
+	err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM user_school_roles WHERE user_id = $1 AND school_id = $2)`, id, req.SchoolID).Scan(&exists)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to check user in school")
+		return
+	}
+	if !exists {
 		common.WriteError(w, http.StatusNotFound, "user not found in school")
 		return
 	}
-	common.WriteJSON(w, http.StatusOK, map[string]any{"user_id": id, "deactivate_at": req.EffectiveAt}, nil)
+
+	if req.EffectiveAt != nil {
+		_, err = tx.ExecContext(ctx, `UPDATE users SET deactivate_at = $1, updated_at = now()
+			WHERE id = $2 AND deleted_at IS NULL`,
+			*req.EffectiveAt, id)
+		if err != nil {
+			common.WriteError(w, http.StatusInternalServerError, "failed to set deactivation date")
+			return
+		}
+	}
+
+	if req.Reason != "" || req.EffectiveAt == nil || !req.EffectiveAt.After(time.Now()) {
+		// Deactivate active roles for this user and school
+		_, err = tx.ExecContext(ctx, `
+			UPDATE user_school_roles
+			SET status = 'inactive', deactivated_at = now()
+			WHERE user_id = $1 AND school_id = $2 AND status = 'active'
+		`, id, req.SchoolID)
+		if err != nil {
+			common.WriteError(w, http.StatusInternalServerError, "failed to deactivate user roles")
+			return
+		}
+
+		// Deactivate guardian_links for this student and school
+		_, err = tx.ExecContext(ctx, `
+			UPDATE guardian_links
+			SET status = 'inactive', deactivated_at = now(), updated_at = now()
+			WHERE student_user_id = $1 AND school_id = $2 AND status = 'active'
+		`, id, req.SchoolID)
+		if err != nil {
+			common.WriteError(w, http.StatusInternalServerError, "failed to deactivate guardian links")
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to commit transaction")
+		return
+	}
+
+	common.WriteJSON(w, http.StatusOK, map[string]any{
+		"deactivated":   true,
+		"user_id":       id,
+		"school_id":     req.SchoolID,
+		"deactivate_at": req.EffectiveAt,
+	}, nil)
 }

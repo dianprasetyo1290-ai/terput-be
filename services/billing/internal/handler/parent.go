@@ -65,6 +65,9 @@ func (a *App) ListMyBills(w http.ResponseWriter, r *http.Request) {
 	if c == nil {
 		return
 	}
+	if !a.checkStudentBillVisibility(w, r, c.SchoolID, c.UserID) {
+		return
+	}
 	a.writeStudentBills(w, r, c.SchoolID, c.UserID)
 }
 
@@ -298,6 +301,9 @@ func (a *App) ListChildPayments(w http.ResponseWriter, r *http.Request) {
 func (a *App) ListMyPayments(w http.ResponseWriter, r *http.Request) {
 	c := common.RequireStudent(w, r)
 	if c == nil {
+		return
+	}
+	if !a.checkStudentBillVisibility(w, r, c.SchoolID, c.UserID) {
 		return
 	}
 	a.writeStudentPayments(w, r, c.SchoolID, c.UserID)

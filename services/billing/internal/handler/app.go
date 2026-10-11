@@ -17,10 +17,13 @@ type IdentityChecker interface {
 	GuardianHasAccess(ctx context.Context, guardianUserID, studentUserID, schoolID string) (bool, error)
 }
 
-// ClassRoster resolves the students a teacher may see (academic-service).
+// ClassRoster resolves the students a teacher may see, and student grade levels (academic-service).
 // *client.Client satisfies it; tests use a stub.
 type ClassRoster interface {
+	Configured() bool
 	TeacherStudentIDs(ctx context.Context, schoolID, teacherUserID string) (map[string]bool, error)
+	StudentGradeLevel(ctx context.Context, schoolID, studentUserID string) (string, error)
+	SchoolGradeLevels(ctx context.Context, schoolID string) ([]string, error)
 }
 
 // App carries every dependency the HTTP handlers need. Handlers talk to the

@@ -47,3 +47,7 @@ func FromCtx(r *http.Request) *Claims {
 	c, _ := r.Context().Value(ClaimsCtxKey).(*Claims)
 	return c
 }
+
+func WithClaims(ctx context.Context, c *Claims) context.Context {
+	return context.WithValue(ctx, ClaimsCtxKey, c)
+}

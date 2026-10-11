@@ -111,6 +111,7 @@ func main() {
 		st.Use(common.JWTMiddleware(cfg.JWTSecret))
 
 		st.Get("/me/bills", app.ListMyBills)
+		st.Get("/me/bills/visibility", app.GetMyBillVisibility)
 		st.Get("/me/payments", app.ListMyPayments)
 	})
 
@@ -146,7 +147,6 @@ func main() {
 		ad.Post("/admin/refunds/{id}/process", app.ProcessRefund)
 
 		ad.Get("/admin/finance/summary", app.FinanceSummary)
-
 		// T6 Payment Gateway & Cashier routes
 		ad.Get("/admin/payment-methods", app.AdminListPaymentMethods)
 		ad.Post("/admin/payment-methods", app.AdminCreatePaymentMethod)
@@ -174,6 +174,9 @@ func main() {
 		ad.Post("/admin/bank-reconciliation/run", app.AdminRunBankReconciliation)
 
 		ad.Get("/admin/payment-dashboard", app.AdminPaymentDashboard)
+
+		ad.Get("/admin/student-bill-visibility", app.GetStudentBillVisibility)
+		ad.Put("/admin/student-bill-visibility", app.UpdateStudentBillVisibility)
 	})
 
 	// ---------------------------------------------------------------------
@@ -185,6 +188,9 @@ func main() {
 		in.Post("/internal/bills/generate", app.InternalGenerateBills)
 		in.Get("/internal/students/{studentUserId}/outstanding", app.InternalStudentOutstanding)
 		in.Post("/internal/corrections/{id}/callback", app.CorrectionCallback)
+		in.Get("/internal/students/{studentUserId}/financial-summary", app.InternalStudentFinancialSummary)
+		in.Post("/internal/students/{studentUserId}/exit", app.InternalStudentExit)
+		in.Post("/internal/students/{studentUserId}/refund", app.InternalStudentRefund)
 	})
 
 	log.Printf("billing-service listening on :%s (%s)", cfg.Port, cfg.AppEnv)

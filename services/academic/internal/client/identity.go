@@ -18,6 +18,7 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -131,3 +132,67 @@ func (c *IdentityClient) GetUser(userID string) (*User, error) {
 	}
 	return &env.Data, nil
 }
+
+// CreateOrLinkStudent links or creates a student account in the destination school.
+func (c *IdentityClient) CreateOrLinkStudent(schoolID, studentUserID, name, email string) error {
+	url := fmt.Sprintf("%s/internal/students/create-or-link", c.BaseURL)
+	payload := map[string]any{
+		"school_id":     schoolID,
+		"source":        "academic_transfer",
+		"external_ref":  studentUserID,
+		"name":          name,
+		"email":         email,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Internal-Key", c.InternalKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("identity create-or-link returned status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// DeactivateUser calls identity POST /internal/users/{id}/deactivate
+func (c *IdentityClient) DeactivateUser(schoolID, userID, reason string) error {
+	url := fmt.Sprintf("%s/internal/users/%s/deactivate", c.BaseURL, userID)
+	payload := map[string]any{
+		"school_id": schoolID,
+		"reason":    reason,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Internal-Key", c.InternalKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("identity deactivate returned status %d", resp.StatusCode)
+	}
+	return nil
+}
+
