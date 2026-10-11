@@ -205,3 +205,71 @@ func (a *App) InternalConversionMapping(w http.ResponseWriter, r *http.Request) 
 	}
 	common.WriteJSON(w, http.StatusOK, m, nil)
 }
+
+type internalDeactivateRequest struct {
+	SchoolID string `json:"school_id"`
+	Reason   string `json:"reason"`
+}
+
+// InternalDeactivateUser handles POST /internal/users/{id}/deactivate (called on withdrawal/exit).
+func (a *App) InternalDeactivateUser(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "id")
+	if strings.TrimSpace(userID) == "" {
+		common.WriteError(w, http.StatusUnprocessableEntity, "user_id is required")
+		return
+	}
+
+	var req internalDeactivateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.WriteError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	schoolID := strings.TrimSpace(req.SchoolID)
+	if schoolID == "" {
+		common.WriteError(w, http.StatusUnprocessableEntity, "school_id is required")
+		return
+	}
+
+	ctx := r.Context()
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Deactivate user_school_roles for this user and school
+	_, err = tx.ExecContext(ctx, `
+		UPDATE user_school_roles
+		SET status = 'inactive', deactivated_at = now()
+		WHERE user_id = $1 AND school_id = $2 AND status = 'active'
+	`, userID, schoolID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Deactivate guardian_links for this student and school
+	_, err = tx.ExecContext(ctx, `
+		UPDATE guardian_links
+		SET status = 'inactive', deactivated_at = now(), updated_at = now()
+		WHERE student_user_id = $1 AND school_id = $2 AND status = 'active'
+	`, userID, schoolID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	common.WriteJSON(w, http.StatusOK, map[string]any{
+		"deactivated": true,
+		"user_id":     userID,
+		"school_id":   schoolID,
+	}, nil)
+}
+

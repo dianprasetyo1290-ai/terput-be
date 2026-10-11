@@ -183,3 +183,52 @@ func (c *Client) TeacherStudentIDs(ctx context.Context, schoolID, teacherUserID 
 	}
 	return out, nil
 }
+
+// StudentGradeLevel asks academic-service for a student's active classroom grade level.
+func (c *Client) StudentGradeLevel(ctx context.Context, schoolID, studentUserID string) (string, error) {
+	if !c.Configured() {
+		return "", ErrNotConfigured
+	}
+	var res struct {
+		ClassroomID string `json:"classroom_id"`
+	}
+	path := "/students/" + url.PathEscape(studentUserID) + "/classroom?school_id=" + url.QueryEscape(schoolID)
+	if err := c.Get(ctx, path, &res); err != nil {
+		return "", err
+	}
+	if res.ClassroomID == "" {
+		return "", nil
+	}
+	var classroom struct {
+		GradeLevel string `json:"grade_level"`
+	}
+	clPath := "/classrooms/" + url.PathEscape(res.ClassroomID) + "?school_id=" + url.QueryEscape(schoolID)
+	if err := c.Get(ctx, clPath, &classroom); err != nil {
+		return "", err
+	}
+	return classroom.GradeLevel, nil
+}
+
+// SchoolGradeLevels asks academic-service for distinct grade levels in a school.
+func (c *Client) SchoolGradeLevels(ctx context.Context, schoolID string) ([]string, error) {
+	if !c.Configured() {
+		return nil, ErrNotConfigured
+	}
+	var classrooms []struct {
+		GradeLevel string `json:"grade_level"`
+	}
+	if err := c.Get(ctx, "/classrooms?per_page=500&school_id="+url.QueryEscape(schoolID), &classrooms); err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, cl := range classrooms {
+		gl := strings.TrimSpace(cl.GradeLevel)
+		if gl != "" && !seen[gl] {
+			seen[gl] = true
+			out = append(out, gl)
+		}
+	}
+	return out, nil
+}
+

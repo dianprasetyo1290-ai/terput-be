@@ -232,8 +232,26 @@ func (a *App) generateBills(ctx context.Context, schoolID string, in generateReq
 	if err != nil {
 		return result, err
 	}
+	// Exclude exited students (FR-78-005: hentikan penerbitan tagihan berikutnya)
+	exitedStudents := map[string]bool{}
+	if exitRows, err := a.DB.QueryContext(ctx, `
+		SELECT student_user_id::text FROM student_billing_exits
+		WHERE school_id=$1 AND effective_date <= make_date($2, $3, 1)
+	`, schoolID, in.PeriodYear, in.PeriodMonth); err == nil {
+		defer exitRows.Close()
+		for exitRows.Next() {
+			var sid string
+			if err := exitRows.Scan(&sid); err == nil {
+				exitedStudents[sid] = true
+			}
+		}
+	}
+
 	candidates := make([]model.BillCandidate, 0, len(students))
 	for _, s := range students {
+		if exitedStudents[s] {
+			continue
+		}
 		candidates = append(candidates, model.BillCandidate{Key: model.BillKey{
 			StudentUserID: s, Year: in.PeriodYear, Month: in.PeriodMonth, SchemeID: in.SchemeID,
 		}})

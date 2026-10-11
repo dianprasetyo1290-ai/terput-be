@@ -76,6 +76,7 @@ func main() {
 		st.Use(common.JWTMiddleware(cfg.JWTSecret))
 
 		st.Get("/me/bills", app.ListMyBills)
+		st.Get("/me/bills/visibility", app.GetMyBillVisibility)
 		st.Get("/me/payments", app.ListMyPayments)
 	})
 
@@ -111,6 +112,8 @@ func main() {
 		ad.Post("/admin/refunds/{id}/process", app.ProcessRefund)
 
 		ad.Get("/admin/finance/summary", app.FinanceSummary)
+		ad.Get("/admin/student-bill-visibility", app.GetStudentBillVisibility)
+		ad.Put("/admin/student-bill-visibility", app.UpdateStudentBillVisibility)
 	})
 
 	// ---------------------------------------------------------------------
@@ -121,6 +124,9 @@ func main() {
 
 		in.Post("/internal/bills/generate", app.InternalGenerateBills)
 		in.Get("/internal/students/{studentUserId}/outstanding", app.InternalStudentOutstanding)
+		in.Get("/internal/students/{studentUserId}/financial-summary", app.InternalStudentFinancialSummary)
+		in.Post("/internal/students/{studentUserId}/exit", app.InternalStudentExit)
+		in.Post("/internal/students/{studentUserId}/refund", app.InternalStudentRefund)
 	})
 
 	log.Printf("billing-service listening on :%s (%s)", cfg.Port, cfg.AppEnv)

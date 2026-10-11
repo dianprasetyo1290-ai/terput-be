@@ -18,8 +18,18 @@ type stubRoster struct {
 	err      error
 }
 
+func (s stubRoster) Configured() bool { return true }
+
 func (s stubRoster) TeacherStudentIDs(_ context.Context, _, teacher string) (map[string]bool, error) {
 	return s.students[teacher], s.err
+}
+
+func (s stubRoster) StudentGradeLevel(_ context.Context, _, _ string) (string, error) {
+	return "", nil
+}
+
+func (s stubRoster) SchoolGradeLevels(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
 }
 
 // A guru may only read bills of students in their own classes; every other

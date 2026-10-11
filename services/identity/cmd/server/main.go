@@ -251,6 +251,7 @@ func main() {
 		in.Post("/internal/students/create-or-link", app.InternalCreateOrLinkStudent)
 		in.Post("/internal/guardian-links", app.InternalCreateGuardianLink)
 		in.Get("/internal/conversions/{conversionRef}", app.InternalConversionMapping)
+		in.Post("/internal/users/{id}/deactivate", app.InternalDeactivateUser)
 	})
 
 	r.Group(func(ir chi.Router) {

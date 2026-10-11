@@ -11,10 +11,17 @@ import (
 type Handler struct {
 	Store    *store.Store
 	Identity *client.IdentityClient
+	Billing  *client.BillingClient
+	Core     *client.CoreClient
 }
 
 func New(s *store.Store, ic *client.IdentityClient) *Handler {
-	return &Handler{Store: s, Identity: ic}
+	return &Handler{
+		Store:    s,
+		Identity: ic,
+		Billing:  client.NewBillingClient(),
+		Core:     client.NewCoreClient(),
+	}
 }
 
 // scopeSchoolID applies the multi-tenancy rule from CONVENTIONS.md: scope to
