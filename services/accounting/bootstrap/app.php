@@ -22,6 +22,10 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
         $middleware->validateCsrfTokens(except: ['sso']);
 
+        $middleware->alias([
+            'internal.key' => \App\Http\Middleware\InternalKey::class,
+        ]);
+
         // Laravel SORTS route middleware by its priority list, and
         // Authenticate sits above SubstituteBindings there -- so appending
         // TenantSchema to the `web` group is not enough: the guard would run

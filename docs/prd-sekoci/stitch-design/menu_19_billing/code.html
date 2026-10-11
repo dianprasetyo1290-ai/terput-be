@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+
+<html lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_dashboard" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={"darkMode":"class","theme":{"extend":{"colors":{"tertiary":"#2c4bb9","surface-dim":"#d2d9f4","inverse-primary":"#b4c5ff","secondary-container":"#d0e1fb","background":"#F8FAFC","tertiary-fixed":"#dde1ff","secondary":"#505f76","on-secondary-fixed-variant":"#38485d","on-primary-fixed-variant":"#003ea8","outline":"#737686","on-secondary-fixed":"#0b1c30","on-tertiary-fixed":"#001453","surface-container-highest":"#dae2fd","primary-container":"#2563eb","surface-container-low":"#f2f3ff","on-primary-fixed":"#00174b","on-tertiary-container":"#eff0ff","surface-container-high":"#e2e7ff","on-secondary":"#ffffff","info":"#0284C7","tertiary-fixed-dim":"#b8c4ff","success":"#16A34A","error-light":"#FEF2F2","warning":"#D97706","on-tertiary-fixed-variant":"#173bab","primary":"#004ac6","surface":"#FFFFFF","surface-container-lowest":"#ffffff","error":"#DC2626","warning-light":"#FFFBEB","primary-fixed":"#dbe1ff","on-background":"#131b2e","on-primary-container":"#eeefff","on-error-container":"#93000a","border":"#E2E8F0","success-light":"#F0FDF4","outline-variant":"#c3c6d7","on-primary":"#ffffff","on-surface":"#131b2e","on-secondary-container":"#54647a","inverse-surface":"#283044","surface-container":"#eaedff","info-light":"#F0F9FF","surface-variant":"#dae2fd","on-tertiary":"#ffffff","surface-bright":"#faf8ff","secondary-fixed-dim":"#b7c8e1","inverse-on-surface":"#eef0ff","muted":"#94A3B8","surface-tint":"#0053db","error-container":"#ffdad6","primary-light":"#EFF6FF","on-surface-variant":"#434655","primary-fixed-dim":"#b4c5ff","secondary-fixed":"#d3e4fe","tertiary-container":"#4865d4","on-error":"#ffffff"},"borderRadius":{"DEFAULT":"0.125rem","lg":"0.25rem","xl":"0.5rem","full":"0.75rem"},"spacing":{"space-2xs":"0.25rem","space-2xl":"2rem","space-lg":"1.25rem","space-sm":"0.75rem","gutter":"1.5rem","space-3xl":"2.5rem","margin":"2rem","margin-mobile":"1rem","space-xs":"0.5rem","space-xl":"1.5rem","space-4xl":"3rem","gutter-mobile":"1rem","space-md":"1rem"},"fontFamily":{"page-title":["Inter"],"label":["Inter"],"body-default":["Inter"],"page-title-mobile":["Inter"],"body-medium":["Inter"],"display-mobile":["Inter"],"section-title":["Inter"],"body-small":["Inter"],"card-title":["Inter"],"display":["Inter"],"caption":["Inter"]},"fontSize":{"page-title":["24px",{"lineHeight":"32px","letterSpacing":"-0.015em","fontWeight":"600"}],"label":["12px",{"lineHeight":"16px","letterSpacing":"0.01em","fontWeight":"500"}],"body-default":["14px",{"lineHeight":"20px","fontWeight":"400"}],"page-title-mobile":["20px",{"lineHeight":"28px","letterSpacing":"-0.01em","fontWeight":"600"}],"body-medium":["14px",{"lineHeight":"20px","fontWeight":"500"}],"display-mobile":["24px",{"lineHeight":"32px","letterSpacing":"-0.015em","fontWeight":"700"}],"section-title":["18px",{"lineHeight":"24px","letterSpacing":"-0.01em","fontWeight":"600"}],"body-small":["13px",{"lineHeight":"18px","fontWeight":"400"}],"card-title":["16px",{"lineHeight":"24px","letterSpacing":"-0.005em","fontWeight":"600"}],"display":["32px",{"lineHeight":"40px","letterSpacing":"-0.02em","fontWeight":"700"}],"caption":["11px",{"lineHeight":"14px","letterSpacing":"0.01em","fontWeight":"400"}]}}}};</script></head><body class="bg-background font-body-default text-body-default text-on-surface antialiased"><aside class="fixed left-0 top-0 h-screen w-72 bg-surface flex flex-col z-50 border-r border-border"><div class="h-16 px-space-lg flex items-center justify-between border-b border-border bg-surface shrink-0"><div class="flex items-center gap-space-sm"><div class="w-8 h-8 rounded-xl bg-primary-container flex items-center justify-center text-on-primary font-section-title text-section-title">S</div><div class="flex flex-col"><span class="font-card-title text-card-title leading-tight text-on-surface font-semibold">SEKOCI</span><span class="font-caption text-caption text-secondary">School Mgmt v2.4.0</span></div></div><span class="px-space-xs py-0.5 rounded-lg bg-success-light text-success font-caption text-caption border border-border">STABLE</span></div><nav class="flex-1 overflow-y-auto px-space-sm py-space-md space-y-space-lg" data-active-classes="bg-primary-light text-primary font-body-medium rounded-lg border-l-2 border-primary"><div class="space-y-space-2xs"><div class="px-space-xs py-space-2xs font-caption text-caption text-secondary uppercase tracking-wider font-semibold">OVERVIEW</div><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="dashboard-beranda" href="#"><span class="material-symbols-outlined text-[18px]">space_dashboard</span><span>Beranda</span></a></div><div class="space-y-space-2xs"><div class="px-space-xs py-space-2xs font-caption text-caption text-secondary uppercase tracking-wider font-semibold">FINANCE & BILLING (PHASE 2)</div><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="finance-dashboard" href="#"><span class="material-symbols-outlined text-[18px]">analytics</span><span>17 Finance Dashboard</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="fee-structure" href="#"><span class="material-symbols-outlined text-[18px]">account_balance_wallet</span><span>18 Struktur Biaya</span></a><a aria-current="page" class="flex items-center gap-space-sm px-space-sm py-1.5 transition-colors bg-primary-light text-primary font-body-medium rounded-lg border-l-2 border-primary" data-path="billing-invoicing" href="#"><span class="material-symbols-outlined text-[18px]">receipt_long</span><span>19 Billing & Penagihan</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="student-receivable-ledger" href="#"><span class="material-symbols-outlined text-[18px]">assignment_ind</span><span>20 Kartu Piutang Siswa</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="payment-allocation" href="#"><span class="material-symbols-outlined text-[18px]">call_split</span><span>21 Alokasi Pembayaran</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="debt-collection" href="#"><span class="material-symbols-outlined text-[18px]">pending_actions</span><span>22 Piutang & Penagihan</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="aging-analysis" href="#"><span class="material-symbols-outlined text-[18px]">history_toggle_off</span><span>23 Analisis Aging</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="scholarships-discounts" href="#"><span class="material-symbols-outlined text-[18px]">loyalty</span><span>24 Beasiswa & Potongan</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="refund-management" href="#"><span class="material-symbols-outlined text-[18px]">currency_exchange</span><span>25 Refund</span></a></div><div class="space-y-space-2xs"><div class="px-space-xs py-space-2xs font-caption text-caption text-secondary uppercase tracking-wider font-semibold">PAYMENT (PHASE 2)</div><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="payment-dashboard" href="#"><span class="material-symbols-outlined text-[18px]">payments</span><span>26 Payment Dashboard</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="transactions-pos" href="#"><span class="material-symbols-outlined text-[18px]">point_of_sale</span><span>29 Transaksi & Kasir</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="settlement" href="#"><span class="material-symbols-outlined text-[18px]">account_balance</span><span>30 Settlement</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="reconciliation" href="#"><span class="material-symbols-outlined text-[18px]">sync_alt</span><span>31 Rekonsiliasi</span></a></div><div class="space-y-space-2xs"><div class="px-space-xs py-space-2xs font-caption text-caption text-secondary uppercase tracking-wider font-semibold">PLATFORM FOUNDATION</div><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="organization-unit" href="#"><span class="material-symbols-outlined text-[18px]">corporate_fare</span><span>01 Org & Unit</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="academic-year" href="#"><span class="material-symbols-outlined text-[18px]">calendar_month</span><span>02 Academic Year</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="master-data" href="#"><span class="material-symbols-outlined text-[18px]">database</span><span>03 Master Data</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="import-migration" href="#"><span class="material-symbols-outlined text-[18px]">upload_file</span><span>04 Import & Migration</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="user-access" href="#"><span class="material-symbols-outlined text-[18px]">admin_panel_settings</span><span>05 User & Access</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="audit-trail" href="#"><span class="material-symbols-outlined text-[18px]">manage_search</span><span>06 Audit Trail</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="notifications" href="#"><span class="material-symbols-outlined text-[18px]">notifications_active</span><span>07 Notifications</span></a></div><div class="space-y-space-2xs"><div class="px-space-xs py-space-2xs font-caption text-caption text-secondary uppercase tracking-wider font-semibold">PPDB (ADMISSION)</div><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="ppdb-dashboard" href="#"><span class="material-symbols-outlined text-[18px]">group_add</span><span>08 PPDB Dashboard</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="ppdb-configuration" href="#"><span class="material-symbols-outlined text-[18px]">tune</span><span>09 Konfigurasi PPDB</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="applicant-data" href="#"><span class="material-symbols-outlined text-[18px]">how_to_reg</span><span>10 Data Pendaftar</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="document-verification" href="#"><span class="material-symbols-outlined text-[18px]">fact_check</span><span>12 Verifikasi Berkas</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="selection-announcement" href="#"><span class="material-symbols-outlined text-[18px]">campaign</span><span>13/14 Seleksi & Pengumuman</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="re-enrollment" href="#"><span class="material-symbols-outlined text-[18px]">task_alt</span><span>15 Daftar Ulang</span></a></div><div class="space-y-space-2xs"><div class="px-space-xs py-space-2xs font-caption text-caption text-secondary uppercase tracking-wider font-semibold">CORE EXTENSIONS</div><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="approval-center" href="#"><span class="material-symbols-outlined text-[18px]">approval</span><span>79 Approval Center</span></a><a class="flex items-center gap-space-sm px-space-sm py-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface transition-colors font-body-default text-body-default" data-path="exception-queue" href="#"><span class="material-symbols-outlined text-[18px]">rule_folder</span><span>80 Exception Queue</span></a></div></nav><div class="p-space-sm border-t border-border shrink-0 bg-surface-container-lowest"><div class="flex items-center gap-space-sm p-space-xs rounded-lg hover:bg-surface-container-low cursor-pointer"><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center shrink-0"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div><div class="flex flex-col min-w-0 flex-1"><span class="font-body-small text-body-small font-semibold text-on-surface truncate">David Pambudi</span><span class="font-caption text-caption text-secondary truncate">Finance Manager</span></div><span class="material-symbols-outlined text-muted text-[18px]">unfold_more</span></div></div></aside><div class="pl-72 flex flex-col min-h-screen"><header class="fixed top-0 left-72 right-0 h-16 bg-surface z-40 border-b border-border flex items-center justify-between px-space-xl"><div class="flex items-center gap-space-sm"><div class="flex items-center gap-space-2xs text-on-surface"><div class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border bg-surface-bright text-body-small font-body-small cursor-pointer hover:bg-surface-container-low transition-colors"><span class="material-symbols-outlined text-primary text-[16px]">domain</span><span class="font-medium">Yayasan Pendidikan Nusantara</span><span class="material-symbols-outlined text-muted text-[14px]">expand_more</span></div><span class="text-border font-caption">/</span><div class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border bg-surface-bright text-body-small font-body-small cursor-pointer hover:bg-surface-container-low transition-colors"><span class="material-symbols-outlined text-info text-[16px]">school</span><span class="font-medium">Unit SMP Nusantara</span><span class="material-symbols-outlined text-muted text-[14px]">expand_more</span></div><span class="text-border font-caption">/</span><div class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-primary-light border border-secondary-container text-body-small font-body-small cursor-pointer text-primary font-medium"><span class="material-symbols-outlined text-[16px]">event_available</span><span>2026/2027 Ganjil</span><span class="material-symbols-outlined text-[14px]">expand_more</span></div></div></div><div class="flex items-center gap-space-md"><div class="flex items-center gap-space-xs px-space-sm py-1.5 w-64 rounded-xl border border-border bg-background text-body-small font-body-small text-secondary"><span class="material-symbols-outlined text-[18px] text-muted">search</span><span class="flex-1">Search records...</span><kbd class="px-1.5 py-0.5 rounded bg-surface border border-border font-caption text-caption text-muted">Ctrl+K</kbd></div><div class="h-6 w-px bg-border"></div><button class="relative p-1.5 rounded-lg text-secondary hover:text-on-surface hover:bg-surface-container-low transition-colors"><span class="material-symbols-outlined text-[20px]">notifications</span><span class="absolute top-1 right-1 w-2 h-2 rounded-full bg-error ring-2 ring-surface"></span></button><div class="flex items-center gap-space-xs pl-space-xs"><div class="text-right hidden xl:block"><div class="font-body-small text-body-small font-medium text-on-surface leading-tight">David Pambudi</div><div class="font-caption text-caption text-secondary">Finance Admin / Manager</div></div><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></header><main class="relative pt-16 bg-background flex-1 w-full px-space-xl py-space-xl"><div class="flex flex-col w-full space-y-space-xl">
+<!-- Top Banner & Header -->
+<div class="flex flex-col lg:flex-row lg:items-center justify-between gap-space-md">
+<div class="space-y-space-2xs">
+<div class="flex flex-wrap items-center gap-space-xs">
+<span class="px-space-xs py-0.5 rounded-lg bg-surface-container-high text-primary font-caption text-caption font-semibold">
+          FR-19-001 s.d. FR-19-006 • BR-FIN-01 Invoice Status Life-cycle
+        </span>
+<span class="px-space-xs py-0.5 rounded-lg bg-success-light text-success font-caption text-caption font-semibold flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px]">verified</span> BR-PPDB-05 Synchronized
+        </span>
+</div>
+<h1 class="font-page-title text-page-title text-on-surface tracking-tight">Penerbitan & Manajemen Tagihan (Billing)</h1>
+<p class="font-body-default text-body-default text-secondary max-w-4xl">
+        Eksekusi billing massal berkala, pembuatan tagihan tahunan siswa baru terkonversi, manajemen termin cicilan, dan monitoring status invoice.
+      </p>
+</div>
+<div class="flex items-center gap-space-sm shrink-0">
+<button class="flex items-center gap-space-xs px-space-md py-2 rounded-xl bg-surface text-on-surface shadow-sm hover:bg-surface-container-low transition-colors font-body-small text-body-small font-medium">
+<span class="material-symbols-outlined text-[18px] text-secondary">table_view</span>
+<span>Ekspor Rekap Tagihan (.XLSX)</span>
+</button>
+<button class="flex items-center gap-space-xs px-space-md py-2 rounded-xl bg-primary text-on-primary shadow-sm hover:bg-tertiary transition-colors font-body-small text-body-small font-semibold" onclick="document.getElementById('batchModal').classList.toggle('hidden')">
+<span class="material-symbols-outlined text-[18px]">bolt</span>
+<span>Generate Billing Massal Baru</span>
+</button>
+</div>
+</div>
+<!-- KPI Metrik Overview -->
+<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-space-md">
+<!-- Card 1 -->
+<div class="p-space-lg rounded-xl bg-surface shadow-sm relative overflow-hidden group">
+<div class="flex items-start justify-between">
+<div class="space-y-space-2xs">
+<span class="font-caption text-caption uppercase text-secondary font-semibold tracking-wider">Total Diterbitkan (Bulan Ini)</span>
+<div class="font-display text-display text-on-surface">360 <span class="font-section-title text-section-title text-secondary">Inv</span></div>
+</div>
+<div class="w-10 h-10 rounded-xl bg-surface-container flex items-center justify-center text-primary shrink-0">
+<span class="material-symbols-outlined text-[22px]">receipt_long</span>
+</div>
+</div>
+<div class="mt-space-md pt-space-xs flex items-center justify-between">
+<div class="flex items-center gap-1 font-body-small text-body-small text-secondary font-medium">
+<span class="material-symbols-outlined text-[16px] text-info">calendar_month</span>
+<span>Rp 234.000.000 SPP Nov</span>
+</div>
+<span class="px-space-xs py-0.5 rounded-lg bg-surface-container-low text-secondary font-caption text-caption font-semibold">100% Target</span>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="p-space-lg rounded-xl bg-surface shadow-sm relative overflow-hidden group">
+<div class="flex items-start justify-between">
+<div class="space-y-space-2xs">
+<span class="font-caption text-caption uppercase text-secondary font-semibold tracking-wider">Status Lunas (Paid)</span>
+<div class="font-display text-display text-success">274 <span class="font-card-title text-card-title text-success font-semibold">(76.1%)</span></div>
+</div>
+<div class="w-10 h-10 rounded-xl bg-success-light flex items-center justify-center text-success shrink-0">
+<span class="material-symbols-outlined text-[22px]">task_alt</span>
+</div>
+</div>
+<div class="mt-space-md pt-space-xs flex items-center justify-between">
+<div class="flex items-center gap-1 font-body-small text-body-small text-success font-medium">
+<span class="material-symbols-outlined text-[16px]">point_of_sale</span>
+<span>Rp 178.100.000 Terbayar</span>
+</div>
+<span class="font-caption text-caption text-secondary">VA & QRIS</span>
+</div>
+</div>
+<!-- Card 3 -->
+<div class="p-space-lg rounded-xl bg-surface shadow-sm relative overflow-hidden group">
+<div class="flex items-start justify-between">
+<div class="space-y-space-2xs">
+<span class="font-caption text-caption uppercase text-secondary font-semibold tracking-wider">Bayar Sebagian (Partial)</span>
+<div class="font-display text-display text-warning">38 <span class="font-card-title text-card-title text-warning font-semibold">(10.5%)</span></div>
+</div>
+<div class="w-10 h-10 rounded-xl bg-warning-light flex items-center justify-center text-warning shrink-0">
+<span class="material-symbols-outlined text-[22px]">pie_chart</span>
+</div>
+</div>
+<div class="mt-space-md pt-space-xs flex items-center justify-between">
+<div class="flex items-center gap-1 font-body-small text-body-small text-warning font-medium">
+<span class="material-symbols-outlined text-[16px]">call_split</span>
+<span>Rp 14.500.000 Masuk</span>
+</div>
+<span class="font-caption text-caption text-secondary">Cicilan Termin</span>
+</div>
+</div>
+<!-- Card 4 -->
+<div class="p-space-lg rounded-xl bg-surface shadow-sm relative overflow-hidden group">
+<div class="flex items-start justify-between">
+<div class="space-y-space-2xs">
+<span class="font-caption text-caption uppercase text-secondary font-semibold tracking-wider">Belum Bayar & Overdue</span>
+<div class="font-display text-display text-error">48 <span class="font-card-title text-card-title text-error font-semibold">(13.4%)</span></div>
+</div>
+<div class="w-10 h-10 rounded-xl bg-error-light flex items-center justify-center text-error shrink-0">
+<span class="material-symbols-outlined text-[22px]">pending_actions</span>
+</div>
+</div>
+<div class="mt-space-md pt-space-xs flex items-center justify-between">
+<div class="flex items-center gap-1 font-body-small text-body-small text-error font-medium">
+<span class="material-symbols-outlined text-[16px]">error</span>
+<span>Rp 41.400.000 Tertunggak</span>
+</div>
+<span class="px-space-xs py-0.5 rounded-lg bg-error-light text-error font-caption text-caption font-semibold">18 Overdue</span>
+</div>
+</div>
+</div>
+<!-- PPDB Auto-Conversion Banner (FR-19-001 & BR-PPDB-05) -->
+<div class="p-space-lg rounded-xl bg-surface-container-low shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-space-md relative overflow-hidden">
+<div class="flex items-start gap-space-md">
+<div class="w-12 h-12 rounded-xl bg-primary flex items-center justify-center text-on-primary shrink-0 shadow-sm">
+<span class="material-symbols-outlined text-[26px]">how_to_reg</span>
+</div>
+<div class="space-y-space-2xs">
+<div class="flex items-center gap-space-xs">
+<span class="font-card-title text-card-title text-on-surface font-semibold">Penerbitan Billing Otomatis Siswa Baru (PPDB Konversi Menu 15)</span>
+<span class="px-space-xs py-0.5 rounded-lg bg-primary-light text-primary font-caption text-caption font-bold">READY QUEUE</span>
+</div>
+<p class="font-body-small text-body-small text-secondary max-w-3xl leading-relaxed">
+          Terdapat <span class="font-body-medium text-body-medium text-on-surface font-semibold">188 Siswa Baru SMP</span> dari gelombang reguler & prestasi yang telah menyelesaikan daftar ulang. Siap diterbitkan billing tahunan 12 bulan SPP + Uang Sarpras dan skema termin otomatis.
+        </p>
+</div>
+</div>
+<div class="flex items-center gap-space-sm shrink-0 self-end md:self-center">
+<button class="px-space-md py-2 rounded-xl bg-surface text-secondary hover:text-on-surface font-body-small text-body-small font-medium transition-colors">
+        Tinjau Matriks (188 Siswa)
+      </button>
+<button class="flex items-center gap-space-xs px-space-md py-2 rounded-xl bg-primary text-on-primary shadow-sm hover:bg-tertiary transition-colors font-body-small text-body-small font-semibold">
+<span class="material-symbols-outlined text-[18px]">publish</span>
+<span>Jalankan Billing Tahunan Massal (FR-19-001)</span>
+</button>
+</div>
+</div>
+<!-- Filter & Data Controls Toolbar -->
+<div class="p-space-md rounded-xl bg-surface shadow-sm space-y-space-md">
+<div class="grid grid-cols-1 md:grid-cols-12 gap-space-sm items-center">
+<!-- Search Input -->
+<div class="md:col-span-4 relative">
+<span class="material-symbols-outlined absolute left-3 top-2.5 text-muted text-[18px]">search</span>
+<input class="w-full h-9 pl-9 pr-14 rounded-xl bg-background text-on-surface placeholder-muted font-body-default text-body-default focus:bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all" placeholder="Cari No Invoice, NIS, Nama Siswa..." type="text"/>
+<kbd class="absolute right-2.5 top-2 px-1.5 py-0.5 rounded bg-surface shadow-sm font-caption text-caption text-muted">Ctrl+K</kbd>
+</div>
+<!-- Filter Tingkat Kelas -->
+<div class="md:col-span-2">
+<select class="w-full h-9 px-3 rounded-xl bg-background text-on-surface font-body-small text-body-small focus:bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer">
+<option selected="">Semua Kelas (7A-7D, 8, 9)</option>
+<option>Kelas 7A (Bilingual)</option>
+<option>Kelas 7B (Reguler)</option>
+<option>Kelas 7C (Reguler)</option>
+<option>Kelas 7D (Reguler)</option>
+<option>Kelas 8 (Reguler & Unggulan)</option>
+<option>Kelas 9 (Persiapan Akhir)</option>
+</select>
+</div>
+<!-- Filter Status Tagihan -->
+<div class="md:col-span-2">
+<select class="w-full h-9 px-3 rounded-xl bg-background text-on-surface font-body-small text-body-small focus:bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer">
+<option selected="">Semua Status Tagihan</option>
+<option>Lunas (Paid)</option>
+<option>Bayar Sebagian (Partial)</option>
+<option>Belum Bayar (Unpaid)</option>
+<option>Lewat Jatuh Tempo (Overdue)</option>
+<option>Dibatalkan (Void / Canceled)</option>
+</select>
+</div>
+<!-- Filter Jenis Biaya -->
+<div class="md:col-span-2">
+<select class="w-full h-9 px-3 rounded-xl bg-background text-on-surface font-body-small text-body-small focus:bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer">
+<option selected="">Semua Jenis Biaya</option>
+<option>SPP Bulanan</option>
+<option>Uang Masuk / Gedung</option>
+<option>Kegiatan & Ujian</option>
+<option>Seragam & Buku</option>
+</select>
+</div>
+<!-- Filter Jatuh Tempo & Refresh -->
+<div class="md:col-span-2 flex items-center gap-space-xs">
+<div class="relative flex-1">
+<input class="w-full h-9 px-3 rounded-xl bg-background text-on-surface font-body-small text-body-small focus:bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer text-center" type="text" value="10 Nov 2026"/>
+</div>
+<button class="w-9 h-9 rounded-xl bg-surface-container-low hover:bg-surface-container flex items-center justify-center text-secondary hover:text-on-surface transition-colors shrink-0" title="Reset Filters">
+<span class="material-symbols-outlined text-[18px]">filter_alt_off</span>
+</button>
+</div>
+</div>
+<!-- Active Filter Badges Bar -->
+<div class="flex flex-wrap items-center justify-between gap-space-xs pt-space-xs text-secondary font-caption text-caption">
+<div class="flex items-center gap-space-xs flex-wrap">
+<span>Filter Aktif:</span>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-surface-container text-on-surface font-medium">
+          Tahun Ajaran: 2026/2027 Ganjil
+          <span class="material-symbols-outlined text-[12px] cursor-pointer">close</span>
+</span>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-surface-container text-on-surface font-medium">
+          Bulan: November 2026
+          <span class="material-symbols-outlined text-[12px] cursor-pointer">close</span>
+</span>
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-surface-container text-on-surface font-medium">
+          Unit: SMP Nusantara
+          <span class="material-symbols-outlined text-[12px] cursor-pointer">close</span>
+</span>
+</div>
+<div class="flex items-center gap-space-xs font-body-small text-body-small">
+<span>Menampilkan <strong class="text-on-surface font-semibold">6</strong> dari <strong class="text-on-surface font-semibold">360</strong> data tagihan</span>
+</div>
+</div>
+</div>
+<!-- Master Data Table Invoice -->
+<div class="rounded-xl bg-surface shadow-sm overflow-hidden flex flex-col">
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-background text-secondary font-caption text-caption uppercase tracking-wider font-semibold h-11 select-none">
+<th class="w-10 pl-space-md pr-space-xs py-2 text-center">
+<input class="w-4 h-4 rounded text-primary focus:ring-0 cursor-pointer" id="selectAll" type="checkbox"/>
+</th>
+<th class="px-space-sm py-2">No Invoice</th>
+<th class="px-space-sm py-2">Siswa & NIS</th>
+<th class="px-space-sm py-2">Kelas</th>
+<th class="px-space-sm py-2">Komponen Biaya</th>
+<th class="px-space-sm py-2">Termin / Bulan</th>
+<th class="px-space-sm py-2 text-right">Total Tagihan</th>
+<th class="px-space-sm py-2 text-right">Terbayar</th>
+<th class="px-space-sm py-2 text-right">Sisa Tagihan</th>
+<th class="px-space-sm py-2">Jatuh Tempo</th>
+<th class="px-space-sm py-2 text-center">Status</th>
+<th class="pr-space-md pl-space-sm py-2 text-center">Aksi</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-surface-container font-body-small text-body-small text-on-surface">
+<!-- Row 1: Raditya Santoso (Lunas) -->
+<tr class="hover:bg-background/80 transition-colors">
+<td class="pl-space-md pr-space-xs py-3 text-center">
+<input class="row-checkbox w-4 h-4 rounded text-primary focus:ring-0 cursor-pointer" type="checkbox"/>
+</td>
+<td class="px-space-sm py-3 font-medium">
+<div class="flex items-center gap-1 font-body-medium text-body-medium text-primary cursor-pointer hover:underline">
+<span class="material-symbols-outlined text-[16px]">receipt</span>
+<span>INV-2026-11-001</span>
+</div>
+<span class="font-caption text-caption text-muted">01 Nov 2026, 08:30</span>
+</td>
+<td class="px-space-sm py-3">
+<div class="font-body-medium text-body-medium font-semibold text-on-surface">Raditya Santoso</div>
+<span class="font-caption text-caption text-secondary">NIS 2627-07-043</span>
+</td>
+<td class="px-space-sm py-3">
+<span class="px-2 py-0.5 rounded-lg bg-surface-container text-on-surface font-caption text-caption font-medium">7A (Bilingual)</span>
+</td>
+<td class="px-space-sm py-3">
+<div class="font-medium">SPP November 2026</div>
+<span class="font-caption text-caption text-secondary">Biaya Pendidikan Rutin</span>
+</td>
+<td class="px-space-sm py-3 text-secondary">
+<span class="px-2 py-0.5 rounded bg-surface-container-low font-caption text-caption">Termin 1 (Bulanan)</span>
+</td>
+<td class="px-space-sm py-3 text-right font-medium text-on-surface">Rp 850.000</td>
+<td class="px-space-sm py-3 text-right font-medium text-success">Rp 850.000</td>
+<td class="px-space-sm py-3 text-right font-medium text-secondary">Rp 0</td>
+<td class="px-space-sm py-3 text-secondary">10 Nov 2026</td>
+<td class="px-space-sm py-3 text-center">
+<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-success-light text-success font-caption text-caption font-semibold">
+<span class="w-1.5 h-1.5 rounded-full bg-success"></span>
+<span>Lunas (VA Mandiri)</span>
+</span>
+</td>
+<td class="pr-space-md pl-space-sm py-3 text-center">
+<div class="flex items-center justify-center gap-1">
+<button class="p-1 rounded-lg hover:bg-surface-container text-secondary hover:text-primary transition-colors" title="Unduh PDF">
+<span class="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+</button>
+<button class="p-1 rounded-lg hover:bg-surface-container text-secondary hover:text-on-surface transition-colors" title="Detail Invoice">
+<span class="material-symbols-outlined text-[18px]">open_in_new</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 2: Raditya Santoso (Uang Masuk Termin 2 - Belum Bayar) -->
+<tr class="hover:bg-background/80 transition-colors">
+<td class="pl-space-md pr-space-xs py-3 text-center">
+<input class="row-checkbox w-4 h-4 rounded text-primary focus:ring-0 cursor-pointer" type="checkbox"/>
+</td>
+<td class="px-space-sm py-3 font-medium">
+<div class="flex items-center gap-1 font-body-medium text-body-medium text-primary cursor-pointer hover:underline">
+<span class="material-symbols-outlined text-[16px]">receipt</span>
+<span>INV-2026-11-002</span>
+</div>
+<span class="font-caption text-caption text-muted">01 Nov 2026, 08:30</span>
+</td>
+<td class="px-space-sm py-3">
+<div class="font-body-medium text-body-medium font-semibold text-on-surface">Raditya Santoso</div>
+<span class="font-caption text-caption text-secondary">NIS 2627-07-043</span>
+</td>
+<td class="px-space-sm py-3">
+<span class="px-2 py-0.5 rounded-lg bg-surface-container text-on-surface font-caption text-caption font-medium">7A (Bilingual)</span>
+</td>
+<td class="px-space-sm py-3">
+<div class="font-medium">Uang Masuk Termin 2 (50%)</div>
+<span class="font-caption text-caption text-secondary">Sarpras & Pengembangan</span>
+</td>
+<td class="px-space-sm py-3 text-secondary">
+<span class="px-2 py-0.5 rounded bg-surface-container-low font-caption text-caption">Termin 2 / 2</span>
+</td>
+<td class="px-space-sm py-3 text-right font-medium text-on-surface">Rp 4.500.000</td>
+<td class="px-space-sm py-3 text-right font-medium text-secondary">Rp 0</td>
+<td class="px-space-sm py-3 text-right font-medium text-error">Rp 4.500.000</td>
+<td class="px-space-sm py-3 text-secondary">10 Jan 2027</td>
+<td class="px-space-sm py-3 text-center">
+<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-surface-container-high text-secondary font-caption text-caption font-semibold">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+<span>Belum Bayar</span>
+</span>
+</td>
+<td class="pr-space-md pl-space-sm py-3 text-center">
+<div class="flex items-center justify-center gap-1">
+<button class="p-1 rounded-lg hover:bg-surface-container text-secondary hover:text-primary transition-colors" title="Unduh PDF">
+<span class="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+</button>
+<button class="p-1 rounded-lg hover:bg-surface-container text-secondary hover:text-on-surface transition-colors" title="Detail Invoice">
+<span class="material-symbols-outlined text-[18px]">open_in_new</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 3: Nabila Rahma (Lunas VA BCA) -->
+<tr class="hover:bg-background/80 transition-colors">
+<td class="pl-space-md pr-space-xs py-3 text-center">
+<input class="row-checkbox w-4 h-4 rounded text-primary focus:ring-0 cursor-pointer" type="checkbox"/>
+</td>
+<td class="px-space-sm py-3 font-medium">
+<div class="flex items-center gap-1 font-body-medium text-body-medium text-primary cursor-pointer hover:underline">
+<span class="material-symbols-outlined text-[16px]">receipt</span>
+<span>INV-2026-11-003</span>
+</div>
+<span class="font-caption text-caption text-muted">01 Nov 2026, 08:35</span>
+</td>
+<td class="px-space-sm py-3">
+<div class="font-body-medium text-body-medium font-semibold text-on-surface">Nabila Rahma</div>
+<span class="font-caption text-caption text-secondary">NIS 2627-07-002</span>
+</td>
+<td class="px-space-sm py-3">
+<span class="px-2 py-0.5 rounded-lg bg-surface-container text-on-surface font-caption text-caption font-medium">7B (Reguler)</span>
+</td>
+<td class="px-space-sm py-3">
+<div class="font-medium">SPP November 2026</div>
+<span class="font-caption text-caption text-secondary">Biaya Pendidikan Rutin</span>
+</td>
+<td class="px-space-sm py-3 text-secondary">
+<span class="px-2 py-0.5 rounded bg-surface-container-low font-caption text-caption">Termin 1 (Bulanan)</span>
+</td>
+<td class="px-space-sm py-3 text-right font-medium text-on-surface">Rp 650.000</td>
+<td class="px-space-sm py-3 text-right font-medium text-success">Rp 650.000</td>
+<td class="px-space-sm py-3 text-right font-medium text-secondary">Rp 0</td>
+<td class="px-space-sm py-3 text-secondary">10 Nov 2026</td>
+<td class="px-space-sm py-3 text-center">
+<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-success-light text-success font-caption text-caption font-semibold">
+<span class="w-1.5 h-1.5 rounded-full bg-success"></span>
+<span>Lunas (VA BCA)</span>
+</span>
+</td>
+<td class="pr-space-md pl-space-sm py-3 text-center">
+<div class="flex items-center justify-center gap-1">
+<button class="p-1 rounded-lg hover:bg-surface-container text-secondary hover:text-primary transition-colors" title="Unduh PDF">
+<span class="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+</button>
+<button class="p-1 rounded-lg hover:bg-surface-container text-secondary hover:text-on-surface transition-colors" title="Detail Invoice">
+<span class="material-symbols-outlined text-[18px]">open_in_new</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 4: Fajar Maulana (Bayar Sebagian - Kasir) -->
+<tr class="hover:bg-background/80 transition-colors bg-warning-light/10">
+<td class="pl-space-md pr-space-xs py-3 text-center">
+<input checked="" class="row-checkbox w-4 h-4 rounded text-primary focus:ring-0 cursor-pointer" type="checkbox"/>
+</td>
+<td class="px-space-sm py-3 font-medium">
+<div class="flex items-center gap-1 font-body-medium text-body-medium text-primary cursor-pointer hover:underline">
+<span class="material-symbols-outlined text-[16px]">receipt</span>
+<span>INV-2026-11-004</span>
+</div>
+<span class="font-caption text-caption text-muted">01 Nov 2026, 08:35</span>
+</td>
+<td class="px-space-sm py-3">
+<div class="font-body-medium text-body-medium font-semibold text-on-surface">Fajar Maulana</div>
+<span class="font-caption text-caption text-secondary">NIS 2627-07-015</span>
+</td>
+<td class="px-space-sm py-3">
+<span class="px-2 py-0.5 rounded-lg bg-surface-container text-on-surface font-caption text-caption font-medium">7B (Reguler)</span>
+</td>
+<td class="px-space-sm py-3">
+<div class="font-medium">SPP November 2026</div>
+<span class="font-caption text-caption text-secondary">Biaya Pendidikan Rutin</span>
+</td>
+<td class="px-space-sm py-3 text-secondary">
+<span class="px-2 py-0.5 rounded bg-surface-container-low font-caption text-caption">Termin 1 (Bulanan)</span>
+</td>
+<td class="px-space-sm py-3 text-right font-medium text-on-surface">Rp 650.000</td>
+<td class="px-space-sm py-3 text-right font-medium text-warning">Rp 300.000</td>
+<td class="px-space-sm py-3 text-right font-medium text-error">Rp 350.000</td>
+<td class="px-space-sm py-3 text-secondary">10 Nov 2026</td>
+<td class="px-space-sm py-3 text-center">
+<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-warning-light text-warning font-caption text-caption font-semibold">
+<span class="w-1.5 h-1.5 rounded-full bg-warning"></span>
+<span>Sebagian (Tunai Kasir)</span>
+</span>
+</td>
+<td class="pr-space-md pl-space-sm py-3 text-center">
+<div class="flex items-center justify-center gap-1">
+<button class="p-1 rounded-lg hover:bg-surface-container text-secondary hover:text-primary transition-colors" title="Unduh PDF">
+<span class="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+</button>
+<button class="p-1 rounded-lg hover:bg-surface-container text-secondary hover:text-on-surface transition-colors" title="Detail Invoice">
+<span class="material-symbols-outlined text-[18px]">open_in_new</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 5: Dimas Irawan (Overdue) -->
+<tr class="hover:bg-background/80 transition-colors bg-error-light/10">
+<td class="pl-space-md pr-space-xs py-3 text-center">
+<input class="row-checkbox w-4 h-4 rounded text-primary focus:ring-0 cursor-pointer" type="checkbox"/>
+</td>
+<td class="px-space-sm py-3 font-medium">
+<div class="flex items-center gap-1 font-body-medium text-body-medium text-primary cursor-pointer hover:underline">
+<span class="material-symbols-outlined text-[16px]">receipt</span>
+<span>INV-2026-10-089</span>
+</div>
+<span class="font-caption text-caption text-muted">01 Okt 2026, 09:00</span>
+</td>
+<td class="px-space-sm py-3">
+<div class="font-body-medium text-body-medium font-semibold text-on-surface">Dimas Irawan</div>
+<span class="font-caption text-caption text-secondary">NIS 2526-08-012</span>
+</td>
+<td class="px-space-sm py-3">
+<span class="px-2 py-0.5 rounded-lg bg-surface-container text-on-surface font-caption text-caption font-medium">8A (Reguler)</span>
+</td>
+<td class="px-space-sm py-3">
+<div class="font-medium">SPP Oktober 2026</div>
+<span class="font-caption text-caption text-secondary">Tunggakan Bulan Lalu</span>
+</td>
+<td class="px-space-sm py-3 text-secondary">
+<span class="px-2 py-0.5 rounded bg-surface-container-low font-caption text-caption">Termin 1 (Bulanan)</span>
+</td>
+<td class="px-space-sm py-3 text-right font-medium text-on-surface">Rp 600.000</td>
+<td class="px-space-sm py-3 text-right font-medium text-secondary">Rp 0</td>
+<td class="px-space-sm py-3 text-right font-medium text-error">Rp 600.000</td>
+<td class="px-space-sm py-3 text-error font-medium">10 Okt 2026</td>
+<td class="px-space-sm py-3 text-center">
+<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-error-light text-error font-caption text-caption font-semibold">
+<span class="w-1.5 h-1.5 rounded-full bg-error"></span>
+<span>Lewat Jatuh Tempo</span>
+</span>
+</td>
+<td class="pr-space-md pl-space-sm py-3 text-center">
+<div class="flex items-center justify-center gap-1">
+<button class="p-1 rounded-lg hover:bg-surface-container text-secondary hover:text-warning transition-colors" title="Kirim Pengingat WA">
+<span class="material-symbols-outlined text-[18px]">forward_to_inbox</span>
+</button>
+<button class="p-1 rounded-lg hover:bg-surface-container text-secondary hover:text-on-surface transition-colors" title="Detail Invoice">
+<span class="material-symbols-outlined text-[18px]">open_in_new</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 6: Kirana Anindya (Dibatalkan) -->
+<tr class="hover:bg-background/80 transition-colors opacity-75">
+<td class="pl-space-md pr-space-xs py-3 text-center">
+<input class="w-4 h-4 rounded text-muted cursor-not-allowed opacity-50" disabled="" type="checkbox"/>
+</td>
+<td class="px-space-sm py-3 font-medium">
+<div class="flex items-center gap-1 font-body-medium text-body-medium text-secondary line-through">
+<span class="material-symbols-outlined text-[16px]">receipt</span>
+<span>INV-2026-11-044</span>
+</div>
+<span class="font-caption text-caption text-muted">01 Nov 2026, 09:12</span>
+</td>
+<td class="px-space-sm py-3">
+<div class="font-body-medium text-body-medium font-semibold text-on-surface">Kirana Anindya</div>
+<span class="font-caption text-caption text-secondary">NIS 2627-07-088</span>
+</td>
+<td class="px-space-sm py-3">
+<span class="px-2 py-0.5 rounded-lg bg-surface-container text-on-surface font-caption text-caption font-medium">7C (Reguler)</span>
+</td>
+<td class="px-space-sm py-3">
+<div class="font-medium text-secondary line-through">Salah Terbit Komponen</div>
+<span class="font-caption text-caption text-muted">Koreksi Akuntansi</span>
+</td>
+<td class="px-space-sm py-3 text-secondary">
+<span class="px-2 py-0.5 rounded bg-surface-container-low font-caption text-caption">-</span>
+</td>
+<td class="px-space-sm py-3 text-right font-medium text-secondary line-through">Rp 500.000</td>
+<td class="px-space-sm py-3 text-right font-medium text-secondary">Rp 0</td>
+<td class="px-space-sm py-3 text-right font-medium text-secondary">Rp 0</td>
+<td class="px-space-sm py-3 text-secondary">10 Nov 2026</td>
+<td class="px-space-sm py-3 text-center">
+<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-surface-container text-secondary font-caption text-caption font-semibold">
+<span class="material-symbols-outlined text-[13px]">block</span>
+<span>Dibatalkan (AC-19-04)</span>
+</span>
+</td>
+<td class="pr-space-md pl-space-sm py-3 text-center">
+<div class="flex items-center justify-center gap-1">
+<button class="p-1 rounded-lg hover:bg-surface-container text-secondary hover:text-on-surface transition-colors" title="Detail Log Pembatalan">
+<span class="material-symbols-outlined text-[18px]">history</span>
+</button>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Bulk Action & Pagination Footer -->
+<div class="p-space-md bg-surface-container-low flex flex-col sm:flex-row items-center justify-between gap-space-md">
+<!-- Bulk Selected Actions -->
+<div class="flex items-center gap-space-sm flex-wrap w-full sm:w-auto">
+<span class="font-body-small text-body-small text-secondary font-medium">
+<strong class="text-primary font-bold">1</strong> invoice terpilih
+        </span>
+<div class="h-4 w-px bg-surface-container-highest hidden sm:block"></div>
+<button class="flex items-center gap-1 px-space-sm py-1.5 rounded-xl bg-surface hover:bg-surface-container text-on-surface font-body-small text-body-small font-medium shadow-sm transition-colors">
+<span class="material-symbols-outlined text-[16px] text-success">send</span>
+<span>Kirim Notifikasi WA/Email (FR-19-005)</span>
+</button>
+<button class="flex items-center gap-1 px-space-sm py-1.5 rounded-xl bg-surface hover:bg-error-light text-error font-body-small text-body-small font-medium shadow-sm transition-colors">
+<span class="material-symbols-outlined text-[16px]">cancel</span>
+<span>Ajukan Pembatalan (Menu 79)</span>
+</button>
+</div>
+<!-- Pagination -->
+<div class="flex items-center gap-space-xs shrink-0 self-end sm:self-auto font-body-small text-body-small text-secondary">
+<span>Baris per halaman:</span>
+<select class="h-8 px-2 rounded-lg bg-surface text-on-surface font-body-small text-body-small border-0 shadow-sm focus:ring-0">
+<option>10</option>
+<option>25</option>
+<option>50</option>
+</select>
+<span class="ml-2">1 - 6 dari 360</span>
+<div class="flex items-center gap-1 ml-2">
+<button class="w-8 h-8 rounded-lg bg-surface shadow-sm flex items-center justify-center text-secondary hover:text-on-surface transition-colors disabled:opacity-50" disabled="">
+<span class="material-symbols-outlined text-[18px]">chevron_left</span>
+</button>
+<button class="w-8 h-8 rounded-lg bg-surface shadow-sm flex items-center justify-center text-secondary hover:text-on-surface transition-colors">
+<span class="material-symbols-outlined text-[18px]">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Batch Generator Modal (FR-19-001, FR-19-002, AC-19-01, AC-19-03) -->
+<div class="hidden fixed inset-0 z-50 flex items-center justify-center p-space-md bg-on-surface/40 backdrop-blur-sm" id="batchModal">
+<div class="bg-surface rounded-xl shadow-xl max-w-2xl w-full p-space-xl space-y-space-lg relative animate-in fade-in zoom-in-95 duration-200">
+<div class="flex items-start justify-between">
+<div class="space-y-space-2xs">
+<span class="px-space-xs py-0.5 rounded-lg bg-primary-light text-primary font-caption text-caption font-semibold">
+            FR-19-001 • GENERATE BILLING MASSAL
+          </span>
+<h2 class="font-section-title text-section-title text-on-surface font-semibold">Buat Tagihan Massal Baru (Periode / Termin)</h2>
+<p class="font-body-small text-body-small text-secondary">
+            Sistem akan memvalidasi penetapan tarif aktif, potongan beasiswa, dan mencegah duplikasi invoice (AC-19-03).
+          </p>
+</div>
+<button class="w-8 h-8 rounded-lg hover:bg-surface-container flex items-center justify-center text-secondary hover:text-on-surface transition-colors" onclick="document.getElementById('batchModal').classList.add('hidden')">
+<span class="material-symbols-outlined text-[20px]">close</span>
+</button>
+</div>
+<div class="space-y-space-md">
+<!-- Target Periode & Komponen -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-space-md">
+<div class="space-y-1">
+<label class="font-label text-label text-secondary font-medium">Bulan & Tahun Tagihan</label>
+<select class="w-full h-9 px-3 rounded-xl bg-background text-on-surface font-body-small text-body-small focus:bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20">
+<option selected="">November 2026</option>
+<option>Desember 2026</option>
+<option>Januari 2027</option>
+</select>
+</div>
+<div class="space-y-1">
+<label class="font-label text-label text-secondary font-medium">Komponen Biaya</label>
+<select class="w-full h-9 px-3 rounded-xl bg-background text-on-surface font-body-small text-body-small focus:bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20">
+<option selected="">SPP Bulanan (Semua Tingkat)</option>
+<option>Uang Masuk / Gedung (Siswa Baru PPDB)</option>
+<option>Biaya Ujian Semester Ganjil</option>
+<option>Biaya Kegiatan Field Trip</option>
+</select>
+</div>
+</div>
+<!-- Target Populasi & Tanggal Jatuh Tempo -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-space-md">
+<div class="space-y-1">
+<label class="font-label text-label text-secondary font-medium">Sasaran Unit & Kelas</label>
+<select class="w-full h-9 px-3 rounded-xl bg-background text-on-surface font-body-small text-body-small focus:bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20">
+<option selected="">Semua Kelas SMP (Kelas 7, 8, 9) - 360 Siswa</option>
+<option>Hanya Kelas 7 (Siswa Baru Konversi)</option>
+<option>Hanya Kelas 8</option>
+<option>Hanya Kelas 9</option>
+</select>
+</div>
+<div class="space-y-1">
+<label class="font-label text-label text-secondary font-medium">Tanggal Jatuh Tempo (Default)</label>
+<input class="w-full h-9 px-3 rounded-xl bg-background text-on-surface font-body-small text-body-small focus:bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20" type="date" value="2026-11-10"/>
+</div>
+</div>
+<!-- Otomasi & Notifikasi Checklist -->
+<div class="p-space-md rounded-xl bg-surface-container-low space-y-space-xs">
+<div class="font-label text-label text-on-surface font-semibold">Opsi Eksekusi & Kanal Notifikasi (FR-19-005):</div>
+<label class="flex items-center gap-space-xs font-body-small text-body-small text-secondary cursor-pointer">
+<input checked="" class="w-4 h-4 rounded text-primary focus:ring-0" type="checkbox"/>
+<span>Kirim notifikasi tagihan instan via WhatsApp Gateway ke Nomor Orang Tua</span>
+</label>
+<label class="flex items-center gap-space-xs font-body-small text-body-small text-secondary cursor-pointer">
+<input checked="" class="w-4 h-4 rounded text-primary focus:ring-0" type="checkbox"/>
+<span>Aktifkan nomor Virtual Account otomatis (Bank Mandiri, BCA, BNI, BSI)</span>
+</label>
+<label class="flex items-center gap-space-xs font-body-small text-body-small text-secondary cursor-pointer">
+<input checked="" class="w-4 h-4 rounded text-primary focus:ring-0" type="checkbox"/>
+<span>Terapkan pemotongan beasiswa siswa secara otomatis (Menu 24)</span>
+</label>
+</div>
+</div>
+<!-- Action Footer Modal -->
+<div class="flex items-center justify-between pt-space-xs">
+<span class="font-caption text-caption text-secondary flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px] text-info">info</span>
+          Proses berjalan di background worker queue
+        </span>
+<div class="flex items-center gap-space-sm">
+<button class="px-space-md py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface font-body-small text-body-small font-medium transition-colors" onclick="document.getElementById('batchModal').classList.add('hidden')">
+            Batal
+          </button>
+<button class="flex items-center gap-space-xs px-space-md py-2 rounded-xl bg-primary text-on-primary font-body-small text-body-small font-semibold shadow-sm hover:bg-tertiary transition-colors" onclick="alert('Batch Billing Berhasil Dijadwalkan!'); document.getElementById('batchModal').classList.add('hidden');">
+<span class="material-symbols-outlined text-[18px]">play_circle</span>
+<span>Konfirmasi & Terbitkan Tagihan</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<script>
+  // Simple select all checkbox interaction
+  const selectAll = document.getElementById('selectAll');
+  const rowCheckboxes = document.querySelectorAll('.row-checkbox');
+  
+  if (selectAll) {
+    selectAll.addEventListener('change', (e) => {
+      rowCheckboxes.forEach(cb => {
+        if (!cb.disabled) cb.checked = e.target.checked;
+      });
+    });
+  }
+</script></main></div></body></html>

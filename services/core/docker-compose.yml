@@ -1,0 +1,53 @@
+services:
+  core-db:
+    image: postgres:16-alpine
+    container_name: skci-core-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-teratai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${DB_NAME:-teratai_core}
+    ports:
+      - "${DB_HOST_PORT:-5491}:5432"
+    volumes:
+      - core_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-teratai} -d ${DB_NAME:-teratai_core}"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  core-migrate:
+    image: migrate/migrate:v4.18.2
+    container_name: skci-core-migrate
+    depends_on:
+      core-db:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://${POSTGRES_USER:-teratai}:${POSTGRES_PASSWORD:-change-me}@core-db:5432/${DB_NAME:-teratai_core}?sslmode=disable
+      - up
+    restart: on-failure
+
+  core:
+    build: .
+    container_name: skci-core
+    depends_on:
+      core-migrate:
+        condition: service_completed_successfully
+    environment:
+      PORT: 8091
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgres://${POSTGRES_USER:-teratai}:${POSTGRES_PASSWORD:-change-me}@core-db:5432/${DB_NAME:-teratai_core}?sslmode=disable
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET:-change-me}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY:-change-me}
+      NOTIFICATION_URL: ${NOTIFICATION_URL:-http://notification:8089}
+      IDENTITY_URL: ${IDENTITY_URL:-http://identity:8081}
+      HR_URL: ${HR_URL:-http://hr:8092}
+      JOB_INTERVAL_SECONDS: ${JOB_INTERVAL_SECONDS:-300}
+    ports:
+      - "${PORT:-8091}:8091"
+
+volumes:
+  core_pgdata:
