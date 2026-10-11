@@ -7,10 +7,13 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"skci/hr/internal/common"
+	"skci/hr/internal/training"
 )
 
 func (a *App) Router() http.Handler {
 	r := chi.NewRouter()
+
+	trHandler := training.NewHandler(training.NewStore(a.DB))
 
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -51,6 +54,14 @@ func (a *App) Router() http.Handler {
 		api.Get("/me/documents", a.MeListDocuments)
 		api.Post("/me/documents", a.MeUploadDocument)
 		api.Get("/documents/{id}/download", a.DownloadDocument)
+
+		// ESS Training & Onboarding
+		api.Get("/me/training/assignments", trHandler.MyAssignments)
+		api.Get("/me/training/assignments/{assignmentId}/quiz", trHandler.MyQuiz)
+		api.Post("/me/training/assignments/{assignmentId}/quiz", trHandler.SubmitQuiz)
+		api.Post("/me/training/assignments/{assignmentId}/materials/{materialId}/done", trHandler.MarkMaterialDone)
+		api.Get("/me/onboarding", trHandler.MyOnboarding)
+		api.Post("/onboarding/tasks/{taskId}/done", trHandler.MarkOnboardingTaskDone)
 
 		// 2. HR Management routes: HR Admin, HR Manager, Superadmin
 		api.Group(func(hr chi.Router) {
@@ -158,6 +169,24 @@ func (a *App) Router() http.Handler {
 				// Settings mutations
 				admin.Put("/settings/hr", a.UpdateHRSettings)
 			})
+
+			// Training & Onboarding Management
+			hr.Get("/training/courses", trHandler.ListCourses)
+			hr.Post("/training/courses", trHandler.CreateCourse)
+			hr.Get("/training/courses/{id}", trHandler.GetCourse)
+			hr.Put("/training/courses/{id}", trHandler.UpdateCourse)
+			hr.Get("/training/courses/{courseId}/materials", trHandler.ListMaterials)
+			hr.Post("/training/courses/{courseId}/materials", trHandler.CreateMaterial)
+			hr.Get("/training/courses/{courseId}/sessions", trHandler.ListSessions)
+			hr.Post("/training/courses/{courseId}/sessions", trHandler.CreateSession)
+			hr.Get("/training/courses/{courseId}/questions", trHandler.ListQuestions)
+			hr.Post("/training/courses/{courseId}/questions", trHandler.CreateQuestion)
+			hr.Get("/training/mandatory", trHandler.ListMandatory)
+			hr.Post("/training/mandatory", trHandler.CreateMandatory)
+			hr.Get("/training/assignments", trHandler.ListAssignments)
+			hr.Post("/training/assignments", trHandler.CreateAssignment)
+			hr.Get("/onboarding/templates", trHandler.ListOnboardingTemplates)
+			hr.Post("/onboarding/templates", trHandler.CreateOnboardingTemplate)
 		})
 	})
 
