@@ -10,12 +10,16 @@ import (
 
 // Roles issued by identity-service (see docs/CONVENTIONS.md).
 const (
-	RoleSuperadmin = "superadmin"
-	RoleAdmin      = "admin"
-	RoleParent     = "orang_tua"
-	RoleStudent    = "siswa"
-	RoleGuru       = "guru"
-	RoleWalikelas  = "walikelas"
+	RoleSuperadmin     = "superadmin"
+	RoleAdmin          = "admin"
+	RoleParent         = "orang_tua"
+	RoleStudent        = "siswa"
+	RoleGuru           = "guru"
+	RoleWalikelas      = "walikelas"
+	RoleFinanceManager = "finance_manager"
+	RoleFinanceAdmin   = "finance_admin"
+	RoleAccounting     = "accounting"
+	RoleKasir          = "kasir"
 )
 
 // Claims is the identity JWT payload billing-service verifies. It never
@@ -99,6 +103,36 @@ func RequireAdmin(w http.ResponseWriter, r *http.Request) *Claims {
 	c := FromCtx(r)
 	if c == nil || (c.ActiveRole != RoleAdmin && c.ActiveRole != RoleSuperadmin) {
 		WriteError(w, http.StatusForbidden, "admin role required")
+		return nil
+	}
+	return c
+}
+
+// RequireFinance admits admin, superadmin, finance_manager, or finance_admin.
+func RequireFinance(w http.ResponseWriter, r *http.Request) *Claims {
+	c := FromCtx(r)
+	if c == nil || (c.ActiveRole != RoleAdmin && c.ActiveRole != RoleSuperadmin && c.ActiveRole != RoleFinanceManager && c.ActiveRole != RoleFinanceAdmin) {
+		WriteError(w, http.StatusForbidden, "finance role required")
+		return nil
+	}
+	return c
+}
+
+// RequireFinanceOrAccounting admits admin, superadmin, finance_manager, finance_admin, or accounting.
+func RequireFinanceOrAccounting(w http.ResponseWriter, r *http.Request) *Claims {
+	c := FromCtx(r)
+	if c == nil || (c.ActiveRole != RoleAdmin && c.ActiveRole != RoleSuperadmin && c.ActiveRole != RoleFinanceManager && c.ActiveRole != RoleFinanceAdmin && c.ActiveRole != RoleAccounting) {
+		WriteError(w, http.StatusForbidden, "finance or accounting role required")
+		return nil
+	}
+	return c
+}
+
+// RequireCashier admits admin, superadmin, kasir, finance_admin, or finance_manager.
+func RequireCashier(w http.ResponseWriter, r *http.Request) *Claims {
+	c := FromCtx(r)
+	if c == nil || (c.ActiveRole != RoleAdmin && c.ActiveRole != RoleSuperadmin && c.ActiveRole != RoleKasir && c.ActiveRole != RoleFinanceAdmin && c.ActiveRole != RoleFinanceManager) {
+		WriteError(w, http.StatusForbidden, "cashier role required")
 		return nil
 	}
 	return c

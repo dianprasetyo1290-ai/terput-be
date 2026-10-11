@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 
+	"skci/billing/internal/client"
 	"skci/billing/internal/config"
+	"skci/billing/internal/nicepay"
 	"skci/billing/internal/storage"
 )
 
@@ -25,13 +27,17 @@ type ClassRoster interface {
 // database directly through App.DB (the service is small enough that a query
 // layer would only add indirection); pure domain rules live in internal/model.
 type App struct {
-	DB       *sql.DB
-	Config   config.Config
-	Storage  storage.Storage
-	Identity IdentityChecker
+	DB           *sql.DB
+	Config       config.Config
+	Storage      storage.Storage
+	Identity     IdentityChecker
 	// Roster limits guru/walikelas bill reads to their own classes. Nil
 	// denies every teacher read.
-	Roster ClassRoster
+	Roster       ClassRoster
+	Nicepay      *nicepay.Client
+	Core         *client.Client
+	Notification *client.Client
+	Accounting   *client.Client
 }
 
 // New wires the application graph.

@@ -347,7 +347,7 @@ func (a *App) GetChildPaymentProof(w http.ResponseWriter, r *http.Request) {
 	err := a.DB.QueryRowContext(r.Context(),
 		`SELECT p.object_key,p.mime,p.size_bytes,p.sha256
 		 FROM bill_payments p JOIN student_bills b ON b.id=p.student_bill_id
-		 WHERE p.id=$1 AND p.school_id=$2 AND b.student_user_id::text=$3`,
+		 WHERE p.id=$1 AND p.school_id=$2 AND b.student_user_id::text=$3 AND p.object_key IS NOT NULL`,
 		param(r, "paymentId"), c.SchoolID, studentID).Scan(&key, &mime, &size, &checksum)
 	if err != nil {
 		common.WriteError(w, http.StatusNotFound, "payment not found")
