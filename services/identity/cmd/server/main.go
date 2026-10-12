@@ -250,6 +250,7 @@ func main() {
 		in.Get("/internal/guardians/{guardianUserId}/children", app.InternalGuardianChildren)
 		in.Get("/internal/guardians/{guardianUserId}/students/{studentUserId}/access", app.InternalGuardianStudentAccess)
 		in.Post("/internal/students/create-or-link", app.InternalCreateOrLinkStudent)
+		in.Get("/internal/students/{studentUserId}/guardians", app.InternalStudentGuardians)
 		in.Post("/internal/guardian-links", app.InternalCreateGuardianLink)
 		in.Get("/internal/conversions/{conversionRef}", app.InternalConversionMapping)
 		in.Post("/internal/employees/create-or-link", app.InternalCreateOrLinkEmployee)

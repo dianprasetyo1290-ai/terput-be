@@ -244,6 +244,27 @@ func (a *App) InternalGuardianStudentAccess(w http.ResponseWriter, r *http.Reque
 	common.WriteJSON(w, http.StatusOK, map[string]bool{"allowed": true}, nil)
 }
 
+// InternalStudentGuardians backs the service-to-service endpoint
+//
+//	GET /internal/students/{studentUserId}/guardians?school_id=<uuid>
+//
+// returning [{guardian_user_id, relationship, is_primary}] for the student's
+// active guardian links at that school (T9 §4.1, used by T10/T19/T20/T21).
+// Tenant-scoped by the mandatory school_id (400 when absent).
+func (a *App) InternalStudentGuardians(w http.ResponseWriter, r *http.Request) {
+	schoolID, ok := internalGuardianSchool(r)
+	if !ok {
+		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+		return
+	}
+	guardians, err := store.StudentGuardians(a.DB, schoolID, chi.URLParam(r, "studentUserId"))
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to list student guardians")
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, guardians, nil)
+}
+
 type claimRequest struct {
 	NISN string `json:"nisn"`
 	Code string `json:"code"`

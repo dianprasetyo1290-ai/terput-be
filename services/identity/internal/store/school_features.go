@@ -17,6 +17,57 @@ var FeatureKeys = []string{
 	"payment_gateway",
 	"student_bills",
 	"service_requests",
+	// PRD Bagian 3–4 (T9 §2b), urutan seperti tabel; dipakai persis oleh
+	// meta.feature dan requireFeature di T9–T26.
+	"facility",
+	"health",
+	"service_desk",
+	"canteen",
+	"wallet",
+	"campaign",
+	"teacher_parent_chat",
+	"ppdb_marketing",
+	"payment_multi_provider",
+	"payment_autodebit",
+	"inventory",
+	"procurement",
+	"asset",
+	"budget",
+	"tax_nonpayroll",
+	"payable",
+	"library",
+	"transport",
+	"counseling",
+	"discipline",
+	"event",
+	"extracurricular",
+	"achievement",
+	"pkl",
+	"quality",
+	"gov_reporting",
+	"bi",
+	"ai_assistant",
+	"predictive",
+	"campus3d",
+	"white_label",
+}
+
+// FeatureRequires: fitur yang hanya boleh dinyalakan bila fitur lain sudah
+// menyala (Kampus 3D memakai master ruang Fasilitas).
+var FeatureRequires = map[string][]string{
+	"campus3d": {"facility"},
+}
+
+// MissingRequirements mengembalikan prasyarat key yang belum menyala.
+// Fungsi murni supaya aturan dependensi bisa dites tanpa DB.
+func MissingRequirements(key string, enabled map[string]bool) []string {
+	missing := []string{}
+	for _, req := range FeatureRequires[key] {
+		if !enabled[req] {
+			missing = append(missing, req)
+		}
+	}
+	return missing
 }
 
 // SchoolFeature satu baris tabel (dipakai daftar lintas-sekolah).
