@@ -23,7 +23,7 @@ const (
 
 // GrantableRoles are the roles an admin may grant a confidential access
 // policy to (OQ-31). Parents/students are never grantable.
-var GrantableRoles = []string{common.RoleKepalaSekolah, common.RoleAdmin, "guru", common.RoleWalikelas}
+var GrantableRoles = []string{common.RoleKepalaSekolah, common.RoleAdmin, common.RoleGuru, common.RoleWalikelas}
 
 // ErrPolicyExists is returned when the role already has an active policy.
 var ErrPolicyExists = errors.New("policy already active")

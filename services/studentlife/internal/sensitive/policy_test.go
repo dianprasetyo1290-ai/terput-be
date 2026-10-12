@@ -25,7 +25,7 @@ func TestCanAccess(t *testing.T) {
 		{"kepala sekolah dengan kebijakan full", ModuleHealth, common.RoleKepalaSekolah, Facts{}, []string{common.RoleKepalaSekolah}, Full},
 		{"superadmin tanpa kebijakan none", ModuleHealth, common.RoleSuperadmin, Facts{}, nil, None},
 		{"admin none", ModuleHealth, common.RoleAdmin, Facts{}, []string{common.RoleKepalaSekolah}, None},
-		{"guru none", ModuleHealth, "guru", Facts{IsHomeroom: true}, nil, None},
+		{"guru none", ModuleHealth, common.RoleGuru, Facts{IsHomeroom: true}, nil, None},
 		{"modul konseling: wali tidak otomatis", ModuleCounseling, common.RoleParent, Facts{IsGuardian: true}, nil, None},
 	}
 	for _, tc := range cases {

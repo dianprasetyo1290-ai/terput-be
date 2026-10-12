@@ -10,6 +10,7 @@ const (
 	RoleKepalaSekolah = "kepala_sekolah"
 	RoleAuditor       = "auditor"
 	RolePetugasUKS    = "petugas_uks"
+	RoleGuru          = "guru"
 
 	FeatureHealth = "health"
 )

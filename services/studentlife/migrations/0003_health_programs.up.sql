@@ -13,7 +13,6 @@ CREATE TABLE health_programs (
     consent_deadline DATE NULL,
     status           TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'completed', 'cancelled')),
     created_by       UUID NOT NULL,
-    reminder_sent_on DATE NULL,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (ends_on >= starts_on)

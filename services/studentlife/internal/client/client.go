@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"skci/studentlife/internal/common"
 )
 
 // ErrNotConfigured is returned when the target base URL is empty.
@@ -407,4 +409,28 @@ type InventoryIssue struct {
 // IssueInventory posts a stock issue to ops. ErrNotConfigured when OPS_URL is empty.
 func (c *Client) IssueInventory(ctx context.Context, in InventoryIssue) error {
 	return c.do(ctx, http.MethodPost, c.URLs.Ops, "/internal/inventory/issues", in, in.IdempotencyKey, nil)
+}
+
+// RequireFeature is middleware rejecting requests (403) while featureKey is
+// off for the caller's school; lookup failures fail closed (502).
+func (c *Client) RequireFeature(featureKey string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			school := common.EffectiveSchoolID(r)
+			if school == "" {
+				common.WriteError(w, http.StatusBadRequest, "school_id wajib diisi")
+				return
+			}
+			on, err := c.FeatureEnabled(r.Context(), school, featureKey)
+			if err != nil {
+				common.WriteError(w, http.StatusBadGateway, "Gagal memverifikasi modul sekolah")
+				return
+			}
+			if !on {
+				common.WriteError(w, http.StatusForbidden, "Modul belum diaktifkan untuk sekolah ini")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }

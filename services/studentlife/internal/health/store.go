@@ -454,7 +454,6 @@ type Program struct {
 	CreatedAt       time.Time  `json:"created_at"`
 	Targets         []Target   `json:"targets"`
 	ParticipantsN   int        `json:"participants_count"`
-	ReminderSentOn  *time.Time `json:"-"`
 }
 
 const programCols = `p.id, p.kind, p.name, p.description, to_char(p.starts_on,'YYYY-MM-DD'), to_char(p.ends_on,'YYYY-MM-DD'),
