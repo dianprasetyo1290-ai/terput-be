@@ -41,10 +41,11 @@ type Handler struct {
 
 	guardianAccess   guardianAccessChecker
 	parentAttendance parentAttendanceReader
+	healthAbsence    healthAbsenceStore
 }
 
 func New(s *store.Store, c *client.Client) *Handler {
-	h := &Handler{Store: s, Client: c, parentAttendance: s}
+	h := &Handler{Store: s, Client: c, parentAttendance: s, healthAbsence: s}
 	if c != nil {
 		h.guardianAccess = c
 	}
