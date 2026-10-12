@@ -33,7 +33,9 @@ func (f *fakeRelations) UserRoles(_ context.Context, _, userID string) ([]string
 	return f.roles[userID], nil
 }
 
-func (f *fakeRelations) UserName(_ context.Context, userID string) string { return "Nama " + userID[:4] }
+func (f *fakeRelations) UserName(_ context.Context, userID string) string {
+	return "Nama " + userID[:4]
+}
 
 func (f *fakeRelations) TeacherStudentIDs(_ context.Context, _, teacherID string) (map[string]bool, error) {
 	if f.fail {
