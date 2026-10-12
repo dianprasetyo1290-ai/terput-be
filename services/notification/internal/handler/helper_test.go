@@ -33,6 +33,7 @@ func newTestServer(t *testing.T) (*fakeStore, http.Handler) {
 	t.Helper()
 	fs := newFakeStore()
 	h := New(fs, client.New("", ""), provider.NoopProvider{}, false)
+	h.Relations = newFakeRelations()
 	router := NewRouter(h, RouterConfig{
 		JWTSecret:   testJWTSecret,
 		InternalKey: testInternalKey,

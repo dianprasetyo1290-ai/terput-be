@@ -11,7 +11,7 @@ import (
 
 // ---- chat ------------------------------------------------------------------
 
-const threadColumns = `id, school_id, subject, created_by, created_at, closed_at`
+const threadColumns = `id, school_id, subject, created_by, created_at, closed_at, kind, student_user_id, teacher_user_id, guardian_user_id, archived_at`
 
 // ParticipantInput is one member to add to a new thread.
 type ParticipantInput struct {
@@ -25,6 +25,12 @@ type CreateThreadInput struct {
 	Subject      string
 	CreatedBy    string
 	Participants []ParticipantInput
+
+	// Teacher–parent threads (T13); empty Kind = general.
+	Kind           string
+	StudentUserID  string
+	TeacherUserID  string
+	GuardianUserID string
 }
 
 // CreateMessageInput is one chat message.
@@ -33,14 +39,21 @@ type CreateMessageInput struct {
 	SenderUserID  string
 	Body          string
 	AttachmentKey *string
+
+	AttachmentName      *string
+	AttachmentMime      *string
+	AttachmentSize      *int64
+	OutsideServiceHours bool
 }
 
 func scanThread(row rowScanner) (*model.ChatThread, error) {
 	var (
 		t        model.ChatThread
 		closedAt sql.NullTime
+		ext      threadExt
 	)
-	if err := row.Scan(&t.ID, &t.SchoolID, &t.Subject, &t.CreatedBy, &t.CreatedAt, &closedAt); err != nil {
+	if err := row.Scan(&t.ID, &t.SchoolID, &t.Subject, &t.CreatedBy, &t.CreatedAt, &closedAt,
+		&t.Kind, &ext.student, &ext.teacher, &ext.guardian, &ext.archived); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -50,7 +63,30 @@ func scanThread(row rowScanner) (*model.ChatThread, error) {
 		ct := closedAt.Time
 		t.ClosedAt = &ct
 	}
+	ext.apply(&t)
 	return &t, nil
+}
+
+// threadExt scans the nullable T13 thread columns.
+type threadExt struct {
+	student, teacher, guardian sql.NullString
+	archived                   sql.NullTime
+}
+
+func (e threadExt) apply(t *model.ChatThread) {
+	if e.student.Valid {
+		t.StudentUserID = &e.student.String
+	}
+	if e.teacher.Valid {
+		t.TeacherUserID = &e.teacher.String
+	}
+	if e.guardian.Valid {
+		t.GuardianUserID = &e.guardian.String
+	}
+	if e.archived.Valid {
+		a := e.archived.Time
+		t.ArchivedAt = &a
+	}
 }
 
 // CreateChatThread inserts a thread and its participants in one transaction.
@@ -63,9 +99,10 @@ func (s *Store) CreateChatThread(ctx context.Context, in CreateThreadInput) (*mo
 	defer tx.Rollback()
 
 	t, err := scanThread(tx.QueryRowContext(ctx, `
-		INSERT INTO chat_threads (school_id, subject, created_by)
-		VALUES ($1,$2,$3)
-		RETURNING `+threadColumns, in.SchoolID, in.Subject, in.CreatedBy))
+		INSERT INTO chat_threads (school_id, subject, created_by, kind, student_user_id, teacher_user_id, guardian_user_id)
+		VALUES ($1,$2,$3,$4,NULLIF($5,'')::uuid,NULLIF($6,'')::uuid,NULLIF($7,'')::uuid)
+		RETURNING `+threadColumns, in.SchoolID, in.Subject, in.CreatedBy, kindOrGeneral(in.Kind),
+		in.StudentUserID, in.TeacherUserID, in.GuardianUserID))
 	if err != nil {
 		return nil, err
 	}
@@ -142,6 +179,7 @@ func (s *Store) ListChatThreadsForUser(ctx context.Context, schoolID, userID str
 	}
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT t.id, t.school_id, t.subject, t.created_by, t.created_at, t.closed_at,
+		       t.kind, t.student_user_id, t.teacher_user_id, t.guardian_user_id, t.archived_at,
 		       (SELECT count(*) FROM chat_messages m WHERE m.thread_id = t.id) AS message_count,
 		       (SELECT max(m.created_at) FROM chat_messages m WHERE m.thread_id = t.id) AS last_message_at
 		FROM chat_threads t
@@ -160,11 +198,14 @@ func (s *Store) ListChatThreadsForUser(ctx context.Context, schoolID, userID str
 			t             model.ChatThread
 			closedAt      sql.NullTime
 			lastMessageAt sql.NullTime
+			ext           threadExt
 		)
 		if err := rows.Scan(&t.ID, &t.SchoolID, &t.Subject, &t.CreatedBy, &t.CreatedAt,
-			&closedAt, &t.MessageCount, &lastMessageAt); err != nil {
+			&closedAt, &t.Kind, &ext.student, &ext.teacher, &ext.guardian, &ext.archived,
+			&t.MessageCount, &lastMessageAt); err != nil {
 			return nil, 0, err
 		}
+		ext.apply(&t)
 		if closedAt.Valid {
 			ct := closedAt.Time
 			t.ClosedAt = &ct
@@ -228,6 +269,7 @@ func (s *Store) ListChatMessages(ctx context.Context, threadID string, page, per
 	}
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT m.id, m.thread_id, m.sender_user_id, m.body, m.attachment_key, m.created_at,
+		       m.attachment_name, m.attachment_mime, m.attachment_size, m.outside_service_hours,
 		       COALESCE((SELECT json_agg(r.user_id ORDER BY r.read_at)
 		                 FROM chat_message_reads r WHERE r.message_id = m.id), '[]'::json) AS read_by
 		FROM chat_messages m
@@ -245,10 +287,13 @@ func (s *Store) ListChatMessages(ctx context.Context, threadID string, page, per
 			m             model.ChatMessage
 			attachmentKey sql.NullString
 			readBy        []byte
+			att           attachmentCols
 		)
-		if err := rows.Scan(&m.ID, &m.ThreadID, &m.SenderUserID, &m.Body, &attachmentKey, &m.CreatedAt, &readBy); err != nil {
+		if err := rows.Scan(&m.ID, &m.ThreadID, &m.SenderUserID, &m.Body, &attachmentKey, &m.CreatedAt,
+			&att.name, &att.mime, &att.size, &m.OutsideServiceHours, &readBy); err != nil {
 			return nil, 0, err
 		}
+		att.apply(&m)
 		if attachmentKey.Valid {
 			m.AttachmentKey = &attachmentKey.String
 		}
@@ -268,10 +313,12 @@ func (s *Store) CreateChatMessage(ctx context.Context, in CreateMessageInput) (*
 		attachmentKey sql.NullString
 	)
 	err := s.DB.QueryRowContext(ctx, `
-		INSERT INTO chat_messages (thread_id, sender_user_id, body, attachment_key)
-		VALUES ($1,$2,$3,$4)
+		INSERT INTO chat_messages (thread_id, sender_user_id, body, attachment_key,
+		                           attachment_name, attachment_mime, attachment_size, outside_service_hours, school_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,(SELECT school_id FROM chat_threads WHERE id=$1))
 		RETURNING id, thread_id, sender_user_id, body, attachment_key, created_at`,
-		in.ThreadID, in.SenderUserID, in.Body, in.AttachmentKey).Scan(
+		in.ThreadID, in.SenderUserID, in.Body, in.AttachmentKey,
+		in.AttachmentName, in.AttachmentMime, in.AttachmentSize, in.OutsideServiceHours).Scan(
 		&m.ID, &m.ThreadID, &m.SenderUserID, &m.Body, &attachmentKey, &m.CreatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -283,6 +330,8 @@ func (s *Store) CreateChatMessage(ctx context.Context, in CreateMessageInput) (*
 		m.AttachmentKey = &attachmentKey.String
 	}
 	m.ReadBy = []string{}
+	m.AttachmentName, m.AttachmentMime, m.AttachmentSize = in.AttachmentName, in.AttachmentMime, in.AttachmentSize
+	m.OutsideServiceHours = in.OutsideServiceHours
 	return &m, nil
 }
 

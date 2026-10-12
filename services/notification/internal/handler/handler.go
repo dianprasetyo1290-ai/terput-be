@@ -8,6 +8,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -15,6 +16,7 @@ import (
 	"skci/notification/internal/common"
 	"skci/notification/internal/model"
 	"skci/notification/internal/provider"
+	"skci/notification/internal/storage"
 	"skci/notification/internal/store"
 )
 
@@ -57,6 +59,31 @@ type DataStore interface {
 	ListChatMessages(ctx context.Context, threadID string, page, perPage int) ([]model.ChatMessage, int, error)
 	CreateChatMessage(ctx context.Context, in store.CreateMessageInput) (*model.ChatMessage, error)
 	MarkChatThreadRead(ctx context.Context, threadID, userID string) ([]string, error)
+
+	// teacher–parent chat (T13)
+	FindActiveTeacherParentThread(ctx context.Context, schoolID, teacherID, guardianID, studentID string) (*model.ChatThread, error)
+	ArchiveChatThread(ctx context.Context, threadID string) error
+	GetChatMessage(ctx context.Context, id, schoolID string) (*model.ChatMessage, error)
+	GetChatSettings(ctx context.Context, schoolID string) (*model.ChatSettings, error)
+	UpsertChatSettings(ctx context.Context, in model.ChatSettings) error
+	CreateChatReport(ctx context.Context, schoolID, messageID, reporterID, reason string) (*model.ChatMessageReport, error)
+	GetChatReport(ctx context.Context, id, schoolID string) (*model.ChatMessageReport, error)
+	ListChatReports(ctx context.Context, schoolID, status string, page, perPage int) ([]model.ChatMessageReport, int, error)
+	ReviewChatReport(ctx context.Context, id, schoolID, status, note, reviewerID string) (*model.ChatMessageReport, error)
+}
+
+// Relations answers BR-COM-02 relation questions (identity + academic).
+// client.Relations is the production implementation; tests use a fake.
+// Every method must fail closed: on error the caller denies.
+type Relations interface {
+	UserRoles(ctx context.Context, schoolID, userID string) ([]string, error)
+	UserName(ctx context.Context, userID string) string
+	TeacherStudentIDs(ctx context.Context, schoolID, teacherID string) (map[string]bool, error)
+	GuardianHasAccess(ctx context.Context, schoolID, guardianID, studentID string) (bool, error)
+	GuardianChildren(ctx context.Context, schoolID, guardianID string) ([]string, error)
+	StudentGuardians(ctx context.Context, schoolID, studentID string) ([]client.StudentGuardian, error)
+	StudentTeachers(ctx context.Context, schoolID, studentID string) ([]client.StudentTeacher, error)
+	UsersByRole(ctx context.Context, schoolID, role string) ([]client.UserProfile, error)
 }
 
 // Handler carries every dependency the HTTP handlers need.
@@ -65,6 +92,13 @@ type Handler struct {
 	Client     *client.Client
 	Provider   provider.Provider
 	Production bool
+
+	// T13 chat dependencies, set by main (and tests) after New.
+	Relations   Relations
+	Attachments storage.Storage
+	Audit       func(ctx context.Context, e client.AuditEvent)
+	Location    *time.Location
+	Now         func() time.Time
 }
 
 // New wires the handler.

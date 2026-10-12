@@ -246,6 +246,7 @@ func main() {
 		// Status Request Approval Callback & Apply Job
 		r.Post("/internal/student-status-requests/approval-callback", h.ApprovalCallback)
 		r.Post("/internal/student-status-requests/apply-pending", h.ApplyPendingRequestsJob)
+		r.Get("/internal/enrollments", h.InternalListEnrollments) // T13: read-only, internal key only
 	})
 
 	log.Printf("academic-service listening on :%s", port)

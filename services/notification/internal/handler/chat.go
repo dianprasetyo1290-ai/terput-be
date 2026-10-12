@@ -87,6 +87,11 @@ func (h *Handler) CreateThread(w http.ResponseWriter, r *http.Request) {
 		participants = append(participants, store.ParticipantInput{UserID: id, Role: model.ChatRoleMember})
 	}
 
+	if msg, ok := h.checkGeneralThread(r.Context(), schoolID, claims, participants); !ok {
+		common.WriteError(w, http.StatusForbidden, msg)
+		return
+	}
+
 	thread, err := h.Store.CreateChatThread(r.Context(), store.CreateThreadInput{
 		SchoolID:     schoolID,
 		Subject:      strings.TrimSpace(payload.Subject),
@@ -147,18 +152,18 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msg, err := h.Store.CreateChatMessage(r.Context(), store.CreateMessageInput{
+	key := strings.TrimSpace(payload.AttachmentKey)
+	if key != "" && !strings.HasPrefix(key, "chat/"+thread.ID+"/") {
+		// A key may only reference a file uploaded to this same thread.
+		common.WriteError(w, http.StatusBadRequest, "attachment_key does not belong to this thread")
+		return
+	}
+	h.postMessage(w, r, thread, store.CreateMessageInput{
 		ThreadID:      thread.ID,
 		SenderUserID:  claims.UserID,
 		Body:          payload.Body,
-		AttachmentKey: strptr(strings.TrimSpace(payload.AttachmentKey)),
+		AttachmentKey: strptr(key),
 	})
-	if err != nil {
-		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to post message")
-		return
-	}
-	common.WriteJSONMsg(w, http.StatusCreated, msg, nil, "Pesan terkirim")
 }
 
 // MarkThreadRead handles POST /chat/threads/{id}/read. Idempotent: a second call
