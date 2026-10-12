@@ -39,7 +39,7 @@ func jsonb(v any) []byte {
 func (s *Store) ListTeams(ctx context.Context, schoolID string) ([]Team, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT t.id, t.school_id, t.name, t.manager_user_id, t.created_at,
-		       coalesce(array_agg(m.user_id::text) FILTER (WHERE m.user_id IS NOT NULL), '{}')
+		       coalesce(json_agg(m.user_id) FILTER (WHERE m.user_id IS NOT NULL), '[]')
 		FROM sd_teams t LEFT JOIN sd_team_members m ON m.team_id = t.id
 		WHERE t.school_id = $1 AND t.deleted_at IS NULL
 		GROUP BY t.id ORDER BY t.name`, schoolID)
@@ -50,11 +50,12 @@ func (s *Store) ListTeams(ctx context.Context, schoolID string) ([]Team, error) 
 	out := []Team{}
 	for rows.Next() {
 		var t Team
-		var members []string
+		var members []byte
 		if err := rows.Scan(&t.ID, &t.SchoolID, &t.Name, &t.ManagerUserID, &t.CreatedAt, &members); err != nil {
 			return nil, err
 		}
-		t.MemberIDs = members
+		t.MemberIDs = []string{}
+		_ = json.Unmarshal(members, &t.MemberIDs)
 		out = append(out, t)
 	}
 	return out, rows.Err()
@@ -137,10 +138,16 @@ func (s *Store) UserTeamIDs(ctx context.Context, schoolID, userID string) ([]str
 
 // TeamRecipients returns the members and the manager of a team.
 func (s *Store) TeamRecipients(ctx context.Context, schoolID, teamID string) (members []string, manager *string, err error) {
+	var raw []byte
+	defer func() {
+		if err == nil {
+			err = json.Unmarshal(raw, &members)
+		}
+	}()
 	err = s.DB.QueryRowContext(ctx, `
-		SELECT t.manager_user_id, coalesce(array_agg(m.user_id::text) FILTER (WHERE m.user_id IS NOT NULL), '{}')
+		SELECT t.manager_user_id, coalesce(json_agg(m.user_id) FILTER (WHERE m.user_id IS NOT NULL), '[]')
 		FROM sd_teams t LEFT JOIN sd_team_members m ON m.team_id = t.id
-		WHERE t.id=$1 AND t.school_id=$2 GROUP BY t.id`, teamID, schoolID).Scan(&manager, &members)
+		WHERE t.id=$1 AND t.school_id=$2 GROUP BY t.id`, teamID, schoolID).Scan(&manager, &raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, ErrNotFound
 	}
@@ -152,16 +159,18 @@ func (s *Store) TeamRecipients(ctx context.Context, schoolID, teamID string) (me
 // ---------------------------------------------------------------------------
 
 const categoryCols = `c.id, c.school_id, c.name, c.description, c.team_id, t.name, c.is_facility, c.form_schema,
-	c.reporter_kinds, c.service_request_category_id, c.is_fallback, c.active`
+	to_json(c.reporter_kinds), c.service_request_category_id, c.is_fallback, c.active`
 
 func scanCategory(row interface{ Scan(...any) error }) (Category, error) {
 	var c Category
-	var schema []byte
+	var schema, kinds []byte
 	err := row.Scan(&c.ID, &c.SchoolID, &c.Name, &c.Description, &c.TeamID, &c.TeamName, &c.IsFacility, &schema,
-		&c.ReporterKinds, &c.ServiceRequestCategoryID, &c.IsFallback, &c.Active)
+		&kinds, &c.ServiceRequestCategoryID, &c.IsFallback, &c.Active)
 	if err != nil {
 		return c, err
 	}
+	c.ReporterKinds = []string{}
+	_ = json.Unmarshal(kinds, &c.ReporterKinds)
 	c.FormSchema = []FormField{}
 	_ = json.Unmarshal(schema, &c.FormSchema)
 	return c, nil
@@ -701,7 +710,7 @@ func (s *Store) ListEvents(ctx context.Context, schoolID, ticketID string, inclu
 	if !includeInternal {
 		q += ` AND NOT internal AND kind NOT IN ('escalation','sla_breach')`
 	}
-	rows, err := s.DB.QueryContext(ctx, q+` ORDER BY created_at, id`, schoolID, ticketID)
+	rows, err := s.DB.QueryContext(ctx, q+` ORDER BY created_at, seq`, schoolID, ticketID)
 	if err != nil {
 		return nil, err
 	}

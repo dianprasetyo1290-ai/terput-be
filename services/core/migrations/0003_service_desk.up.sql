@@ -151,7 +151,8 @@ CREATE TABLE sd_ticket_events (
     attachments JSONB NOT NULL DEFAULT '[]',
     actor_user_id UUID NULL,
     dedupe_key TEXT NULL,
+    seq BIGSERIAL, -- stable timeline order for events sharing a timestamp
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (ticket_id, dedupe_key)
 );
-CREATE INDEX idx_sd_ticket_events_ticket ON sd_ticket_events (ticket_id, created_at);
+CREATE INDEX idx_sd_ticket_events_ticket ON sd_ticket_events (ticket_id, created_at, seq);
