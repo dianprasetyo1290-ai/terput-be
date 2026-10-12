@@ -9,9 +9,9 @@ import (
 
 func TestAlertView_AC12701(t *testing.T) {
 	p := Profile{
-		BloodType: "O",
-		Allergies: []Allergy{{Name: "Kacang", Reaction: "sesak napas", IsAlert: true}, {Name: "Debu", IsAlert: false}},
-		Conditions: []Condition{{Name: "Riwayat asma", Note: "kambuh saat dingin", IsAlert: false}},
+		BloodType:          "O",
+		Allergies:          []Allergy{{Name: "Kacang", Reaction: "sesak napas", IsAlert: true}, {Name: "Debu", IsAlert: false}},
+		Conditions:         []Condition{{Name: "Riwayat asma", Note: "kambuh saat dingin", IsAlert: false}},
 		RoutineMedications: []Medication{{Name: "Salbutamol"}},
 	}
 	contacts := []Contact{{Name: "Ibu", Relationship: "ibu", Phone: "081234567"}}
@@ -209,13 +209,25 @@ func TestValidateProgram(t *testing.T) {
 		err  bool
 		f    func() error
 	}{
-		{"valid", false, func() error { return ValidateProgram(KindImmunization, "BIAS", d("2026-11-01"), d("2026-11-03"), true, &dl, tg) }},
+		{"valid", false, func() error {
+			return ValidateProgram(KindImmunization, "BIAS", d("2026-11-01"), d("2026-11-03"), true, &dl, tg)
+		}},
 		{"jenis asing", true, func() error { return ValidateProgram("vaksin", "x", d("2026-11-01"), d("2026-11-01"), false, nil, tg) }},
-		{"nama kosong", true, func() error { return ValidateProgram(KindScreening, " ", d("2026-11-01"), d("2026-11-01"), false, nil, tg) }},
-		{"selesai sebelum mulai", true, func() error { return ValidateProgram(KindScreening, "x", d("2026-11-02"), d("2026-11-01"), false, nil, tg) }},
-		{"butuh consent tanpa batas", true, func() error { return ValidateProgram(KindScreening, "x", d("2026-11-01"), d("2026-11-01"), true, nil, tg) }},
-		{"batas setelah mulai", true, func() error { return ValidateProgram(KindScreening, "x", d("2026-11-01"), d("2026-11-09"), true, &late, tg) }},
-		{"sasaran asing", true, func() error { return ValidateProgram(KindScreening, "x", d("2026-11-01"), d("2026-11-01"), false, nil, []Target{{"sekolah", "x"}}) }},
+		{"nama kosong", true, func() error {
+			return ValidateProgram(KindScreening, " ", d("2026-11-01"), d("2026-11-01"), false, nil, tg)
+		}},
+		{"selesai sebelum mulai", true, func() error {
+			return ValidateProgram(KindScreening, "x", d("2026-11-02"), d("2026-11-01"), false, nil, tg)
+		}},
+		{"butuh consent tanpa batas", true, func() error {
+			return ValidateProgram(KindScreening, "x", d("2026-11-01"), d("2026-11-01"), true, nil, tg)
+		}},
+		{"batas setelah mulai", true, func() error {
+			return ValidateProgram(KindScreening, "x", d("2026-11-01"), d("2026-11-09"), true, &late, tg)
+		}},
+		{"sasaran asing", true, func() error {
+			return ValidateProgram(KindScreening, "x", d("2026-11-01"), d("2026-11-01"), false, nil, []Target{{"sekolah", "x"}})
+		}},
 	}
 	for _, tc := range cases {
 		if err := tc.f(); (err != nil) != tc.err {

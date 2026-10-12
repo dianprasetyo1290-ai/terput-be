@@ -31,17 +31,17 @@ const (
 // core and ops over one httptest server.
 type fakeWorld struct {
 	mu             sync.Mutex
-	features       map[string]bool              // school → health enabled
-	guardians      map[string][]string          // student → guardian ids
-	homeroom       map[string]string            // classroom → teacher
-	roster         map[string][]string          // classroom → students
-	grade          map[string]string            // classroom → grade
-	names          map[string]string            // user → name
-	flowConfigured bool                         // core approval flow exists
-	opsStatus      int                          // 0 = 201
-	attendance     []map[string]any             // calls
-	notifications  map[string]int               // idempotency key → calls
-	approvals      []map[string]any             // calls
+	features       map[string]bool     // school → health enabled
+	guardians      map[string][]string // student → guardian ids
+	homeroom       map[string]string   // classroom → teacher
+	roster         map[string][]string // classroom → students
+	grade          map[string]string   // classroom → grade
+	names          map[string]string   // user → name
+	flowConfigured bool                // core approval flow exists
+	opsStatus      int                 // 0 = 201
+	attendance     []map[string]any    // calls
+	notifications  map[string]int      // idempotency key → calls
+	approvals      []map[string]any    // calls
 	audits         int
 }
 

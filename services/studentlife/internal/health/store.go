@@ -441,19 +441,19 @@ func SetOutbox(ctx context.Context, q store.Q, id, status, errMsg string, countA
 // ---- programs --------------------------------------------------------------
 
 type Program struct {
-	ID              string     `json:"id"`
-	Kind            string     `json:"kind"`
-	Name            string     `json:"name"`
-	Description     string     `json:"description"`
-	StartsOn        string     `json:"starts_on"`
-	EndsOn          string     `json:"ends_on"`
-	RequiresConsent bool       `json:"requires_consent"`
-	ConsentDeadline *string    `json:"consent_deadline"`
-	Status          string     `json:"status"`
-	CreatedBy       string     `json:"created_by"`
-	CreatedAt       time.Time  `json:"created_at"`
-	Targets         []Target   `json:"targets"`
-	ParticipantsN   int        `json:"participants_count"`
+	ID              string    `json:"id"`
+	Kind            string    `json:"kind"`
+	Name            string    `json:"name"`
+	Description     string    `json:"description"`
+	StartsOn        string    `json:"starts_on"`
+	EndsOn          string    `json:"ends_on"`
+	RequiresConsent bool      `json:"requires_consent"`
+	ConsentDeadline *string   `json:"consent_deadline"`
+	Status          string    `json:"status"`
+	CreatedBy       string    `json:"created_by"`
+	CreatedAt       time.Time `json:"created_at"`
+	Targets         []Target  `json:"targets"`
+	ParticipantsN   int       `json:"participants_count"`
 }
 
 const programCols = `p.id, p.kind, p.name, p.description, to_char(p.starts_on,'YYYY-MM-DD'), to_char(p.ends_on,'YYYY-MM-DD'),

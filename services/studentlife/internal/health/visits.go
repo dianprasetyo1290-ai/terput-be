@@ -530,7 +530,7 @@ func (h *Handler) ProcessVisitEffects(ctx context.Context, visitID, schoolID str
 			_ = h.Client.ReportException(ctx, client.IntegrationException{SchoolID: schoolID, SourceService: "studentlife",
 				Kind: "callback", Severity: "medium", CorrelationID: v.ID, ErrorMessage: "Sinkron presensi sakit dari UKS gagal",
 				PayloadSummary: map[string]any{"visit_id": v.ID, "student_id": v.StudentID, "target": "attendance"},
-				MaxAttempts: h.Cfg.JobMaxAttempts, IdempotencyKey: "studentlife:absence:" + v.ID})
+				MaxAttempts:    h.Cfg.JobMaxAttempts, IdempotencyKey: "studentlife:absence:" + v.ID})
 		default:
 			_ = SetAttendanceSync(ctx, h.DB, v.ID, SyncPending, "sinkron presensi belum berhasil")
 		}
