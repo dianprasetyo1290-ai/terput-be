@@ -67,6 +67,10 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	c.Gateway = gw
+	if c.Gateway.BillingInternalURL == "" {
+		// Dev default only; in docker set BILLING_INTERNAL_URL=http://billing:<port>.
+		c.Gateway.BillingInternalURL = "http://localhost:" + c.Port
+	}
 
 	if c.JWTSecret == "" && !production {
 		c.JWTSecret = "change-me"
