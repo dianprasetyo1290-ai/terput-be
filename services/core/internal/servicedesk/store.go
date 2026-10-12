@@ -737,6 +737,7 @@ type Change struct {
 type MutateResult struct {
 	Ticket     *Ticket
 	EventID    string // the public event the reporter is told about ("" = none)
+	CommentID  string
 	StatusFrom string
 }
 
@@ -829,6 +830,7 @@ func (s *Store) Mutate(ctx context.Context, schoolID, id string, c Change) (*Mut
 		if err != nil {
 			return nil, err
 		}
+		res.CommentID = eid
 		if !c.Internal && res.EventID == "" && c.ActorUserID != reporter {
 			res.EventID = eid
 		}

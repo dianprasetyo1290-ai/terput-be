@@ -17,6 +17,7 @@ import (
 	"skci/core/internal/common"
 	"skci/core/internal/config"
 	"skci/core/internal/model"
+	"skci/core/internal/servicedesk"
 	"skci/core/internal/store"
 )
 
@@ -25,6 +26,9 @@ type Handler struct {
 	Config config.Config
 	Client *client.Client
 	wg     sync.WaitGroup
+	// ServiceDesk is the nil-safe BR-SD-01 hook (T11): menu 81 requests
+	// become tickets when the school runs the service desk.
+	ServiceDesk *servicedesk.Service
 }
 
 func New(st store.Store, cfg config.Config, cl *client.Client) *Handler {

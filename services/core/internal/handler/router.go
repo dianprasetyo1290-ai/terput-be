@@ -40,6 +40,9 @@ func NewRouter(h *Handler, cfg config.Config) http.Handler {
 		ir.Post("/internal/approvals/{id}/cancel", h.InternalCancelApproval)
 		ir.Post("/internal/exceptions", h.InternalCreateException)
 		ir.Post("/internal/audit", h.InternalCreateAudit)
+		if h.ServiceDesk != nil {
+			h.ServiceDesk.InternalRoutes(ir)
+		}
 	})
 
 	// ---------------------------------------------------------------------
@@ -93,6 +96,11 @@ func NewRouter(h *Handler, cfg config.Config) http.Handler {
 		pr.Get("/service-requests/{id}", h.GetServiceRequestDetail)
 		pr.Post("/service-requests/{id}/status", h.UpdateServiceRequestStatus)
 		pr.Post("/service-requests/{id}/result", h.UpdateServiceRequestResult)
+
+		// Service Desk (menu 137-138, T11)
+		if h.ServiceDesk != nil {
+			h.ServiceDesk.Routes(pr)
+		}
 	})
 
 	return r

@@ -164,9 +164,9 @@ func (s *Service) FromServiceRequest(ctx context.Context, sr model.ServiceReques
 	if !s.FeatureEnabled(ctx, sr.SchoolID) {
 		return
 	}
-	if _, err := s.ticketFromServiceRequest(ctx, sr); err != nil && !errors.Is(err, ErrNotFound) {
+	if _, err := s.TicketFromServiceRequest(ctx, sr); err != nil && !errors.Is(err, ErrNotFound) {
 		log.Printf("service desk: ticket from service request %s: %v", sr.ID, err)
-		retry := s.Config.SelfInternalURL + "/internal/service-desk/from-service-request/" + sr.ID
+		retry := s.Config.SelfInternalURL + "/internal/service-desk/from-service-request/" + sr.ID + "?school_id=" + sr.SchoolID
 		_, _, xerr := s.Core.UpsertException(ctx, model.IntegrationException{
 			SchoolID: sr.SchoolID, SourceService: "core", Kind: model.ExceptionKindDeadLetter, Severity: model.SeverityNormal,
 			CorrelationID: "sr:" + sr.ID, ErrorMessage: "Gagal membuat tiket Service Desk: " + err.Error(), MaxAttempts: 3,
@@ -179,8 +179,8 @@ func (s *Service) FromServiceRequest(ctx context.Context, sr model.ServiceReques
 	}
 }
 
-// ticketFromServiceRequest returns ErrNotFound when no category maps the request.
-func (s *Service) ticketFromServiceRequest(ctx context.Context, sr model.ServiceRequest) (*Ticket, error) {
+// TicketFromServiceRequest returns ErrNotFound when no category maps the request.
+func (s *Service) TicketFromServiceRequest(ctx context.Context, sr model.ServiceRequest) (*Ticket, error) {
 	cat, err := s.Store.CategoryForServiceRequest(ctx, sr.SchoolID, sr.CategoryID)
 	if errors.Is(err, ErrNotFound) {
 		log.Printf("service desk: no category for service request category %s (school %s); menu 81 flow kept", sr.CategoryID, sr.SchoolID)

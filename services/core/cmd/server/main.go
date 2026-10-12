@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -13,6 +14,8 @@ import (
 	"skci/core/internal/config"
 	"skci/core/internal/handler"
 	"skci/core/internal/jobs"
+	"skci/core/internal/servicedesk"
+	"skci/core/internal/storage"
 	"skci/core/internal/store"
 )
 
@@ -37,14 +40,23 @@ func main() {
 
 	st := store.NewPGStore(db)
 	cl := client.New(cfg.NotificationURL, cfg.IdentityURL, cfg.HRURL, cfg.InternalKey)
+	cl.OpsURL = strings.TrimRight(cfg.OpsURL, "/")
+
+	// Service Desk (T11): menu 137-138 + BR-SD-01 hook on menu 81.
+	serviceDesk, err := servicedesk.New(db, st, cl, storage.NewLocal(cfg.StorageRoot, cfg.MaxUploadBytes), cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Periodic job runner (escalation + callback retries)
 	jobRunner := jobs.NewRunner(db, st, cl, time.Duration(cfg.JobIntervalSeconds)*time.Second, cfg.CallbackMaxAttempts)
+	jobRunner.ServiceDeskSLA = serviceDesk.RunSLAJob
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	jobRunner.Start(ctx)
 
 	appHandler := handler.New(st, cfg, cl)
+	appHandler.ServiceDesk = serviceDesk
 	r := handler.NewRouter(appHandler, cfg)
 
 	log.Printf("core-service listening on port %s", cfg.Port)

@@ -237,6 +237,9 @@ func (h *Handler) CreateParentServiceRequest(w http.ResponseWriter, r *http.Requ
 		common.WriteError(w, http.StatusInternalServerError, "gagal membuat permintaan layanan: "+err.Error())
 		return
 	}
+	if h.ServiceDesk != nil {
+		h.ServiceDesk.FromServiceRequest(r.Context(), *created)
+	}
 	common.WriteJSON(w, http.StatusCreated, created, nil)
 }
 
@@ -332,6 +335,10 @@ func (h *Handler) UpdateServiceRequestStatus(w http.ResponseWriter, r *http.Requ
 	schoolID := common.EffectiveSchoolID(r)
 	id := chi.URLParam(r, "id")
 
+	if h.serviceDeskGuard(w, r, schoolID, id) {
+		return
+	}
+
 	var input updateStatusInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		common.WriteError(w, http.StatusBadRequest, "format json tidak valid")
@@ -364,6 +371,10 @@ func (h *Handler) UpdateServiceRequestResult(w http.ResponseWriter, r *http.Requ
 
 	schoolID := common.EffectiveSchoolID(r)
 	id := chi.URLParam(r, "id")
+
+	if h.serviceDeskGuard(w, r, schoolID, id) {
+		return
+	}
 
 	var input updateResultInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
