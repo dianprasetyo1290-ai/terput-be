@@ -116,5 +116,11 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 		ir.Get("/students/{id}/attendance-summary", h.StudentAttendanceSummary)
 	})
 
+	// Service-to-service only (X-Internal-Key, never a browser JWT).
+	r.Group(func(in chi.Router) {
+		in.Use(common.InternalOnlyMiddleware(cfg.InternalKey))
+		in.Post("/internal/student-absences/health", h.InternalHealthAbsence)
+	})
+
 	return r
 }

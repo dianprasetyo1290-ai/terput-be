@@ -1,6 +1,9 @@
 package common
 
-import "net/http"
+import (
+	"crypto/subtle"
+	"net/http"
+)
 
 // InternalOrJWTMiddleware wraps JWTMiddleware for the one route
 // (GET /students/{id}/attendance-summary) that CONVENTIONS.md's cross-service
@@ -21,6 +24,21 @@ func InternalOrJWTMiddleware(jwtSecret, internalKey string) func(http.Handler) h
 				return
 			}
 			jwtWrapped.ServeHTTP(w, r)
+		})
+	}
+}
+
+// InternalOnlyMiddleware protects /internal/** routes that only sibling
+// services (never a browser JWT) may call, using a constant-time compare.
+func InternalOnlyMiddleware(internalKey string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			got := r.Header.Get("X-Internal-Key")
+			if internalKey == "" || subtle.ConstantTimeCompare([]byte(got), []byte(internalKey)) != 1 {
+				WriteError(w, http.StatusUnauthorized, "invalid internal credentials")
+				return
+			}
+			next.ServeHTTP(w, r)
 		})
 	}
 }

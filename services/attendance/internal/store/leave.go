@@ -36,6 +36,8 @@ type LeaveRequest struct {
 	ReviewedAt     *time.Time `json:"reviewed_at"`
 	ReviewNote     *string    `json:"review_note"`
 	CreatedAt      time.Time  `json:"created_at"`
+	Source         string     `json:"source"`     // parent | uks (T10)
+	SickSince      *time.Time `json:"sick_since"` // jam dipulangkan/dirujuk UKS
 
 	// Enrichment filled in by the handler (identity/academic lookups).
 	StudentName   string `json:"student_name,omitempty"`
@@ -45,15 +47,18 @@ type LeaveRequest struct {
 
 const leaveColumns = `id, school_id, academic_year_id, classroom_id, student_id, requested_by, type,
 	to_char(start_date, 'YYYY-MM-DD'), to_char(end_date, 'YYYY-MM-DD'), reason, attachment_name,
-	status, reviewed_by, reviewed_at, review_note, created_at`
+	status, reviewed_by, reviewed_at, review_note, created_at, source, sick_since`
 
 func scanLeave(sc interface{ Scan(...interface{}) error }) (*LeaveRequest, error) {
 	var l LeaveRequest
 	var ay, cls, att, rb, note sql.NullString
-	var ra sql.NullTime
+	var ra, ss sql.NullTime
 	if err := sc.Scan(&l.ID, &l.SchoolID, &ay, &cls, &l.StudentID, &l.RequestedBy, &l.Type,
-		&l.StartDate, &l.EndDate, &l.Reason, &att, &l.Status, &rb, &ra, &note, &l.CreatedAt); err != nil {
+		&l.StartDate, &l.EndDate, &l.Reason, &att, &l.Status, &rb, &ra, &note, &l.CreatedAt, &l.Source, &ss); err != nil {
 		return nil, err
+	}
+	if ss.Valid {
+		l.SickSince = &ss.Time
 	}
 	str := func(n sql.NullString) *string {
 		if n.Valid {
@@ -195,6 +200,15 @@ func leaveCatatan(typ, reason string) string {
 	return "Pengajuan " + typ + " disetujui: " + reason
 }
 
+// catatanFor is the attendance note an approved request writes: UKS rows
+// carry their own note ("Dipulangkan dari UKS pukul 10.15 WIB").
+func catatanFor(source, typ, reason string) string {
+	if source == LeaveSourceUKS {
+		return reason
+	}
+	return leaveCatatan(typ, reason)
+}
+
 // ApprovedLeave is the attendance status + note an approved request imposes
 // on one student for one date.
 type ApprovedLeave struct{ Status, Catatan string }
@@ -209,7 +223,7 @@ func (s *Store) ApprovedLeaveTypes(ctx context.Context, schoolID, sessionDate st
 		return out, nil
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT student_id, type, reason FROM leave_requests
+		SELECT student_id, type, reason, source FROM leave_requests
 		WHERE school_id = $1 AND status = 'approved' AND $2::date BETWEEN start_date AND end_date
 		  AND student_id::text = ANY(string_to_array($3, ','))
 	`, schoolID, sessionDate, strings.Join(studentIDs, ","))
@@ -218,11 +232,68 @@ func (s *Store) ApprovedLeaveTypes(ctx context.Context, schoolID, sessionDate st
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var sid, typ, reason string
-		if err := rows.Scan(&sid, &typ, &reason); err != nil {
+		var sid, typ, reason, source string
+		if err := rows.Scan(&sid, &typ, &reason, &source); err != nil {
 			return nil, err
 		}
-		out[sid] = ApprovedLeave{Status: typ, Catatan: leaveCatatan(typ, reason)}
+		out[sid] = ApprovedLeave{Status: typ, Catatan: catatanFor(source, typ, reason)}
 	}
 	return out, rows.Err()
+}
+
+// ---- absen sakit dari UKS (T10 §4.2, menu 128 AC-128-01) ----------------
+
+// LeaveSourceUKS marks leave_requests rows created by studentlife (UKS).
+const LeaveSourceUKS = "uks"
+
+// HealthAbsenceInput is POST /internal/student-absences/health.
+type HealthAbsenceInput struct {
+	SchoolID, StudentID, Date, SourceRef, ActorUserID, Reason, ClassroomID string
+	SickSince                                                              time.Time
+}
+
+// ApplyHealthAbsence records an approved 'sakit' leave for one day from a
+// UKS visit and applies BR-ATT-02 to that day's attendance rows (same path
+// as ReviewLeaveRequest; days seeded later pick it up via ApprovedLeaveTypes).
+// Idempotent by source_ref; never overrides another approved izin/sakit.
+func (s *Store) ApplyHealthAbsence(ctx context.Context, in HealthAbsenceInput) (applied bool, reason string, err error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return false, "", err
+	}
+	defer tx.Rollback()
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM leave_requests WHERE source = $1 AND source_ref = $2)`,
+		LeaveSourceUKS, in.SourceRef).Scan(&exists); err != nil {
+		return false, "", err
+	}
+	if exists {
+		return true, "", nil
+	}
+	var covered bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM leave_requests
+		WHERE school_id = $1 AND student_id = $2 AND status = 'approved' AND $3::date BETWEEN start_date AND end_date)`,
+		in.SchoolID, in.StudentID, in.Date).Scan(&covered); err != nil {
+		return false, "", err
+	}
+	if covered {
+		return false, "sudah ada izin/sakit disetujui", nil
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO leave_requests (school_id, classroom_id, student_id, requested_by, type,
+			start_date, end_date, reason, status, reviewed_by, reviewed_at, source, source_ref, sick_since)
+		VALUES ($1, NULLIF($2,'')::uuid, $3, $4, 'sakit', $5::date, $5::date, $6, 'approved', $4, now(), $7, $8, $9)
+		ON CONFLICT (source, source_ref) WHERE source_ref IS NOT NULL DO NOTHING`,
+		in.SchoolID, in.ClassroomID, in.StudentID, in.ActorUserID, in.Date, in.Reason, LeaveSourceUKS, in.SourceRef, in.SickSince)
+	if err != nil {
+		return false, "", err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return true, "", nil
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE student_attendances SET status = 'sakit', catatan = $1, marked_by = $2, updated_at = now()
+		WHERE student_id = $3 AND school_id = $4 AND session_date = $5::date`,
+		in.Reason, in.ActorUserID, in.StudentID, in.SchoolID, in.Date); err != nil {
+		return false, "", err
+	}
+	return true, "", tx.Commit()
 }
