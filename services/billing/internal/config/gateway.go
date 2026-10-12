@@ -30,6 +30,13 @@ type Gateway struct {
 
 	Location    *time.Location
 	JobInterval time.Duration
+
+	// T14: simulator switches (non-production only) for failover and
+	// failed-debit drills, and how many past days the daily gateway journal
+	// job re-checks for days it has not journaled yet.
+	SimFailCharges      bool
+	SimFailDebits       bool
+	JournalLookbackDays int
 }
 
 // NicepayConfigured reports whether NICEPay credentials are present.
@@ -52,6 +59,9 @@ func loadGateway() (Gateway, error) {
 		AccountingURL:       os.Getenv("ACCOUNTING_URL"),
 		BillingInternalURL:  strings.TrimRight(os.Getenv("BILLING_INTERNAL_URL"), "/"),
 		JobInterval:         time.Duration(integer("GATEWAY_JOB_INTERVAL_SECONDS", 60)) * time.Second,
+		SimFailCharges:      os.Getenv("PAYMENT_SIM_FAIL_CHARGES") == "true",
+		SimFailDebits:       os.Getenv("PAYMENT_SIM_FAIL_DEBITS") == "true",
+		JournalLookbackDays: integer("GATEWAY_JOURNAL_LOOKBACK_DAYS", 7),
 	}
 	loc, err := time.LoadLocation(env("APP_TIMEZONE", "Asia/Jakarta"))
 	if err != nil {
@@ -77,4 +87,33 @@ func loadGateway() (Gateway, error) {
 		return g, errors.New("NICEPay is partially configured; missing " + strings.Join(missing, ", "))
 	}
 	return g, nil
+}
+
+// NicepayCredentials are the NICEPay settings of one provider instance,
+// read from <credential_ref>_* (FR-150-001: credentials live in the secret
+// manager / env, never in the DB). The 'NICEPAY' prefix is the T6 set.
+type NicepayCredentials struct {
+	BaseURL, ClientID, ChannelID, ClientSecret, PrivateKey, PublicKey string
+	StoreID, CallbackURL, ReturnURL, ImageURL                        string
+}
+
+// NicepayFromEnv reads <prefix>_BASE_URL, <prefix>_CLIENT_ID, ...
+func NicepayFromEnv(prefix string) NicepayCredentials {
+	get := func(k string) string { return strings.TrimSpace(os.Getenv(prefix + "_" + k)) }
+	return NicepayCredentials{
+		BaseURL: strings.TrimRight(get("BASE_URL"), "/"), ClientID: get("CLIENT_ID"), ChannelID: get("CHANNEL_ID"),
+		ClientSecret: get("CLIENT_SECRET"), PrivateKey: get("PRIVATE_KEY"), PublicKey: get("PUBLIC_KEY"),
+		StoreID: get("STORE_ID"), CallbackURL: get("CALLBACK_URL"), ReturnURL: strings.TrimRight(get("RETURN_URL"), "/"),
+		ImageURL: get("IMAGE_URL"),
+	}
+}
+
+// Installed reports whether every required credential is present.
+func (c NicepayCredentials) Installed() bool {
+	for _, v := range []string{c.BaseURL, c.ClientID, c.ChannelID, c.ClientSecret, c.PrivateKey, c.PublicKey, c.CallbackURL, c.ReturnURL} {
+		if v == "" {
+			return false
+		}
+	}
+	return true
 }

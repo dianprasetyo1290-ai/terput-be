@@ -225,10 +225,29 @@ func (c *Client) call(method, path string, body any, out snapResponse) error {
 		return err
 	}
 	if rc, msg := out.code(); !strings.HasPrefix(rc, "200") {
-		return fmt.Errorf("nicepay %s: %s %s", path, rc, msg)
+		return &APIError{Path: path, Code: rc, Message: msg}
 	}
 	return nil
 }
+
+// APIError is a SNAP response whose responseCode is not 200xxxx. The first
+// three digits of a SNAP code are the HTTP status class.
+type APIError struct {
+	Path, Code, Message string
+}
+
+func (e *APIError) Error() string { return fmt.Sprintf("nicepay %s: %s %s", e.Path, e.Code, e.Message) }
+
+// ServerSide reports a 5xx SNAP code (NICEPay-side outage).
+func (e *APIError) ServerSide() bool { return strings.HasPrefix(e.Code, "5") }
+
+// HTTPError is a response that was not SNAP JSON at all.
+type HTTPError struct {
+	Status int
+	Body   string
+}
+
+func (e *HTTPError) Error() string { return fmt.Sprintf("nicepay: HTTP %d: %s", e.Status, e.Body) }
 
 func (c *Client) send(req *http.Request, out any) error {
 	resp, err := c.httpClient.Do(req)
@@ -241,7 +260,7 @@ func (c *Client) send(req *http.Request, out any) error {
 		return err
 	}
 	if err := json.Unmarshal(b, out); err != nil {
-		return fmt.Errorf("nicepay: HTTP %d: %s", resp.StatusCode, string(b))
+		return &HTTPError{Status: resp.StatusCode, Body: string(b)}
 	}
 	return nil
 }
