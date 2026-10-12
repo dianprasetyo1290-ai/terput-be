@@ -13,6 +13,7 @@ import (
 	"skci/billing/internal/common"
 	"skci/billing/internal/config"
 	"skci/billing/internal/handler"
+	"skci/billing/internal/jobs"
 	"skci/billing/internal/nicepay"
 	"skci/billing/internal/storage"
 	"skci/billing/internal/store"
@@ -66,6 +67,23 @@ func main() {
 		app.Accounting = client.New(cfg.Gateway.AccountingURL, cfg.InternalKey)
 	}
 
+	// T12 & T14: kantin, dompet, dan payment-extension jobs.
+	app.IdentitySvc = client.New(cfg.IdentityURL, cfg.InternalKey)
+	app.PaymentFeatures = client.New(cfg.IdentityURL, cfg.InternalKey)
+	app.PurposeCharger = app
+	if app.PurposeHandlers == nil {
+		app.PurposeHandlers = make(map[string]handler.PurposeHandler)
+	}
+	app.PurposeHandlers["wallet_topup"] = app.WalletTopupHook()
+
+	gwRunner := jobs.NewRunner(db, cfg.Gateway.JobInterval)
+	gwRunner.Register("autodebit_schedule", app.JobAutodebitSchedule)
+	gwRunner.Register("retail_expiry", app.JobRetailExpiry)
+	gwRunner.Register("provider_health", app.JobProviderHealth)
+	gwRunner.Register("gateway_journal", app.JobGatewayJournal)
+	gwRunner.Start()
+	defer gwRunner.Stop()
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.RealIP, middleware.Logger, common.SentryMiddleware(), middleware.Recoverer)
 	r.Use(cors.Handler(cors.Options{
@@ -83,6 +101,9 @@ func main() {
 
 	// Payment Gateway Webhook (no JWT auth, verified via SNAP signature)
 	r.Post("/webhooks/nicepay", app.NicepayWebhook)
+	// T14: webhook per provider + mandate notifications.
+	r.Post("/webhooks/{provider}", app.ProviderWebhook)
+	r.Post("/webhooks/{provider}/mandates", app.MandateWebhook)
 
 	// ---------------------------------------------------------------------
 	// Portal Orang Tua (identity JWT, active_role=orang_tua). Child
@@ -96,6 +117,12 @@ func main() {
 		pr.Post("/parent/checkout", app.ParentCheckout)
 		pr.Get("/parent/transactions/{id}", app.ParentGetTransaction)
 		pr.Post("/parent/transactions/{id}/renew", app.ParentRenewTransaction)
+		// T14: autodebit (orang_tua, payment_autodebit).
+		pr.Get("/parent/autodebit/mandates", app.ParentListMandates)
+		pr.Post("/parent/autodebit/mandates", app.ParentCreateMandate)
+		pr.Post("/parent/autodebit/mandates/{id}/cancel", app.ParentCancelMandate)
+		pr.Get("/parent/autodebit/attempts", app.ParentListAttempts)
+		pr.Get("/payment-providers/options", app.ListPaymentProviderOptions)
 
 		pr.Get("/parent/children/{studentUserId}/bills", app.ListChildBills)
 		pr.Get("/parent/children/{studentUserId}/bills/{billId}", app.GetChildBill)
@@ -174,6 +201,20 @@ func main() {
 		ad.Post("/admin/bank-reconciliation/run", app.AdminRunBankReconciliation)
 
 		ad.Get("/admin/payment-dashboard", app.AdminPaymentDashboard)
+
+		// T14: providers (superadmin), routing, autodebit administration.
+		ad.Get("/platform/payment-providers", app.PlatformListProviders)
+		ad.Post("/platform/payment-providers", app.PlatformCreateProvider)
+		ad.Put("/platform/payment-providers/{code}", app.PlatformUpdateProvider)
+		ad.Get("/admin/payment-routing-rules", app.AdminListRoutingRules)
+		ad.Post("/admin/payment-routing-rules", app.AdminCreateRoutingRule)
+		ad.Post("/admin/payment-routing-rules/preview", app.AdminPreviewRouting)
+		ad.Put("/admin/payment-routing-rules/{id}", app.AdminUpdateRoutingRule)
+		ad.Delete("/admin/payment-routing-rules/{id}", app.AdminDeleteRoutingRule)
+		ad.Get("/admin/autodebit/mandates", app.AdminListMandates)
+		ad.Get("/admin/autodebit/attempts", app.AdminListAttempts)
+		ad.Get("/admin/autodebit/settings", app.AdminGetAutodebitSettings)
+		ad.Put("/admin/autodebit/settings", app.AdminPutAutodebitSettings)
 
 		ad.Get("/admin/student-bill-visibility", app.GetStudentBillVisibility)
 		ad.Put("/admin/student-bill-visibility", app.UpdateStudentBillVisibility)

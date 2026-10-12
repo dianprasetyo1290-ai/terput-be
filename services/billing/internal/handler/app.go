@@ -3,10 +3,12 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"sync"
 	"time"
 
 	"skci/billing/internal/client"
 	"skci/billing/internal/config"
+	"skci/billing/internal/gateway"
 	"skci/billing/internal/nicepay"
 	"skci/billing/internal/storage"
 )
@@ -52,6 +54,14 @@ type App struct {
 	Ops            *client.Client
 	PurposeCharger purposeCharger
 	Clock          func() time.Time
+
+	// T14: provider adapters by code (nil = built from payment_providers +
+	// env on first use), purpose hooks called by the webhook (contract K2),
+	// and the per-school feature switch reader.
+	Providers       map[string]gateway.Provider
+	PurposeHandlers map[string]PurposeHandler
+	PaymentFeatures FeatureChecker
+	providerCache   sync.Map
 }
 
 // New wires the application graph.

@@ -43,6 +43,17 @@ type PaymentDashboardResponse struct {
 	MethodShares      []MethodShareStat     `json:"method_shares"`
 	DailyTrend        []DailyTrendItem      `json:"daily_trend"`
 	SettlementSummary SettlementSummaryStat `json:"settlement_summary"`
+	// T14 (FR-150-004): per-provider breakdown.
+	ProviderBreakdown []ProviderStat `json:"provider_breakdown"`
+}
+
+// ProviderStat is one provider's share of the period's transactions.
+type ProviderStat struct {
+	Provider      string `json:"provider"`
+	Count         int    `json:"count"`
+	SuccessCount  int    `json:"success_count"`
+	AmountIDR     int64  `json:"amount_idr"`
+	FailoverCount int    `json:"failover_count"`
 }
 
 // AdminPaymentDashboard calculates payment statistics, method shares, and trends (FR-26-001, AC-26-01).
@@ -112,7 +123,7 @@ func (a *App) AdminPaymentDashboard(w http.ResponseWriter, r *http.Request) {
 
 	shares := model.MethodShare(counts)
 	var methodShares []MethodShareStat
-	for _, k := range []string{"va", "qris", "ewallet"} {
+	for _, k := range []string{"va", "qris", "ewallet", "retail", "autodebit"} {
 		c := counts[k]
 		bp := shares[k]
 		methodShares = append(methodShares, MethodShareStat{
@@ -148,7 +159,26 @@ func (a *App) AdminPaymentDashboard(w http.ResponseWriter, r *http.Request) {
 		 WHERE school_id = $1 AND settled_on BETWEEN $2 AND $3`, schoolID, fromStr, toStr).Scan(
 		&setStat.TotalBatches, &setStat.GrossIDR, &setStat.FeeIDR, &setStat.NetIDR)
 
+	// 5. Provider breakdown
+	providerBreakdown := []ProviderStat{}
+	pRows, err := a.DB.QueryContext(r.Context(),
+		`SELECT provider, COUNT(*), COUNT(*) FILTER (WHERE status = 'success'),
+		        COALESCE(SUM(total_idr) FILTER (WHERE status = 'success'), 0), COUNT(*) FILTER (WHERE failover_from IS NOT NULL)
+		 FROM gateway_transactions
+		 WHERE school_id = $1 AND DATE(created_at) BETWEEN $2 AND $3
+		 GROUP BY provider ORDER BY provider`, schoolID, fromStr, toStr)
+	if err == nil {
+		defer pRows.Close()
+		for pRows.Next() {
+			var it ProviderStat
+			if err := pRows.Scan(&it.Provider, &it.Count, &it.SuccessCount, &it.AmountIDR, &it.FailoverCount); err == nil {
+				providerBreakdown = append(providerBreakdown, it)
+			}
+		}
+	}
+
 	resp := PaymentDashboardResponse{
+		ProviderBreakdown: providerBreakdown,
 		PeriodFrom:        fromStr,
 		PeriodTo:          toStr,
 		StatusSummary:     statusSummary,
@@ -189,7 +219,8 @@ func (a *App) AdminListTransactions(w http.ResponseWriter, r *http.Request) {
 
 	query := `SELECT t.id, t.tx_no, t.bills_amount_idr, t.fee_idr, t.total_idr, t.fee_bearer,
 	                 t.status, m.code, m.kind, m.label, t.va_number, t.qr_content, t.redirect_url,
-	                 t.expires_at, t.paid_at, t.student_user_id, t.provider_ref, t.created_at
+	                 t.expires_at, t.paid_at, t.student_user_id, t.provider_ref, t.created_at,
+	                 t.provider, t.failover_from, t.purpose
 	          FROM gateway_transactions t
 	          JOIN payment_methods m ON m.id = t.method_id
 	          WHERE t.school_id = $1`
@@ -203,6 +234,10 @@ func (a *App) AdminListTransactions(w http.ResponseWriter, r *http.Request) {
 	if method != "" {
 		args = append(args, method)
 		query += fmt.Sprintf(" AND m.kind = $%d", len(args))
+	}
+	if provider := r.URL.Query().Get("provider"); provider != "" {
+		args = append(args, provider)
+		query += fmt.Sprintf(" AND t.provider = $%d", len(args))
 	}
 	if from != "" {
 		args = append(args, from)
@@ -243,16 +278,20 @@ func (a *App) AdminListTransactions(w http.ResponseWriter, r *http.Request) {
 		PaidAt         *time.Time `json:"paid_at,omitempty"`
 		StudentUserID  string     `json:"student_user_id"`
 		CreatedAt      time.Time  `json:"created_at"`
+		Provider       string     `json:"provider"`
+		FailoverFrom   *string    `json:"failover_from,omitempty"`
+		Purpose        string     `json:"purpose"`
 	}
 
 	var items []adminTxRow
 	for rows.Next() {
 		var it adminTxRow
-		var va, qr, redir, pref sql.NullString
+		var va, qr, redir, pref, fo sql.NullString
 		var pAt sql.NullTime
 		if err := rows.Scan(&it.ID, &it.TXNo, &it.BillsAmountIDR, &it.FeeIDR, &it.TotalIDR, &it.FeeBearer,
 			&it.Status, &it.MethodCode, &it.MethodKind, &it.MethodLabel, &va, &qr, &redir,
-			&it.ExpiresAt, &pAt, &it.StudentUserID, &pref, &it.CreatedAt); err == nil {
+			&it.ExpiresAt, &pAt, &it.StudentUserID, &pref, &it.CreatedAt, &it.Provider, &fo, &it.Purpose); err == nil {
+			it.FailoverFrom = optString(fo.String)
 			if va.Valid {
 				it.VANumber = &va.String
 			}

@@ -6,13 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"skci/billing/internal/common"
+	"skci/billing/internal/gateway"
 	"skci/billing/internal/model"
-	"skci/billing/internal/nicepay"
 )
 
 type CheckoutPreviewRequest struct {
@@ -119,6 +120,29 @@ type TransactionResponse struct {
 	ExpiresAt      time.Time         `json:"expires_at"`
 	PaidAt         *time.Time        `json:"paid_at,omitempty"`
 	Bills          []BillSummaryItem `json:"bills,omitempty"`
+	// T14 (additive): provider that holds the transaction, purpose, retail
+	// pay code and the provider it failed over from.
+	Provider     string  `json:"provider"`
+	Purpose      string  `json:"purpose"`
+	PayCode      *string `json:"pay_code,omitempty"`
+	RetailOutlet *string `json:"retail_outlet,omitempty"`
+	FailoverFrom *string `json:"failover_from,omitempty"`
+}
+
+func optString(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
+}
+
+// clientIP is the payer's IP without port (NICEPay userIP).
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 // ParentCheckout creates a single payment transaction for multiple bills (AC-27-01).
@@ -194,115 +218,25 @@ func (a *App) ParentCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	txNo := fmt.Sprintf("TX-%s%d", time.Now().Format("060102150405"), time.Now().Nanosecond()%1000)
-
-	// Call NICEPay (or fallback to test simulation if client not configured)
-	expiresAt := time.Now().Add(time.Duration(method.ValidMinutes) * time.Minute)
-	var vaNumber, qrContent, redirectURL, providerRef string
-
-	order := nicepay.Order{
-		RefNo:      txNo,
-		Amount:     totals.TotalIDR,
-		GoodsName:  fmt.Sprintf("Pembayaran Tagihan (%d item)", len(bills)),
-		BuyerName:  "Orang Tua Siswa",
-		BuyerPhone: "081200000000",
-		NotifyURL:  a.Config.Gateway.NicepayCallbackURL,
-		ReturnURL:  a.Config.Gateway.NicepayReturnURL,
-		ClientIP:   "127.0.0.1",
-		ImageURL:   a.Config.Gateway.NicepayImageURL,
-	}
-
-	if a.Nicepay != nil {
-		switch method.Kind {
-		case "va":
-			ins, err := a.Nicepay.CreateVA(order, method.ProviderCode)
-			if err != nil {
-				common.WriteError(w, http.StatusBadGateway, "Gagal membuat kode VA: "+err.Error())
-				return
-			}
-			providerRef = ins.GatewayRef
-			vaNumber = ins.PayCode
-			if !ins.ExpiresAt.IsZero() {
-				expiresAt = ins.ExpiresAt
-			}
-		case "qris":
-			ins, err := a.Nicepay.CreateQRIS(order, time.Duration(method.ValidMinutes)*time.Minute)
-			if err != nil {
-				common.WriteError(w, http.StatusBadGateway, "Gagal membuat kode QRIS: "+err.Error())
-				return
-			}
-			providerRef = ins.GatewayRef
-			qrContent = ins.PayCode
-			if !ins.ExpiresAt.IsZero() {
-				expiresAt = ins.ExpiresAt
-			}
-		case "ewallet":
-			ins, err := a.Nicepay.CreateEWallet(order, method.ProviderCode, time.Duration(method.ValidMinutes)*time.Minute)
-			if err != nil {
-				common.WriteError(w, http.StatusBadGateway, "Gagal memproses e-wallet: "+err.Error())
-				return
-			}
-			providerRef = ins.GatewayRef
-			redirectURL = ins.PayCode
-			if !ins.ExpiresAt.IsZero() {
-				expiresAt = ins.ExpiresAt
-			}
-		}
-	} else {
-		// Test/dev simulation
-		providerRef = "SIM-" + txNo
-		switch method.Kind {
-		case "va":
-			vaNumber = "8808" + txNo[3:]
-		case "qris":
-			qrContent = "00020101021226680016ID.CO.NICEPAY.WWW0118936009990000000001520454115303360540" + fmt.Sprintf("%d", totals.TotalIDR) + "5802ID"
-		case "ewallet":
-			redirectURL = "https://mock-ewallet.nicepay.co.id/pay?ref=" + txNo
-		}
-	}
-
-	txDB, err := a.DB.BeginTx(r.Context(), nil)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	defer txDB.Rollback()
-
-	var txID string
-	err = txDB.QueryRowContext(r.Context(),
-		`INSERT INTO gateway_transactions (
-			school_id, tx_no, payer_user_id, student_user_id, method_id,
-			bills_amount_idr, fee_idr, total_idr, fee_bearer, status,
-			provider_ref, va_number, qr_content, redirect_url, expires_at, idempotency_key
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, NULLIF($11,''), NULLIF($12,''), NULLIF($13,''), $14, $15)
-		RETURNING id`,
-		claims.SchoolID, txNo, claims.UserID, req.StudentUserID, method.ID,
-		totals.BillsAmountIDR, totals.FeeIDR, totals.TotalIDR, totals.FeeBearer,
-		providerRef, vaNumber, qrContent, redirectURL, expiresAt, idemKey).Scan(&txID)
-	if err != nil {
+	if err := a.checkMethodAllowed(r.Context(), claims.SchoolID, method); err != nil {
 		writeErr(w, err)
 		return
 	}
 
-	for i, b := range bills {
-		_, err = txDB.ExecContext(r.Context(),
-			`INSERT INTO gateway_transaction_bills (transaction_id, bill_id, position, amount_idr)
-			 VALUES ($1, $2, $3, $4)`,
-			txID, b.ID, i+1, b.OutstandingIDR)
-		if err != nil {
-			writeErr(w, err)
-			return
-		}
-	}
-
-	if err := txDB.Commit(); err != nil {
+	out, err := a.createCharge(r.Context(), chargeInput{
+		SchoolID: claims.SchoolID, PayerUserID: claims.UserID, StudentUserID: req.StudentUserID,
+		Method: method, Totals: totals, Bills: bills, Purpose: PurposeBills, IdemKey: idemKey,
+		GoodsName: fmt.Sprintf("Pembayaran Tagihan (%d item)", len(bills)),
+		BuyerName: "Orang Tua Siswa", ClientIP: clientIP(r),
+	})
+	if err != nil {
 		writeErr(w, err)
 		return
 	}
 
 	res := TransactionResponse{
-		ID:             txID,
-		TXNo:           txNo,
+		ID:             out.TxID,
+		TXNo:           out.TxNo,
 		BillsAmountIDR: totals.BillsAmountIDR,
 		FeeIDR:         totals.FeeIDR,
 		TotalIDR:       totals.TotalIDR,
@@ -311,18 +245,17 @@ func (a *App) ParentCheckout(w http.ResponseWriter, r *http.Request) {
 		MethodCode:     method.Code,
 		MethodKind:     method.Kind,
 		MethodLabel:    method.Label,
-		ExpiresAt:      expiresAt,
+		ExpiresAt:      out.ExpiresAt,
 		Bills:          bills,
+		Provider:       out.Provider,
+		Purpose:        PurposeBills,
 	}
-	if vaNumber != "" {
-		res.VANumber = &vaNumber
-	}
-	if qrContent != "" {
-		res.QRContent = &qrContent
-	}
-	if redirectURL != "" {
-		res.RedirectURL = &redirectURL
-	}
+	res.VANumber = optString(out.Charge.VANumber)
+	res.QRContent = optString(out.Charge.QRContent)
+	res.RedirectURL = optString(out.Charge.RedirectURL)
+	res.PayCode = optString(out.Charge.PayCode)
+	res.RetailOutlet = optString(out.Charge.RetailOutlet)
+	res.FailoverFrom = optString(out.FailoverFrom)
 
 	common.WriteSuccess(w, res, nil)
 }
@@ -345,31 +278,26 @@ func (a *App) ParentGetTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Auto expire check if pending and expired
+	if tx.PayerUserID != claims.UserID {
+		common.WriteError(w, http.StatusNotFound, "transaksi tidak ditemukan")
+		return
+	}
+
+	// Pending past expires_at: ask the transaction's own provider, then
+	// settle (full allocation, same path as the webhook) or expire.
 	if tx.Status == "pending" && time.Now().After(tx.ExpiresAt) {
-		// Check NICEPay status if client available
-		if a.Nicepay != nil && tx.ProviderRef != nil {
-			st, err := a.Nicepay.Status(nicepay.StatusQuery{
-				Method:     tx.MethodKind,
-				RefNo:      tx.TXNo,
-				GatewayRef: *tx.ProviderRef,
-				Amount:     tx.TotalIDR,
-			})
-			if err == nil && st == nicepay.StatusSuccess {
-				// Transition to success
-				_ = a.markTransactionSuccess(r.Context(), tx.ID)
-				tx.Status = "success"
-				now := time.Now()
-				tx.PaidAt = &now
-			} else {
-				_, _ = a.DB.ExecContext(r.Context(),
-					`UPDATE gateway_transactions SET status = 'expired', updated_at = now() WHERE id = $1`, tx.ID)
-				tx.Status = "expired"
+		st := gateway.StatusExpired
+		if p, perr := a.paymentProvider(r.Context(), tx.Provider); perr == nil {
+			if got, qerr := p.QueryStatus(r.Context(), tx.statusQuery()); qerr == nil && got == gateway.StatusPaid {
+				st = gateway.StatusPaid
 			}
-		} else {
-			_, _ = a.DB.ExecContext(r.Context(),
-				`UPDATE gateway_transactions SET status = 'expired', updated_at = now() WHERE id = $1`, tx.ID)
-			tx.Status = "expired"
+		}
+		if err := a.applyProviderStatus(r.Context(), tx.ID, st, "expiry-check:"+tx.ID); err != nil {
+			writeErr(w, err)
+			return
+		}
+		if fresh, err := a.getTransactionByID(r.Context(), claims.SchoolID, id); err == nil {
+			tx = fresh
 		}
 	}
 
@@ -389,20 +317,23 @@ func (a *App) ParentRenewTransaction(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusNotFound, "transaksi tidak ditemukan")
 		return
 	}
+	if tx.PayerUserID != claims.UserID {
+		common.WriteError(w, http.StatusNotFound, "transaksi tidak ditemukan")
+		return
+	}
+	if tx.Purpose != PurposeBills {
+		common.WriteError(w, http.StatusBadRequest, "transaksi ini tidak dapat diperbarui dari halaman tagihan")
+		return
+	}
 	if tx.Status != "expired" && tx.Status != "failed" {
 		common.WriteError(w, http.StatusBadRequest, "hanya transaksi kedaluwarsa atau gagal yang dapat diperbarui")
 		return
 	}
 
-	// Best-effort cancel old VA at NICEPay
-	if tx.MethodKind == "va" && a.Nicepay != nil && tx.VANumber != nil && tx.ProviderRef != nil {
-		_ = a.Nicepay.CancelVA(nicepay.StatusQuery{
-			Method:     "va",
-			RefNo:      tx.TXNo,
-			GatewayRef: *tx.ProviderRef,
-			PayCode:    *tx.VANumber,
-			Amount:     tx.TotalIDR,
-		})
+	// Best-effort cancel of the old code at its own provider; the new
+	// checkout below is routed again (BR-PAY-03).
+	if p, perr := a.paymentProvider(r.Context(), tx.Provider); perr == nil && tx.ProviderRef != nil {
+		_ = p.Cancel(r.Context(), tx.statusQuery())
 	}
 
 	var billIDs []string
@@ -438,26 +369,44 @@ type fullTxDetail struct {
 	TransactionResponse
 	StudentUserID string
 	ProviderRef   *string
+	PayerUserID   string `json:"-"`
+}
+
+// statusQuery identifies the transaction at its provider.
+func (t *fullTxDetail) statusQuery() gateway.StatusQuery {
+	q := gateway.StatusQuery{Kind: t.MethodKind, RefNo: t.TXNo, AmountIDR: t.TotalIDR}
+	if t.ProviderRef != nil {
+		q.ProviderRef = *t.ProviderRef
+	}
+	if t.VANumber != nil {
+		q.PayCode = *t.VANumber
+	}
+	return q
 }
 
 func (a *App) getTransactionByID(ctx context.Context, schoolID, id string) (*fullTxDetail, error) {
 	var tx fullTxDetail
-	var va, qr, redir, pRef sql.NullString
+	var va, qr, redir, pRef, payCode, outlet, failoverFrom sql.NullString
 	var paidAt sql.NullTime
 
 	query := `SELECT t.id, t.tx_no, t.bills_amount_idr, t.fee_idr, t.total_idr, t.fee_bearer,
 	                 t.status, m.code, m.kind, m.label, t.va_number, t.qr_content, t.redirect_url,
-	                 t.expires_at, t.paid_at, t.student_user_id, t.provider_ref
+	                 t.expires_at, t.paid_at, t.student_user_id, t.provider_ref,
+	                 t.provider, t.purpose, t.pay_code, t.retail_outlet, t.failover_from, t.payer_user_id
 	          FROM gateway_transactions t
 	          JOIN payment_methods m ON m.id = t.method_id
 	          WHERE t.id = $1 AND t.school_id = $2`
 	err := a.DB.QueryRowContext(ctx, query, id, schoolID).Scan(
 		&tx.ID, &tx.TXNo, &tx.BillsAmountIDR, &tx.FeeIDR, &tx.TotalIDR, &tx.FeeBearer,
 		&tx.Status, &tx.MethodCode, &tx.MethodKind, &tx.MethodLabel, &va, &qr, &redir,
-		&tx.ExpiresAt, &paidAt, &tx.StudentUserID, &pRef)
+		&tx.ExpiresAt, &paidAt, &tx.StudentUserID, &pRef,
+		&tx.Provider, &tx.Purpose, &payCode, &outlet, &failoverFrom, &tx.PayerUserID)
 	if err != nil {
 		return nil, err
 	}
+	tx.PayCode = optString(payCode.String)
+	tx.RetailOutlet = optString(outlet.String)
+	tx.FailoverFrom = optString(failoverFrom.String)
 
 	if va.Valid {
 		tx.VANumber = &va.String

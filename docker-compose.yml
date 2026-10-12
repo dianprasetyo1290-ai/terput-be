@@ -322,6 +322,9 @@ services:
       STORAGE_ROOT: /data/private
       CORE_URL: http://core:${CORE_PORT:-8091}
       BILLING_INTERNAL_URL: http://billing:${BILLING_PORT}
+      NOTIFICATION_URL: http://notification:${NOTIFICATION_PORT}
+      ACCOUNTING_URL: http://accounting:80
+      GATEWAY_JOB_INTERVAL_SECONDS: ${GATEWAY_JOB_INTERVAL_SECONDS:-60}
     volumes: ["billing_files:/data/private"]
     ports: ["${BILLING_PORT}:${BILLING_PORT}"]
 

@@ -1,11 +1,14 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 
 	"skci/billing/internal/common"
+	"skci/billing/internal/gateway"
 	"skci/billing/internal/model"
 )
 
@@ -19,8 +22,9 @@ func (a *App) ListPaymentMethods(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.DB.QueryContext(r.Context(),
 		`SELECT id, code, kind, provider_code, label, enabled, fee_kind, fee_flat_idr, fee_bp, fee_bearer, valid_minutes, sort
 		 FROM payment_methods
-		 WHERE school_id = $1 AND enabled = true
-		 ORDER BY sort ASC, created_at ASC`, claims.SchoolID)
+		 WHERE school_id = $1 AND enabled = true AND kind <> 'autodebit'
+		   AND (kind <> 'retail' OR $2)
+		 ORDER BY sort ASC, created_at ASC`, claims.SchoolID, a.paymentFeature(r.Context(), claims.SchoolID, common.FeaturePaymentAutodebit))
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -75,7 +79,81 @@ func (a *App) AdminListPaymentMethods(w http.ResponseWriter, r *http.Request) {
 		methods = append(methods, m)
 	}
 
-	common.WriteSuccess(w, methods, nil)
+	out := make([]adminMethodDTO, 0, len(methods))
+	for _, m := range methods {
+		mp, err := a.methodMappings(r.Context(), m.ID)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		codes := []providerMethodCode{}
+		for _, p := range sortedMapKeys(mp) {
+			codes = append(codes, providerMethodCode{ProviderCode: p, ProviderMethodCode: mp[p]})
+		}
+		out = append(out, adminMethodDTO{GatewayMethod: m, ProviderCodes: codes})
+	}
+	common.WriteSuccess(w, out, nil)
+}
+
+// providerMethodCode maps a method to its code at one provider (T14).
+type providerMethodCode struct {
+	ProviderCode       string `json:"provider_code"`
+	ProviderMethodCode string `json:"provider_method_code"`
+}
+
+type adminMethodDTO struct {
+	model.GatewayMethod
+	ProviderCodes []providerMethodCode `json:"provider_codes"`
+}
+
+func sortedMapKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// validMethodKind: retail and autodebit methods need payment_autodebit.
+func (a *App) validMethodKind(ctx context.Context, schoolID, kind string) error {
+	switch kind {
+	case "va", "qris", "ewallet":
+		return nil
+	case gateway.CapRetail, kindAutodebit:
+		if a.paymentFeature(ctx, schoolID, common.FeaturePaymentAutodebit) {
+			return nil
+		}
+		return &httpError{status: http.StatusBadRequest, msg: "jenis gerai retail/autodebit membutuhkan fitur Autodebit & Gerai Retail"}
+	}
+	return &httpError{status: http.StatusBadRequest, msg: "invalid kind (va, qris, ewallet, retail, autodebit)"}
+}
+
+// saveMethodMappings replaces a method's provider codes when given.
+func (a *App) saveMethodMappings(ctx context.Context, methodID string, codes *[]providerMethodCode) error {
+	if codes == nil {
+		return nil
+	}
+	dbTx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer dbTx.Rollback()
+	if _, err := dbTx.ExecContext(ctx, `DELETE FROM payment_method_provider_codes WHERE method_id = $1`, methodID); err != nil {
+		return err
+	}
+	for _, c := range *codes {
+		pc, mc := strings.TrimSpace(c.ProviderCode), strings.TrimSpace(c.ProviderMethodCode)
+		if pc == "" || mc == "" {
+			continue
+		}
+		if _, err := dbTx.ExecContext(ctx,
+			`INSERT INTO payment_method_provider_codes (method_id, provider_code, provider_method_code) VALUES ($1, $2, $3)`,
+			methodID, pc, mc); err != nil {
+			return &httpError{status: http.StatusBadRequest, msg: "provider " + pc + " tidak dikenal"}
+		}
+	}
+	return dbTx.Commit()
 }
 
 type PaymentMethodInput struct {
@@ -90,6 +168,8 @@ type PaymentMethodInput struct {
 	FeeBearer    string `json:"fee_bearer"` // parent, school
 	ValidMinutes int    `json:"valid_minutes"`
 	Sort         int    `json:"sort"`
+	// T14: codes per provider; nil keeps the current mapping.
+	ProviderCodes *[]providerMethodCode `json:"provider_codes"`
 }
 
 // AdminCreatePaymentMethod creates a new payment method.
@@ -118,8 +198,8 @@ func (a *App) AdminCreatePaymentMethod(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "code, kind, provider_code, label are required")
 		return
 	}
-	if req.Kind != "va" && req.Kind != "qris" && req.Kind != "ewallet" {
-		common.WriteError(w, http.StatusBadRequest, "invalid kind (va, qris, ewallet)")
+	if err := a.validMethodKind(r.Context(), schoolID, req.Kind); err != nil {
+		writeErr(w, err)
 		return
 	}
 	if req.FeeKind != "flat" && req.FeeKind != "percent" {
@@ -147,6 +227,10 @@ func (a *App) AdminCreatePaymentMethod(w http.ResponseWriter, r *http.Request) {
 			common.WriteError(w, http.StatusConflict, "payment method code already exists")
 			return
 		}
+		writeErr(w, err)
+		return
+	}
+	if err := a.saveMethodMappings(r.Context(), id, req.ProviderCodes); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -196,6 +280,10 @@ func (a *App) AdminUpdatePaymentMethod(w http.ResponseWriter, r *http.Request) {
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		common.WriteError(w, http.StatusNotFound, "payment method not found")
+		return
+	}
+	if err := a.saveMethodMappings(r.Context(), id, req.ProviderCodes); err != nil {
+		writeErr(w, err)
 		return
 	}
 
