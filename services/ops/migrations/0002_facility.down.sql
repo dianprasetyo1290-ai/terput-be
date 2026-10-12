@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS work_order_costs;
+DROP TABLE IF EXISTS work_order_events;
+DROP TABLE IF EXISTS work_order_photos;
+DROP TABLE IF EXISTS work_orders;
+DROP TABLE IF EXISTS maintenance_schedules;
+DROP TABLE IF EXISTS room_bookings;
+DROP TABLE IF EXISTS room_fixed_schedules;
+DROP TABLE IF EXISTS room_facilities;
+DROP TABLE IF EXISTS rooms;
+DROP TABLE IF EXISTS floors;
+DROP TABLE IF EXISTS buildings;
