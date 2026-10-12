@@ -7,7 +7,9 @@ package config
 import (
 	"errors"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Config is the resolved runtime configuration.
@@ -29,6 +31,29 @@ type Config struct {
 
 	IdentityURL string
 
+	// T13: sibling services read by the campaign segment resolver, the
+	// teacher–parent relation checks and the central audit log.
+	AcademicURL  string
+	AdmissionURL string
+	CoreURL      string
+
+	// WhatsAppProvider selects the WhatsApp template adapter (IF-ADV-02,
+	// OQ-38). Empty = disabled (WhatsApp campaigns rejected with 409); "noop"
+	// is allowed for development and tests only.
+	WhatsAppProvider      string
+	WhatsAppWebhookSecret string
+	WhatsAppStopKeywords  []string
+
+	// UnsubscribeSecret signs the HMAC token in every campaign email's
+	// unsubscribe link; PublicURL is the browser-facing base of this service.
+	UnsubscribeSecret string
+	PublicURL         string
+
+	CampaignJobInterval time.Duration
+	StorageRoot         string
+	// Timezone is the zone service hours are evaluated in.
+	Timezone string
+
 	SentryDSN         string
 	SentryEnvironment string
 }
@@ -36,16 +61,27 @@ type Config struct {
 // Load reads and validates the configuration.
 func Load() (Config, error) {
 	c := Config{
-		AppEnv:            env("APP_ENV", "development"),
-		Port:              env("PORT", "8089"),
-		DatabaseURL:       env("DATABASE_URL", "postgres://teratai:change-me@localhost:5489/teratai_notification?sslmode=disable"),
-		JWTSecret:         os.Getenv("SEKOCI_JWT_SECRET"),
-		InternalKey:       os.Getenv("SEKOCI_INTERNAL_KEY"),
-		CORSOrigins:       split(env("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:5176,http://localhost:5177,http://localhost:5178")),
-		DeliveryProvider:  os.Getenv("NOTIFICATION_PROVIDER"),
-		IdentityURL:       os.Getenv("IDENTITY_URL"),
-		SentryDSN:         os.Getenv("SENTRY_DSN"),
-		SentryEnvironment: env("SENTRY_ENVIRONMENT", "development"),
+		AppEnv:                env("APP_ENV", "development"),
+		Port:                  env("PORT", "8089"),
+		DatabaseURL:           env("DATABASE_URL", "postgres://teratai:change-me@localhost:5489/teratai_notification?sslmode=disable"),
+		JWTSecret:             os.Getenv("SEKOCI_JWT_SECRET"),
+		InternalKey:           os.Getenv("SEKOCI_INTERNAL_KEY"),
+		CORSOrigins:           split(env("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:5176,http://localhost:5177,http://localhost:5178")),
+		DeliveryProvider:      os.Getenv("NOTIFICATION_PROVIDER"),
+		IdentityURL:           os.Getenv("IDENTITY_URL"),
+		AcademicURL:           os.Getenv("ACADEMIC_URL"),
+		AdmissionURL:          os.Getenv("ADMISSION_URL"),
+		CoreURL:               os.Getenv("CORE_URL"),
+		WhatsAppProvider:      strings.ToLower(strings.TrimSpace(os.Getenv("WHATSAPP_PROVIDER"))),
+		WhatsAppWebhookSecret: os.Getenv("WHATSAPP_WEBHOOK_SECRET"),
+		WhatsAppStopKeywords:  split(env("WHATSAPP_STOP_KEYWORDS", "STOP,BERHENTI")),
+		UnsubscribeSecret:     os.Getenv("CAMPAIGN_UNSUBSCRIBE_SECRET"),
+		PublicURL:             strings.TrimRight(env("NOTIFICATION_PUBLIC_URL", "http://localhost:8089"), "/"),
+		CampaignJobInterval:   time.Duration(positiveInt("CAMPAIGN_JOB_INTERVAL_SECONDS", 60)) * time.Second,
+		StorageRoot:           env("STORAGE_ROOT", "./data/private"),
+		Timezone:              env("SCHOOL_TIMEZONE", "Asia/Jakarta"),
+		SentryDSN:             os.Getenv("SENTRY_DSN"),
+		SentryEnvironment:     env("SENTRY_ENVIRONMENT", "development"),
 	}
 
 	production := c.Production()
@@ -55,6 +91,12 @@ func Load() (Config, error) {
 	}
 	if c.InternalKey == "" && !production {
 		c.InternalKey = "change-me"
+	}
+	if c.UnsubscribeSecret == "" && !production {
+		c.UnsubscribeSecret = "sekoci-dev-unsubscribe-secret-change-me"
+	}
+	if c.WhatsAppWebhookSecret == "" && !production {
+		c.WhatsAppWebhookSecret = "sekoci-dev-wa-webhook-change-me"
 	}
 	if c.DeliveryProvider == "" {
 		if production {
@@ -72,6 +114,12 @@ func Load() (Config, error) {
 			return Config{}, errors.New("SEKOCI_INTERNAL_KEY must be explicitly configured in production")
 		case strings.EqualFold(c.DeliveryProvider, "dev"):
 			return Config{}, errors.New("NOTIFICATION_PROVIDER=dev is forbidden in production")
+		case c.UnsubscribeSecret == "" || containsDev(c.UnsubscribeSecret):
+			return Config{}, errors.New("CAMPAIGN_UNSUBSCRIBE_SECRET must be explicitly configured in production")
+		case c.WhatsAppProvider == "noop" || c.WhatsAppProvider == "dev":
+			return Config{}, errors.New("WHATSAPP_PROVIDER=noop/dev is forbidden in production")
+		case c.WhatsAppProvider != "" && (c.WhatsAppWebhookSecret == "" || containsDev(c.WhatsAppWebhookSecret)):
+			return Config{}, errors.New("WHATSAPP_WEBHOOK_SECRET must be explicitly configured when WHATSAPP_PROVIDER is set")
 		}
 	}
 	return c, nil
@@ -99,4 +147,12 @@ func split(v string) []string {
 		}
 	}
 	return out
+}
+
+func positiveInt(key string, fallback int) int {
+	v, err := strconv.Atoi(os.Getenv(key))
+	if err != nil || v <= 0 {
+		return fallback
+	}
+	return v
 }
