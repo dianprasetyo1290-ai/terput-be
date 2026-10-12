@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -170,8 +171,8 @@ func (h *Handler) CreateStudentStatusRequest(w http.ResponseWriter, r *http.Requ
 		summaryMap["refund_amount_idr"] = *in.RefundAmountIDR
 	}
 
-	callbackURL := "/internal/student-status-requests/approval-callback"
 	if h.Core != nil {
+		callbackURL := h.Core.CallbackBaseURL + "/internal/student-status-requests/approval-callback"
 		coreReq := client.CoreApprovalRequest{
 			SchoolID:       schoolID,
 			RequestType:    requestType,
@@ -188,6 +189,9 @@ func (h *Handler) CreateStudentStatusRequest(w http.ResponseWriter, r *http.Requ
 			IdempotencyKey: "academic:status-request:" + created.ID,
 		}
 		apprResp, cErr := h.Core.SubmitApproval(r.Context(), coreReq)
+		if cErr != nil {
+			log.Printf("student status request %s: submit approval: %v", created.ID, cErr)
+		}
 		if cErr == nil && apprResp != nil && apprResp.ID != "" {
 			_ = h.Store.UpdateStatusRequestApproval(r.Context(), schoolID, created.ID, created.Status, apprResp.ID)
 			created.ApprovalID = &apprResp.ID

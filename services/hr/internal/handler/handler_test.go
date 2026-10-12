@@ -37,8 +37,8 @@ var (
 	// fake core, keyed by request_type.
 	approvalsSeen = map[string]map[string]any{}
 	// coreRejects makes the fake core answer 422 like a missing approval flow.
-	coreRejects   = false
-	testCallback  = "http://hr.internal:8092/internal/approval-callbacks"
+	coreRejects  = false
+	testCallback = "http://hr.internal:8092/internal/approval-callbacks"
 )
 
 const fakeApprovalID = "30000000-0000-0000-0000-000000000099"
