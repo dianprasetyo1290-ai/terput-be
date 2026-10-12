@@ -94,6 +94,8 @@ services:
       SENTRY_DSN: ${SENTRY_DSN}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
       IDENTITY_BASE_URL: http://identity:${IDENTITY_PORT}
+      CORE_BASE_URL: http://core:${CORE_PORT:-8091}
+      ACADEMIC_INTERNAL_URL: http://academic:${ACADEMIC_PORT}
     ports: ["${ACADEMIC_PORT}:${ACADEMIC_PORT}"]
 
   # ---------- attendance ----------
@@ -317,6 +319,8 @@ services:
       IDENTITY_URL: http://identity:${IDENTITY_PORT}
       ACADEMIC_URL: http://academic:${ACADEMIC_PORT}
       STORAGE_ROOT: /data/private
+      CORE_URL: http://core:${CORE_PORT:-8091}
+      BILLING_INTERNAL_URL: http://billing:${BILLING_PORT}
     volumes: ["billing_files:/data/private"]
     ports: ["${BILLING_PORT}:${BILLING_PORT}"]
 
@@ -346,6 +350,7 @@ services:
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
       IDENTITY_URL: http://identity:${IDENTITY_PORT}
       NOTIFICATION_URL: http://notification:${NOTIFICATION_PORT}
+      HR_URL: http://hr:${HR_PORT}
     ports: ["${CORE_PORT}:${CORE_PORT}"]
 
   # ---------- hr (Teratai: HRIS & ESS) ----------
@@ -378,6 +383,7 @@ services:
       CORE_URL: http://core:${CORE_PORT:-8091}
       NOTIFICATION_URL: http://notification:${NOTIFICATION_PORT}
       STORAGE_ROOT: /data/private
+      HR_PUBLIC_INTERNAL_URL: http://hr:${HR_PORT}
     volumes: ["hr_files:/data/private"]
     ports: ["${HR_PORT}:${HR_PORT}"]
 
