@@ -115,8 +115,10 @@ func PendingAudit(ctx context.Context, q Q, limit int) ([]AuditEntry, error) {
 		FROM audit_events WHERE forwarded_at IS NULL ORDER BY id LIMIT $1`, limit)
 	return Collect(rows, err, func(r *sql.Rows) (AuditEntry, error) {
 		var e AuditEntry
+		var before, after []byte // NULL jsonb cannot scan into json.RawMessage directly
 		err := r.Scan(&e.ID, &e.SchoolID, &e.Module, &e.EntityType, &e.EntityID, &e.Action,
-			&e.ActorUserID, &e.ActorRole, &e.BeforeRaw, &e.AfterRaw, &e.Reason, &e.CorrelationID)
+			&e.ActorUserID, &e.ActorRole, &before, &after, &e.Reason, &e.CorrelationID)
+		e.BeforeRaw, e.AfterRaw = before, after
 		return e, err
 	})
 }
