@@ -65,6 +65,11 @@ func CreateProfileChangeRequest(ctx context.Context, q Q, pcr *model.ProfileChan
 		pcr.SchoolID, pcr.EmployeeID, pcr.Field, pcr.NewValueEnc, pcr.Status).Scan(&pcr.ID, &pcr.CreatedAt, &pcr.UpdatedAt)
 }
 
+func UpdateProfileChangeRequestApproval(ctx context.Context, q Q, id, approvalID string) error {
+	_, err := q.ExecContext(ctx, `UPDATE profile_change_requests SET approval_id = NULLIF($2,'')::uuid, updated_at = now() WHERE id = $1`, id, approvalID)
+	return err
+}
+
 func ApplyProfileChangeRequestTx(ctx context.Context, db *sql.DB, id, decision string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -86,8 +91,8 @@ func ApplyProfileChangeRequestTx(ctx context.Context, db *sql.DB, id, decision s
 		return err
 	}
 
-	// Idempotent: already decided
-	if status == decision {
+	// Idempotent: a repeated callback leaves a final request untouched.
+	if status != "pending" {
 		return nil
 	}
 

@@ -2,19 +2,24 @@ package payroll
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
+	"skci/hr/internal/client"
 	"skci/hr/internal/common"
 )
 
 type Handler struct {
-	Store *Store
+	Store     *Store
+	Approvals *client.Client
 }
 
-func NewHandler(s *Store) *Handler {
-	return &Handler{Store: s}
+func NewHandler(s *Store, approvals *client.Client) *Handler {
+	return &Handler{Store: s, Approvals: approvals}
 }
 
 // -----------------------------------------------------------------------------
@@ -102,15 +107,55 @@ func (h *Handler) CalculateRun(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "payroll berhasil dihitung"}, nil)
 }
 
+// SubmitRun opens core approval payroll_run (amount = total net) and only
+// then marks the run pending_approval. Core refusing (e.g. no flow, 422) is
+// returned as-is; the run stays calculated.
 func (h *Handler) SubmitRun(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if claims == nil {
+		common.WriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	schoolID := common.EffectiveSchoolID(r)
 	id := chi.URLParam(r, "id")
 
-	if err := h.Store.SubmitRun(r.Context(), schoolID, id); err != nil {
+	run, err := h.Store.GetRun(r.Context(), schoolID, id)
+	if err != nil {
+		common.WriteError(w, http.StatusNotFound, "payroll run tidak ditemukan")
+		return
+	}
+	if run.Status != "calculated" && run.Status != "draft" {
+		common.WriteError(w, http.StatusConflict, "payroll run dengan status ini tidak dapat diajukan")
+		return
+	}
+	version := int64(0)
+	if run.CalculatedAt != nil {
+		version = run.CalculatedAt.Unix()
+	}
+	total := run.TotalNetIDR
+	appID, err := h.Approvals.CreateApproval(r.Context(), client.ApprovalRequest{
+		SchoolID:    schoolID,
+		RequestType: client.ReqTypePayrollRun,
+		SourceID:    run.ID,
+		Title:       fmt.Sprintf("Payroll periode %s (%s)", run.Period, run.Kind),
+		Summary:     map[string]any{"period": run.Period, "kind": run.Kind, "total_lines": run.TotalLines},
+		AmountIDR:   &total,
+		MakerUserID: claims.UserID,
+		// A recalculated run is a new approval subject.
+		IdempotencyKey: fmt.Sprintf("%s:%s:%d", client.ReqTypePayrollRun, run.ID, version),
+	})
+	if err != nil {
+		log.Printf("payroll run %s: create approval: %v", run.ID, err)
+		status, msg := client.ApprovalErrorMessage(err)
+		common.WriteError(w, status, msg)
+		return
+	}
+
+	if err := h.Store.SubmitRun(r.Context(), schoolID, id, appID); err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "gagal mengajukan approval: "+err.Error())
 		return
 	}
-	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "payroll diajukan untuk persetujuan"}, nil)
+	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "payroll diajukan untuk persetujuan", "approval_id": appID}, nil)
 }
 
 func (h *Handler) FinalizeRun(w http.ResponseWriter, r *http.Request) {
@@ -124,6 +169,10 @@ func (h *Handler) FinalizeRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.Store.FinalizeRun(r.Context(), schoolID, id, userID); err != nil {
+		if errors.Is(err, ErrConflict) {
+			common.WriteError(w, http.StatusConflict, "payroll belum disetujui di Approval Center")
+			return
+		}
 		common.WriteError(w, http.StatusInternalServerError, "gagal finalisasi payroll: "+err.Error())
 		return
 	}

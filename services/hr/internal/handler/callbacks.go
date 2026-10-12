@@ -1,21 +1,33 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
+	"skci/hr/internal/ats"
+	"skci/hr/internal/client"
 	"skci/hr/internal/common"
+	"skci/hr/internal/payroll"
 	"skci/hr/internal/store"
 )
 
+// ApprovalCallbackRequest is the body core POSTs to callback_url once an
+// approval is decided (T1 §3, core jobs.CallbackPayload).
 type ApprovalCallbackRequest struct {
-	ApprovalID   string  `json:"approval_id"`
-	ResourceType string  `json:"resource_type"`
-	ResourceID   string  `json:"resource_id"`
-	Decision     string  `json:"decision"` // "approved" or "rejected"
-	Notes        *string `json:"notes"`
+	ApprovalID  string     `json:"approval_id"`
+	SourceID    string     `json:"source_id"`
+	RequestType string     `json:"request_type"`
+	Decision    string     `json:"decision"` // "approved" | "rejected"
+	DecidedBy   string     `json:"decided_by"`
+	Comment     string     `json:"comment"`
+	DecidedAt   *time.Time `json:"decided_at"`
 }
 
+// InternalApprovalCallback applies a core decision to the hr source row,
+// dispatched by request_type. Idempotent: a repeated callback (Idempotency-Key
+// approval:<id>) on an already-final row answers 200 without changes.
 func (a *App) InternalApprovalCallback(w http.ResponseWriter, r *http.Request) {
 	var body ApprovalCallbackRequest
 	if err := decodeJSON(r, &body); err != nil {
@@ -23,25 +35,34 @@ func (a *App) InternalApprovalCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if body.ResourceID == "" || body.ResourceType == "" || (body.Decision != "approved" && body.Decision != "rejected") {
-		common.Error(w, http.StatusBadRequest, "Data callback tidak lengkap atau status tidak valid")
+	if body.SourceID == "" || body.RequestType == "" || (body.Decision != "approved" && body.Decision != "rejected") {
+		common.Error(w, http.StatusBadRequest, "Data callback tidak lengkap atau keputusan tidak valid")
 		return
 	}
 
+	ctx := r.Context()
 	var err error
-	switch body.ResourceType {
-	case "leave_request":
-		err = store.ApplyLeaveDecisionTx(r.Context(), a.DB, body.ResourceID, body.Decision)
-	case "overtime_request":
-		err = store.ApplyOvertimeDecisionTx(r.Context(), a.DB, body.ResourceID, body.Decision)
-	case "profile_change_request":
-		err = store.ApplyProfileChangeRequestTx(r.Context(), a.DB, body.ResourceID, body.Decision)
+	switch body.RequestType {
+	case client.ReqTypeLeave:
+		err = store.ApplyLeaveDecisionTx(ctx, a.DB, body.SourceID, body.Decision)
+	case client.ReqTypeOvertime:
+		err = store.ApplyOvertimeDecisionTx(ctx, a.DB, body.SourceID, body.Decision)
+	case client.ReqTypeProfileChange:
+		err = store.ApplyProfileChangeRequestTx(ctx, a.DB, body.SourceID, body.Decision)
+	case client.ReqTypePayrollRun:
+		err = payroll.NewStore(a.DB).ApplyRunDecision(ctx, body.SourceID, body.Decision)
+	case client.ReqTypeRequisition:
+		err = ats.NewStore(a.DB).ApplyRequisitionDecision(ctx, body.SourceID, body.Decision)
 	default:
-		common.Error(w, http.StatusBadRequest, fmt.Sprintf("Jenis sumber daya approval '%s' tidak dikenal", body.ResourceType))
+		common.Error(w, http.StatusUnprocessableEntity, fmt.Sprintf("Jenis approval '%s' tidak ditangani hr", body.RequestType))
 		return
 	}
 
-	if err != nil {
+	switch {
+	case errors.Is(err, store.ErrNotFound), errors.Is(err, payroll.ErrNotFound), errors.Is(err, ats.ErrNotFound):
+		common.Error(w, http.StatusNotFound, "Data sumber approval tidak ditemukan")
+		return
+	case err != nil:
 		common.Error(w, http.StatusInternalServerError, "Gagal memproses hasil persetujuan: "+err.Error())
 		return
 	}

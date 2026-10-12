@@ -11,14 +11,15 @@ import (
 )
 
 type fakeStore struct {
-	mu          sync.Mutex
-	flows       map[string]model.ApprovalFlow
-	requests    map[string]model.ApprovalRequest
-	steps       map[string][]model.ApprovalStep
-	delegations map[string]model.ApprovalDelegation
-	exceptions  map[string]model.IntegrationException
-	audits      []model.AuditEvent
-	idCounter   int
+	mu           sync.Mutex
+	flows        map[string]model.ApprovalFlow
+	requests     map[string]model.ApprovalRequest
+	steps        map[string][]model.ApprovalStep
+	delegations  map[string]model.ApprovalDelegation
+	exceptions   map[string]model.IntegrationException
+	audits       []model.AuditEvent
+	srCategories map[string]*model.ServiceRequestCategory
+	idCounter    int
 }
 
 func newFakeStore() *fakeStore {
@@ -589,6 +590,9 @@ func (f *fakeStore) ListServiceRequestCategories(ctx context.Context, schoolID s
 	return nil, nil
 }
 func (f *fakeStore) GetServiceRequestCategory(ctx context.Context, schoolID, id string) (*model.ServiceRequestCategory, error) {
+	if cat, ok := f.srCategories[id]; ok && cat.SchoolID == schoolID {
+		return cat, nil
+	}
 	return nil, store.ErrNotFound
 }
 func (f *fakeStore) CreateServiceRequestCategory(ctx context.Context, cat model.ServiceRequestCategory) (*model.ServiceRequestCategory, error) {
@@ -626,4 +630,3 @@ func (f *fakeStore) ListServiceRequestEvents(ctx context.Context, schoolID, requ
 func (f *fakeStore) CanUserHandleServiceRequests(ctx context.Context, schoolID string, roles []string) ([]string, error) {
 	return nil, nil
 }
-

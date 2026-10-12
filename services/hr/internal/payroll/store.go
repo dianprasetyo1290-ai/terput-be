@@ -226,11 +226,13 @@ func (s *Store) CalculateRun(ctx context.Context, schoolID, runID string) error 
 	return tx.Commit()
 }
 
-func (s *Store) SubmitRun(ctx context.Context, schoolID, runID string) error {
+// SubmitRun moves a calculated run to pending_approval and links its core
+// approval (T3: core approval payroll_run).
+func (s *Store) SubmitRun(ctx context.Context, schoolID, runID, approvalID string) error {
 	res, err := s.DB.ExecContext(ctx, `
 		UPDATE payroll_runs
-		SET status = 'pending_approval', updated_at = NOW()
-		WHERE id = $1 AND school_id = $2 AND status IN ('calculated', 'draft')`, runID, schoolID)
+		SET status = 'pending_approval', approval_id = $3::uuid, updated_at = NOW()
+		WHERE id = $1 AND school_id = $2 AND status IN ('calculated', 'draft')`, runID, schoolID, approvalID)
 	if err != nil {
 		return err
 	}
@@ -241,6 +243,12 @@ func (s *Store) SubmitRun(ctx context.Context, schoolID, runID string) error {
 	return nil
 }
 
+// ApplyRunDecision applies core's approval callback once; a repeated
+// callback on a run that is no longer pending is a no-op.
+func (s *Store) ApplyRunDecision(ctx context.Context, runID, decision string) error {
+	return applyDecisionOnce(ctx, s.DB, "payroll_runs", runID, decision)
+}
+
 func (s *Store) FinalizeRun(ctx context.Context, schoolID, runID, userID string) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -249,12 +257,15 @@ func (s *Store) FinalizeRun(ctx context.Context, schoolID, runID, userID string)
 	defer tx.Rollback()
 
 	now := time.Now()
-	_, err = tx.ExecContext(ctx, `
+	res, err := tx.ExecContext(ctx, `
 		UPDATE payroll_runs
 		SET status = 'final', finalized_at = $3, finalized_by = $4, updated_at = $3
-		WHERE id = $1 AND school_id = $2`, runID, schoolID, now, userID)
+		WHERE id = $1 AND school_id = $2 AND status = 'approved'`, runID, schoolID, now, userID)
 	if err != nil {
 		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrConflict
 	}
 
 	// Create payslips for all lines in this run
@@ -384,4 +395,24 @@ func (s *Store) ListJournals(ctx context.Context, schoolID string) ([]PayrollJou
 		list = append(list, j)
 	}
 	return list, nil
+}
+
+// applyDecisionOnce sets status = decision on a row still pending_approval.
+// Zero rows updated means already decided (no-op) or missing (ErrNotFound).
+func applyDecisionOnce(ctx context.Context, db *sql.DB, table, id, decision string) error {
+	res, err := db.ExecContext(ctx, `UPDATE `+table+` SET status = $2, updated_at = NOW() WHERE id = $1 AND status = 'pending_approval'`, id, decision)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return nil
+	}
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM `+table+` WHERE id = $1)`, id).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrNotFound
+	}
+	return nil
 }

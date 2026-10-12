@@ -224,8 +224,9 @@ func ApplyLeaveDecisionTx(ctx context.Context, db *sql.DB, id, decision string) 
 		return err
 	}
 
-	// Idempotent: already decided
-	if currentStatus == decision {
+	// Idempotent: a repeated callback (or a decision on a cancelled request)
+	// leaves an already-final request untouched.
+	if currentStatus != "pending" {
 		return nil
 	}
 
@@ -388,6 +389,22 @@ func UpdateOvertimeRequestApproval(ctx context.Context, q Q, id, approvalID stri
 	return err
 }
 
+// ApplyOvertimeDecisionTx records the approval outcome once; a repeated
+// callback on an already-final request is a no-op.
 func ApplyOvertimeDecisionTx(ctx context.Context, db *sql.DB, id, decision string) error {
-	return affected(db.ExecContext(ctx, `UPDATE overtime_requests SET status = $2, updated_at = now() WHERE id = $1`, id, decision))
+	res, err := db.ExecContext(ctx, `UPDATE overtime_requests SET status = $2, updated_at = now() WHERE id = $1 AND status = 'pending'`, id, decision)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return nil
+	}
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM overtime_requests WHERE id = $1)`, id).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrNotFound
+	}
+	return nil
 }
