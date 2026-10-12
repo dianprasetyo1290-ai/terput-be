@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"skci/billing/internal/common"
+	"skci/billing/internal/gateway"
 )
 
 // AdminImportSettlement imports NICEPay settlement report CSV (FR-30-001).
@@ -25,6 +26,17 @@ func (a *App) AdminImportSettlement(w http.ResponseWriter, r *http.Request) {
 
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		common.WriteError(w, http.StatusBadRequest, "invalid multipart form")
+		return
+	}
+
+	// FR-150-004: every batch belongs to one provider (NICEPay = T6 format).
+	provider := strings.TrimSpace(r.FormValue("provider"))
+	if provider == "" {
+		provider = gateway.DefaultProvider
+	}
+	var known bool
+	if err := a.DB.QueryRowContext(r.Context(), `SELECT EXISTS (SELECT 1 FROM payment_providers WHERE code = $1)`, provider).Scan(&known); err != nil || !known {
+		common.WriteError(w, http.StatusBadRequest, "provider tidak dikenal")
 		return
 	}
 
@@ -150,11 +162,11 @@ func (a *App) AdminImportSettlement(w http.ResponseWriter, r *http.Request) {
 		err := tx.QueryRowContext(r.Context(),
 			`INSERT INTO settlement_batches (
 				school_id, provider, channel, settled_on, gross_idr, fee_idr, net_idr, bank_account, status
-			) VALUES ($1, 'NICEPay', $2, $3, $4, $5, $6, $7, 'reported')
+			) VALUES ($1, $8, $2, $3, $4, $5, $6, $7, 'reported')
 			ON CONFLICT (school_id, provider, channel, settled_on)
 			DO UPDATE SET gross_idr = $4, fee_idr = $5, net_idr = $6, updated_at = now()
 			RETURNING id`,
-			schoolID, first.channel, first.settledOn, gross, totalFee, net, first.bankAccount).Scan(&batchID)
+			schoolID, first.channel, first.settledOn, gross, totalFee, net, first.bankAccount, provider).Scan(&batchID)
 		if err != nil {
 			writeErr(w, err)
 			return
@@ -166,8 +178,8 @@ func (a *App) AdminImportSettlement(w http.ResponseWriter, r *http.Request) {
 			var matchedTxID *string
 			var mID string
 			if err := tx.QueryRowContext(r.Context(),
-				`SELECT id FROM gateway_transactions WHERE school_id = $1 AND provider_ref = $2`,
-				schoolID, it.providerRef).Scan(&mID); err == nil {
+				`SELECT id FROM gateway_transactions WHERE school_id = $1 AND provider = $3 AND provider_ref = $2`,
+				schoolID, it.providerRef, provider).Scan(&mID); err == nil {
 				matchedTxID = &mID
 			}
 
@@ -190,6 +202,7 @@ func (a *App) AdminImportSettlement(w http.ResponseWriter, r *http.Request) {
 		"message":          "Settlement imported successfully",
 		"imported_batches": importedBatches,
 		"imported_items":   importedItems,
+		"provider":         provider,
 	}, nil)
 }
 

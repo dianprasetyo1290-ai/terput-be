@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"skci/billing/internal/common"
+	"skci/billing/internal/gateway"
 	"skci/billing/internal/model"
 )
 
@@ -28,8 +29,9 @@ func (a *App) AdminRunReconciliation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		BatchID string `json:"batch_id"`
-		Date    string `json:"date"`
+		BatchID  string `json:"batch_id"`
+		Date     string `json:"date"`
+		Provider string `json:"provider"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
@@ -48,56 +50,76 @@ func (a *App) AdminRunReconciliation(w http.ResponseWriter, r *http.Request) {
 		dateStr = time.Now().Format("2006-01-02")
 	}
 
-	// 1. Fetch successful transactions settled or paid on this date
+	provider := r.URL.Query().Get("provider")
+	if req.Provider != "" {
+		provider = req.Provider
+	}
+
+	// 1. Successful transactions paid on this date, tagged with provider.
 	txRows, err := a.DB.QueryContext(r.Context(),
-		`SELECT tx_no, COALESCE(provider_ref, ''), total_idr, fee_idr
+		`SELECT provider, tx_no, COALESCE(provider_ref, ''), total_idr, fee_idr
 		 FROM gateway_transactions
-		 WHERE school_id = $1 AND status = 'success' AND (DATE(paid_at) = $2 OR DATE(created_at) = $2)`,
-		schoolID, dateStr)
+		 WHERE school_id = $1 AND status = 'success' AND (DATE(paid_at) = $2 OR DATE(created_at) = $2)
+		   AND ($3 = '' OR provider = $3)`,
+		schoolID, dateStr, provider)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	defer txRows.Close()
 
-	var successTxs []model.ReconcileTx
+	var successTxs []gateway.ProviderTx
 	for txRows.Next() {
-		var it model.ReconcileTx
-		if err := txRows.Scan(&it.TXNo, &it.ProviderRef, &it.AmountIDR, &it.FeeIDR); err == nil {
+		var it gateway.ProviderTx
+		if err := txRows.Scan(&it.Provider, &it.TXNo, &it.ProviderRef, &it.AmountIDR, &it.FeeIDR); err == nil {
 			successTxs = append(successTxs, it)
 		}
 	}
 
-	// 2. Fetch settlement items for this date
+	// 2. Settlement items of this date, tagged with their batch's provider.
 	itemRows, err := a.DB.QueryContext(r.Context(),
-		`SELECT i.provider_ref, i.amount_idr, i.fee_idr
+		`SELECT b.provider, i.provider_ref, i.amount_idr, i.fee_idr
 		 FROM settlement_items i
 		 JOIN settlement_batches b ON b.id = i.batch_id
-		 WHERE i.school_id = $1 AND b.settled_on = $2`,
-		schoolID, dateStr)
+		 WHERE i.school_id = $1 AND b.settled_on = $2 AND ($3 = '' OR b.provider = $3)`,
+		schoolID, dateStr, provider)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	defer itemRows.Close()
 
-	var settleItems []model.ReconcileItem
+	var settleItems []gateway.ProviderItem
 	for itemRows.Next() {
-		var it model.ReconcileItem
-		if err := itemRows.Scan(&it.ProviderRef, &it.AmountIDR, &it.FeeIDR); err == nil {
+		var it gateway.ProviderItem
+		if err := itemRows.Scan(&it.Provider, &it.ProviderRef, &it.AmountIDR, &it.FeeIDR); err == nil {
 			settleItems = append(settleItems, it)
 		}
 	}
 
-	// 3. Run pure Reconcile function (AC-31-01)
-	reconResult := model.Reconcile(successTxs, settleItems)
-
-	// 4. Save exceptions into database
-	for _, ex := range reconResult.Exceptions {
-		_, _ = a.DB.ExecContext(r.Context(),
-			`INSERT INTO reconciliation_exceptions (school_id, kind, ref, detail, status, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, 'open', now(), now())`,
-			schoolID, string(ex.Kind), ex.Ref, jsonRaw(ex.Detail))
+	// 3. Reconcile per provider (FR-150-004, AC-31-01): a transaction of
+	// provider A is never matched against provider B's settlement.
+	type providerResult struct {
+		Provider       string                     `json:"provider"`
+		MatchedCount   int                        `json:"matched_count"`
+		ExceptionCount int                        `json:"exception_count"`
+		Exceptions     []model.ReconcileException `json:"exceptions"`
+	}
+	var perProvider []providerResult
+	var reconResult model.ReconcileResult
+	for _, g := range gateway.GroupForReconcile(successTxs, settleItems) {
+		res := model.Reconcile(g.Txs, g.Items)
+		perProvider = append(perProvider, providerResult{g.Provider, len(res.Matched), len(res.Exceptions), res.Exceptions})
+		reconResult.Matched = append(reconResult.Matched, res.Matched...)
+		reconResult.Exceptions = append(reconResult.Exceptions, res.Exceptions...)
+		// 4. Save exceptions per provider; a re-run refreshes the detail.
+		for _, ex := range res.Exceptions {
+			_, _ = a.DB.ExecContext(r.Context(),
+				`INSERT INTO reconciliation_exceptions (school_id, provider, kind, ref, detail, status, created_at, updated_at)
+				 VALUES ($1, $2, $3, $4, $5, 'open', now(), now())
+				 ON CONFLICT (school_id, provider, kind, ref) DO UPDATE SET detail = EXCLUDED.detail, updated_at = now()`,
+				schoolID, g.Provider, string(ex.Kind), ex.Ref, jsonRaw(ex.Detail))
+		}
 	}
 
 	common.WriteSuccess(w, map[string]any{
@@ -105,6 +127,7 @@ func (a *App) AdminRunReconciliation(w http.ResponseWriter, r *http.Request) {
 		"matched_count":   len(reconResult.Matched),
 		"exception_count": len(reconResult.Exceptions),
 		"exceptions":      reconResult.Exceptions,
+		"providers":       perProvider,
 	}, nil)
 }
 
@@ -123,7 +146,7 @@ func (a *App) AdminListExceptions(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	kind := r.URL.Query().Get("kind")
 
-	query := `SELECT id, kind, ref, detail, status, COALESCE(resolution_note, ''), created_at, updated_at
+	query := `SELECT id, provider, kind, ref, detail, status, COALESCE(resolution_note, ''), created_at, updated_at
 	          FROM reconciliation_exceptions
 	          WHERE school_id = $1`
 	var args []any
@@ -137,6 +160,10 @@ func (a *App) AdminListExceptions(w http.ResponseWriter, r *http.Request) {
 		args = append(args, kind)
 		query += fmt.Sprintf(" AND kind = $%d", len(args))
 	}
+	if provider := r.URL.Query().Get("provider"); provider != "" {
+		args = append(args, provider)
+		query += fmt.Sprintf(" AND provider = $%d", len(args))
+	}
 	query += " ORDER BY created_at DESC"
 
 	rows, err := a.DB.QueryContext(r.Context(), query, args...)
@@ -148,6 +175,7 @@ func (a *App) AdminListExceptions(w http.ResponseWriter, r *http.Request) {
 
 	type exRow struct {
 		ID             string          `json:"id"`
+		Provider       string          `json:"provider"`
 		Kind           string          `json:"kind"`
 		Ref            string          `json:"ref"`
 		Detail         json.RawMessage `json:"detail"`
@@ -161,7 +189,7 @@ func (a *App) AdminListExceptions(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var it exRow
 		var det []byte
-		if err := rows.Scan(&it.ID, &it.Kind, &it.Ref, &det, &it.Status, &it.ResolutionNote, &it.CreatedAt, &it.UpdatedAt); err == nil {
+		if err := rows.Scan(&it.ID, &it.Provider, &it.Kind, &it.Ref, &det, &it.Status, &it.ResolutionNote, &it.CreatedAt, &it.UpdatedAt); err == nil {
 			it.Detail = det
 			items = append(items, it)
 		}
