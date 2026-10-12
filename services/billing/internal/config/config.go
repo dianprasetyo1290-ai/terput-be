@@ -41,6 +41,8 @@ type Config struct {
 	SentryEnvironment string
 
 	Gateway Gateway
+
+	Wallet Wallet // T12
 }
 
 // Load reads and validates the configuration.
@@ -78,6 +80,8 @@ func Load() (Config, error) {
 	if c.InternalKey == "" && !production {
 		c.InternalKey = "change-me"
 	}
+
+	c.Wallet = loadWallet(c.JWTSecret) // T12
 
 	if production {
 		switch {
