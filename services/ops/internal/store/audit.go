@@ -60,10 +60,12 @@ func PendingAudit(ctx context.Context, q Q, limit int) ([]AuditEntry, error) {
 	out := []AuditEntry{}
 	for rows.Next() {
 		var e AuditEntry
+		var before, after []byte
 		if err := rows.Scan(&e.ID, &e.SchoolID, &e.Module, &e.EntityType, &e.EntityID, &e.Action,
-			&e.ActorUserID, &e.ActorRole, &e.BeforeRaw, &e.AfterRaw, &e.Reason, &e.CorrelationID); err != nil {
+			&e.ActorUserID, &e.ActorRole, &before, &after, &e.Reason, &e.CorrelationID); err != nil {
 			return nil, err
 		}
+		e.BeforeRaw, e.AfterRaw = before, after
 		out = append(out, e)
 	}
 	return out, rows.Err()
