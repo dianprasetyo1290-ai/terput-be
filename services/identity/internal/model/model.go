@@ -116,7 +116,7 @@ type GuardianChild struct {
 
 // StudentGuardian is one active guardian of a student, returned by the
 // internal GET /internal/students/{id}/guardians read (T9 §4.1; used by
-// studentlife/ops to notify or ask consent from parents).
+// caller services/ops to notify or ask consent from parents).
 type StudentGuardian struct {
 	GuardianUserID string `json:"guardian_user_id"`
 	Relationship   string `json:"relationship"`
