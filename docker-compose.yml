@@ -67,6 +67,7 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
       SENTRY_DSN: ${SENTRY_DSN}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      CORE_URL: http://core:${CORE_PORT:-8091}
     ports: ["${IDENTITY_PORT}:${IDENTITY_PORT}"]
 
   # ---------- academic ----------
