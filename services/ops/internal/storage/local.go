@@ -30,24 +30,14 @@ type Local struct {
 	Allowed map[string]bool
 }
 
-func NewLocal(root string, max int64) *Local {
-	return &Local{
-		Root: root,
-		Max:  max,
-		Allowed: map[string]bool{
-			"application/pdf": true,
-			"image/jpeg":      true,
-			"image/png":       true,
-			"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": true,
-			"text/csv":                 true,
-			"application/octet-stream": true,
-		},
+// NewLocal stores private objects under root. allowed lists the accepted
+// MIME types (facility photos: image/jpeg, image/png, image/webp).
+func NewLocal(root string, max int64, allowed ...string) *Local {
+	m := map[string]bool{}
+	for _, a := range allowed {
+		m[a] = true
 	}
-}
-
-// NewLocalStorage returns a new Local storage with default 15MB limit.
-func NewLocalStorage(root string) *Local {
-	return NewLocal(root, 15<<20)
+	return &Local{Root: root, Max: max, Allowed: m}
 }
 
 func (l *Local) path(key string) (string, error) {

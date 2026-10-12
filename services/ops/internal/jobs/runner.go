@@ -1,3 +1,4 @@
+// Package jobs runs the ops background jobs on a ticker (copied from hr).
 package jobs
 
 import (
@@ -67,21 +68,28 @@ func hashJobName(name string) int64 {
 	return int64(h.Sum64())
 }
 
+// runWithLock takes a session-level advisory lock on one dedicated
+// connection (lock and unlock must hit the same session) so only one ops
+// instance runs a given job at a time.
 func (r *Runner) runWithLock(job Job) {
-	lockID := hashJobName(job.Name)
-
-	var acquired bool
-	err := r.db.QueryRow(`SELECT pg_try_advisory_lock($1)`, lockID).Scan(&acquired)
-	if err != nil || !acquired {
-		return // another instance is running this job
-	}
-
-	defer func() {
-		_, _ = r.db.Exec(`SELECT pg_advisory_unlock($1)`, lockID)
-	}()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		log.Printf("[job %s] acquire connection: %v", job.Name, err)
+		return
+	}
+	defer conn.Close()
+
+	lockID := hashJobName(job.Name)
+	var acquired bool
+	if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, lockID).Scan(&acquired); err != nil || !acquired {
+		return // another instance is running this job
+	}
+	defer func() {
+		_, _ = conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock($1)`, lockID)
+	}()
 
 	if err := job.Handler(ctx, r.db); err != nil {
 		log.Printf("[job %s] error: %v", job.Name, err)

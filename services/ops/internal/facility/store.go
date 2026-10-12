@@ -13,6 +13,14 @@ import (
 	"skci/ops/internal/store"
 )
 
+// ValidationError carries an Indonesian message that is safe to show the
+// user (answered with 422).
+type ValidationError struct{ Msg string }
+
+func (e *ValidationError) Error() string { return e.Msg }
+
+func invalid(msg string) error { return &ValidationError{Msg: msg} }
+
 var (
 	ErrNotFound    = errors.New("data tidak ditemukan")
 	ErrDuplicate   = errors.New("kode sudah dipakai")
@@ -430,7 +438,7 @@ func roomWriteErr(err error) error {
 	case "23505":
 		return ErrDuplicate
 	case "23514":
-		return errors.New("Isian ruang tidak valid (jam pakai atau persetujuan hanya untuk ruang yang dapat dipesan)")
+		return invalid("Isian ruang tidak valid (jam pakai atau persetujuan hanya untuk ruang yang dapat dipesan)")
 	}
 	return err
 }
@@ -537,13 +545,13 @@ func (s *Store) CreateFixedSchedule(ctx context.Context, schoolID string, in Fix
 			return err
 		}
 		if room.Usage != UsageBookable {
-			return errors.New("Jadwal tetap hanya untuk ruang yang dapat dipesan; ruang penggunaan tetap sudah tidak bisa dipesan")
+			return invalid("Jadwal tetap hanya untuk ruang yang dapat dipesan; ruang penggunaan tetap sudah tidak bisa dipesan")
 		}
 		err = tx.QueryRowContext(ctx, `INSERT INTO room_fixed_schedules (school_id, room_id, weekday, starts_time, ends_time, label, valid_from, valid_to)
 			VALUES ($1,$2,$3,$4::time,$5::time,$6,$7::date,$8::date) RETURNING id`,
 			schoolID, in.RoomID, in.Weekday, in.StartsTime, in.EndsTime, in.Label, in.ValidFrom, in.ValidTo).Scan(&id)
 		if pgCode(err) == "23514" {
-			return errors.New("Jadwal tetap tidak valid: periksa hari, jam, dan masa berlaku")
+			return invalid("Jadwal tetap tidak valid: periksa hari, jam, dan masa berlaku")
 		}
 		if err != nil {
 			return err
@@ -841,7 +849,7 @@ func (s *Store) CancelBooking(ctx context.Context, schoolID, id, reason string, 
 			return one(err)
 		}
 		if b.Status != BookingPending && b.Status != BookingConfirmed {
-			return errors.New("Pemesanan ini sudah tidak aktif")
+			return invalid("Pemesanan ini sudah tidak aktif")
 		}
 		before = b
 		if _, err := tx.ExecContext(ctx, `UPDATE room_bookings SET status='cancelled', cancel_reason=$2, cancelled_by=NULLIF($3,'')::uuid,
