@@ -12,219 +12,293 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"skci/billing/internal/client"
+	"skci/billing/internal/gateway"
 	"skci/billing/internal/model"
-	"skci/billing/internal/nicepay"
 )
 
-type nicepayNotificationPayload struct {
-	TrxID                      string `json:"trxId"`
-	OriginalPartnerReferenceNo string `json:"originalPartnerReferenceNo"`
-	OriginalReferenceNo        string `json:"originalReferenceNo"`
-	LatestTransactionStatus    string `json:"latestTransactionStatus"`
+// SNAP-style webhook answers (every provider gets the same shape).
+const (
+	snapOK           = `{"responseCode":"2000000","responseMessage":"Success"}`
+	snapBadRequest   = `{"responseCode":"4000000","responseMessage":"Bad Request"}`
+	snapUnauthorized = `{"responseCode":"4010000","responseMessage":"Unauthorized. Signature"}`
+	snapNotFound     = `{"responseCode":"4040000","responseMessage":"Not Found"}`
+	snapError        = `{"responseCode":"5000000","responseMessage":"General Error"}`
+)
+
+// readLimited reads a webhook body (max 64KB).
+func readLimited(r *http.Request) ([]byte, error) {
+	return io.ReadAll(io.LimitReader(r.Body, 64<<10))
 }
 
-// NicepayWebhook handles Bank Indonesia SNAP payment notification (AC-IF-01, AC-IF-02, BR-PAY-01).
+func writeSnap(w http.ResponseWriter, status int, body string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(body))
+}
+
+// NicepayWebhook is the T6 path POST /webhooks/nicepay, kept as an alias of
+// POST /webhooks/{provider} with provider "nicepay".
 func (a *App) NicepayWebhook(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, 64<<10))
+	a.handleProviderWebhook(w, r, gateway.DefaultProvider)
+}
+
+// ProviderWebhook handles POST /webhooks/{provider} (BR-PAY-01/03).
+func (a *App) ProviderWebhook(w http.ResponseWriter, r *http.Request) {
+	a.handleProviderWebhook(w, r, chi.URLParam(r, "provider"))
+}
+
+// gatewayTxState is a transaction as the webhook needs it.
+type gatewayTxState struct {
+	ID, SchoolID, Status, Kind, TxNo, PayerUserID, StudentUserID string
+	TotalIDR, BillsAmountIDR, FeeIDR                             int64
+	ProviderRef, VANumber, PurposeRef, MandateID                 sql.NullString
+	Purpose                                                      string
+}
+
+// handleProviderWebhook: verify with the provider's adapter (AC-IF-01) →
+// dedup per provider (BR-PAY-01) → re-query the transaction's own provider
+// (never trust the body) → apply the status under FOR UPDATE (AC-IF-02).
+func (a *App) handleProviderWebhook(w http.ResponseWriter, r *http.Request, code string) {
+	ctx := r.Context()
+	body, err := readLimited(r)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"responseCode":"4000000","responseMessage":"Bad Request"}`))
+		writeSnap(w, http.StatusBadRequest, snapBadRequest)
 		return
 	}
-
-	timestamp := r.Header.Get("X-TIMESTAMP")
-	signature := r.Header.Get("X-SIGNATURE")
-
-	var n nicepayNotificationPayload
-	_ = json.Unmarshal(body, &n)
-
-	ref := n.TrxID
-	if ref == "" {
-		ref = n.OriginalPartnerReferenceNo
-	}
-	pRef := n.OriginalReferenceNo
-	if pRef == "" {
-		pRef = ref
+	p, err := a.paymentProvider(ctx, code)
+	if err != nil {
+		writeSnap(w, http.StatusNotFound, snapNotFound)
+		return
 	}
 
 	sum := sha256.Sum256(body)
 	rawHash := hex.EncodeToString(sum[:])
-
-	// Mask sensitive data in body for audit and storage (NFR-HR-01)
 	maskedBody := maskJSON(body)
 
-	// (2) Verify signature
-	sigValid := true
-	if a.Nicepay != nil {
-		sigValid = a.Nicepay.VerifyNotification(timestamp, signature)
-	}
-
-	if !sigValid {
-		// Log invalid webhook notification
-		_, _ = a.DB.ExecContext(r.Context(),
-			`INSERT INTO gateway_notifications (provider_ref, signature_valid, raw_hash, body_masked, result, received_at)
-			 VALUES ($1, false, $2, $3, 'invalid_signature', now())
-			 ON CONFLICT (provider_ref, raw_hash) DO NOTHING`,
-			pRef, rawHash, jsonRaw(maskedBody))
-
-		// Central security audit to core (AC-IF-01)
+	n, verr := p.VerifyWebhook(r.Header, body)
+	if verr != nil {
+		_, _ = a.DB.ExecContext(ctx,
+			`INSERT INTO gateway_notifications (provider, provider_ref, signature_valid, raw_hash, body_masked, result, received_at)
+			 VALUES ($1, $2, false, $3, $4, 'invalid_signature', now())
+			 ON CONFLICT (provider, provider_ref, raw_hash) DO NOTHING`,
+			code, n.ProviderRef, rawHash, jsonRaw(maskedBody))
 		if a.Core != nil {
-			_ = a.Core.Audit(r.Context(), client.AuditEvent{
+			_ = a.Core.Audit(ctx, client.AuditEvent{
+				Service:       "billing",
 				Module:        "security",
 				EntityType:    "webhook",
-				EntityID:      pRef,
+				EntityID:      n.ProviderRef,
 				Action:        "webhook_signature_rejected",
-				Reason:        "invalid signature from payment gateway",
+				Reason:        "invalid signature from payment gateway " + code,
 				CorrelationID: rawHash,
 			})
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"responseCode":"4010000","responseMessage":"Unauthorized. Signature"}`))
+		writeSnap(w, http.StatusUnauthorized, snapUnauthorized)
 		return
 	}
 
-	// (3) Deduplicate notification (BR-PAY-01)
 	var notifID string
-	err = a.DB.QueryRowContext(r.Context(),
-		`INSERT INTO gateway_notifications (provider_ref, signature_valid, raw_hash, body_masked, received_at)
-		 VALUES ($1, true, $2, $3, now())
-		 ON CONFLICT (provider_ref, raw_hash) DO NOTHING
+	err = a.DB.QueryRowContext(ctx,
+		`INSERT INTO gateway_notifications (provider, provider_ref, signature_valid, raw_hash, body_masked, received_at)
+		 VALUES ($1, $2, true, $3, $4, now())
+		 ON CONFLICT (provider, provider_ref, raw_hash) DO NOTHING
 		 RETURNING id`,
-		pRef, rawHash, jsonRaw(maskedBody)).Scan(&notifID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		// Duplicate notification already recorded and processed
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"responseCode":"2000000","responseMessage":"Success"}`))
-		return
-	}
-	if notifID == "" {
-		// Already processed via conflict do nothing
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"responseCode":"2000000","responseMessage":"Success"}`))
+		code, n.ProviderRef, rawHash, jsonRaw(maskedBody)).Scan(&notifID)
+	if err != nil || notifID == "" {
+		// Same notification already recorded: processed once only.
+		writeSnap(w, http.StatusOK, snapOK)
 		return
 	}
 
-	// Find corresponding gateway transaction
-	var txID, schoolID, status, methodKind, txNo, payerUserID, studentUserID string
-	var totalIDR, billsAmountIDR, feeIDR int64
-	var providerRefDB sql.NullString
-	err = a.DB.QueryRowContext(r.Context(),
-		`SELECT t.id, t.school_id, t.status, m.kind, t.tx_no, t.total_idr, t.bills_amount_idr, t.fee_idr,
-		        t.payer_user_id, t.student_user_id, t.provider_ref
-		 FROM gateway_transactions t
-		 JOIN payment_methods m ON m.id = t.method_id
-		 WHERE t.tx_no = $1 OR t.provider_ref = $2 OR t.provider_ref = $1`,
-		ref, pRef).Scan(&txID, &schoolID, &status, &methodKind, &txNo, &totalIDR, &billsAmountIDR, &feeIDR,
-		&payerUserID, &studentUserID, &providerRefDB)
+	t, err := a.loadTxForWebhook(ctx, code, n.RefNo, n.ProviderRef)
 	if err != nil {
-		// No matching transaction found
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"responseCode":"2000000","responseMessage":"Success"}`))
+		a.finishNotification(ctx, notifID, "", "no_matching_transaction")
+		writeSnap(w, http.StatusOK, snapOK)
 		return
 	}
 
-	// (4) Re-query status from NICEPay to never trust webhook body blindly
-	expectedStatus := nicepay.StatusSuccess
-	if a.Nicepay != nil && providerRefDB.Valid {
-		st, statusErr := a.Nicepay.Status(nicepay.StatusQuery{
-			Method:     methodKind,
-			RefNo:      txNo,
-			GatewayRef: providerRefDB.String,
-			Amount:     totalIDR,
-		})
-		if statusErr != nil {
-			// Internal error, queue exception to core
-			if a.Core != nil {
-				_ = a.Core.CreateException(r.Context(), client.ExceptionEvent{
-					SchoolID:       schoolID,
-					Kind:           "webhook",
-					Severity:       "normal",
-					CorrelationID:  rawHash,
-					ErrorMessage:   statusErr.Error(),
-					PayloadSummary: map[string]any{"tx_no": txNo, "ref": ref},
-					MaxAttempts:    3,
-					IdempotencyKey: fmt.Sprintf("webhook-err:%s", txID),
-				})
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{"responseCode":"5000000","responseMessage":"General Error"}`))
-			return
-		}
-		expectedStatus = st
+	st, err := p.QueryStatus(ctx, gateway.StatusQuery{
+		Kind: t.Kind, RefNo: t.TxNo, ProviderRef: t.ProviderRef.String, PayCode: t.VANumber.String,
+		AmountIDR: t.TotalIDR, ClaimedStatus: n.ClaimedStatus,
+	})
+	if err == nil {
+		err = a.applyProviderStatus(ctx, t.ID, st, rawHash)
 	}
-
-	if expectedStatus != nicepay.StatusSuccess {
-		// Not paid yet or failed/canceled
-		if expectedStatus == nicepay.StatusCanceled || expectedStatus == nicepay.StatusFailed {
-			_, _ = a.DB.ExecContext(r.Context(),
-				`UPDATE gateway_transactions SET status = 'failed', updated_at = now() WHERE id = $1`, txID)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"responseCode":"2000000","responseMessage":"Success"}`))
-		return
-	}
-
-	// (5) Process success in a DB transaction with SELECT ... FOR UPDATE (AC-IF-02)
-	dbTx, err := a.DB.BeginTx(r.Context(), nil)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"responseCode":"5000000","responseMessage":"General Error"}`))
+		a.webhookException(ctx, t.SchoolID, t.ID, t.TxNo, rawHash, err)
+		// Notification stays unprocessed: delete it so the provider's retry
+		// with the same body is processed again.
+		_, _ = a.DB.ExecContext(ctx, `DELETE FROM gateway_notifications WHERE id = $1`, notifID)
+		writeSnap(w, http.StatusInternalServerError, snapError)
 		return
+	}
+	a.finishNotification(ctx, notifID, t.SchoolID, string(st))
+	writeSnap(w, http.StatusOK, snapOK)
+}
+
+func (a *App) finishNotification(ctx context.Context, id, schoolID, result string) {
+	_, _ = a.DB.ExecContext(ctx,
+		`UPDATE gateway_notifications SET processed_at = now(), result = $2, school_id = COALESCE(NULLIF($3,'')::uuid, school_id) WHERE id = $1`,
+		id, result, schoolID)
+}
+
+func (a *App) webhookException(ctx context.Context, schoolID, txID, txNo, correlation string, err error) {
+	if a.Core == nil {
+		return
+	}
+	_ = a.Core.CreateException(ctx, client.ExceptionEvent{
+		SchoolID:       schoolID,
+		SourceService:  "billing",
+		Kind:           "webhook",
+		Severity:       "normal",
+		CorrelationID:  correlation,
+		ErrorMessage:   err.Error(),
+		PayloadSummary: map[string]any{"tx_no": txNo},
+		MaxAttempts:    3,
+		IdempotencyKey: fmt.Sprintf("webhook-err:%s", txID),
+	})
+}
+
+const txStateColumns = `t.id, t.school_id, t.status, m.kind, t.tx_no, t.total_idr, t.bills_amount_idr, t.fee_idr,
+	t.payer_user_id, t.student_user_id, t.provider_ref, t.va_number, t.purpose, t.purpose_ref, t.mandate_id`
+
+func scanTxState(row interface{ Scan(...any) error }) (*gatewayTxState, error) {
+	var t gatewayTxState
+	err := row.Scan(&t.ID, &t.SchoolID, &t.Status, &t.Kind, &t.TxNo, &t.TotalIDR, &t.BillsAmountIDR, &t.FeeIDR,
+		&t.PayerUserID, &t.StudentUserID, &t.ProviderRef, &t.VANumber, &t.Purpose, &t.PurposeRef, &t.MandateID)
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+// loadTxForWebhook finds the transaction of this provider only, so the same
+// reference at two providers never collides (BR-PAY-03).
+func (a *App) loadTxForWebhook(ctx context.Context, provider, ref, pRef string) (*gatewayTxState, error) {
+	return scanTxState(a.DB.QueryRowContext(ctx,
+		`SELECT `+txStateColumns+`
+		   FROM gateway_transactions t JOIN payment_methods m ON m.id = t.method_id
+		  WHERE t.provider = $3 AND (t.tx_no = $1 OR t.provider_ref = $2 OR t.provider_ref = $1)
+		  ORDER BY t.created_at DESC LIMIT 1`, ref, pRef, provider))
+}
+
+// applyProviderStatus moves a transaction to what its provider reported.
+// Paid → success + allocation (bills) or purpose hook (K2), receipt after
+// commit. Failed/expired → closed + purpose hook. Idempotent.
+func (a *App) applyProviderStatus(ctx context.Context, txID string, st gateway.Status, correlation string) error {
+	switch st {
+	case gateway.StatusPaid:
+		return a.settleTransaction(ctx, txID, correlation)
+	case gateway.StatusFailed, gateway.StatusExpired:
+		return a.closeTransaction(ctx, txID, st)
+	}
+	return nil
+}
+
+func (a *App) lockTx(ctx context.Context, dbTx *sql.Tx, txID string) (*gatewayTxState, error) {
+	return scanTxState(dbTx.QueryRowContext(ctx,
+		`SELECT `+txStateColumns+`
+		   FROM gateway_transactions t JOIN payment_methods m ON m.id = t.method_id
+		  WHERE t.id = $1 FOR UPDATE OF t`, txID))
+}
+
+func (a *App) settleTransaction(ctx context.Context, txID, correlation string) error {
+	dbTx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
 	}
 	defer dbTx.Rollback()
-
-	var currentStatus string
-	err = dbTx.QueryRowContext(r.Context(),
-		`SELECT status FROM gateway_transactions WHERE id = $1 FOR UPDATE`, txID).Scan(&currentStatus)
+	t, err := a.lockTx(ctx, dbTx, txID)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"responseCode":"5000000","responseMessage":"General Error"}`))
-		return
+		return err
 	}
-
-	if currentStatus == "success" {
-		// Already success, idempotent return without re-allocating (AC-IF-02)
-		_ = dbTx.Commit()
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"responseCode":"2000000","responseMessage":"Success"}`))
-		return
+	if t.Status == "success" || t.Status == "corrected" {
+		return dbTx.Commit() // AC-IF-02: never allocate twice
 	}
-
-	// Mark transaction success
 	now := time.Now()
-	_, err = dbTx.ExecContext(r.Context(),
-		`UPDATE gateway_transactions
-		 SET status = 'success', paid_at = $1, updated_at = $1
-		 WHERE id = $2`, now, txID)
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"responseCode":"5000000","responseMessage":"General Error"}`))
-		return
+	if _, err := dbTx.ExecContext(ctx,
+		`UPDATE gateway_transactions SET status = 'success', paid_at = $1, updated_at = $1 WHERE id = $2`, now, txID); err != nil {
+		return err
 	}
-
-	// Allocate to bills
-	rows, err := dbTx.QueryContext(r.Context(),
-		`SELECT bill_id, amount_idr FROM gateway_transaction_bills WHERE transaction_id = $1`, txID)
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"responseCode":"5000000","responseMessage":"General Error"}`))
-		return
+	if t.Purpose == PurposeBills {
+		if err := allocateGatewayBills(ctx, dbTx, t, now, correlation); err != nil {
+			return err
+		}
+	} else {
+		h := a.PurposeHandlers[t.Purpose]
+		if h == nil {
+			return errPurposeHandlerMissing
+		}
+		if err := h.OnGatewaySuccess(ctx, dbTx, t.SchoolID, t.PurposeRef.String, t.ID); err != nil {
+			return err
+		}
 	}
+	if _, err := dbTx.ExecContext(ctx,
+		`UPDATE autodebit_attempts SET status = 'success', updated_at = now()
+		  WHERE gateway_transaction_id = $1 AND status IN ('processing','scheduled')`, txID); err != nil {
+		return err
+	}
+	if err := dbTx.Commit(); err != nil {
+		return err
+	}
+	a.issueGatewayReceipt(ctx, t, now)
+	return nil
+}
 
+func (a *App) closeTransaction(ctx context.Context, txID string, st gateway.Status) error {
+	dbTx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer dbTx.Rollback()
+	t, err := a.lockTx(ctx, dbTx, txID)
+	if err != nil {
+		return err
+	}
+	if t.Status != "pending" {
+		return dbTx.Commit()
+	}
+	status := "failed" // T6 recorded cancelled/failed as failed
+	if st == gateway.StatusExpired {
+		status = "expired"
+	}
+	if _, err := dbTx.ExecContext(ctx,
+		`UPDATE gateway_transactions SET status = $1, updated_at = now() WHERE id = $2`, status, txID); err != nil {
+		return err
+	}
+	if t.Purpose != PurposeBills {
+		h := a.PurposeHandlers[t.Purpose]
+		if h == nil {
+			return errPurposeHandlerMissing
+		}
+		if err := h.OnGatewayClosed(ctx, dbTx, t.SchoolID, t.PurposeRef.String, t.ID, status); err != nil {
+			return err
+		}
+	}
+	if err := dbTx.Commit(); err != nil {
+		return err
+	}
+	if t.MandateID.Valid {
+		var attemptID string
+		if err := a.DB.QueryRowContext(ctx,
+			`SELECT id FROM autodebit_attempts WHERE gateway_transaction_id = $1 AND status = 'processing'`, txID).Scan(&attemptID); err == nil {
+			a.failAttempt(ctx, attemptID, "debit "+status+" di provider", time.Now())
+		}
+	}
+	return nil
+}
+
+// allocateGatewayBills books the transaction's bill lines as verified
+// payments (T6 allocation, unchanged).
+func allocateGatewayBills(ctx context.Context, dbTx *sql.Tx, t *gatewayTxState, now time.Time, correlation string) error {
+	rows, err := dbTx.QueryContext(ctx,
+		`SELECT bill_id, amount_idr FROM gateway_transaction_bills WHERE transaction_id = $1 ORDER BY position`, t.ID)
+	if err != nil {
+		return err
+	}
 	type billAlloc struct {
 		billID string
 		amount int64
@@ -232,17 +306,17 @@ func (a *App) NicepayWebhook(w http.ResponseWriter, r *http.Request) {
 	var allocs []billAlloc
 	for rows.Next() {
 		var ba billAlloc
-		if err := rows.Scan(&ba.billID, &ba.amount); err == nil {
-			allocs = append(allocs, ba)
+		if err := rows.Scan(&ba.billID, &ba.amount); err != nil {
+			rows.Close()
+			return err
 		}
+		allocs = append(allocs, ba)
 	}
 	rows.Close()
 
 	for _, ba := range allocs {
-		// Create verified bill_payments record
-		idemKey := fmt.Sprintf("gw-alloc:%s:%s", txID, ba.billID)
 		var pID string
-		err = dbTx.QueryRowContext(r.Context(),
+		err := dbTx.QueryRowContext(ctx,
 			`INSERT INTO bill_payments (
 				school_id, student_bill_id, amount_idr, transfer_at,
 				bank_name, account_name, reference, object_key, file_name,
@@ -253,126 +327,62 @@ func (a *App) NicepayWebhook(w http.ResponseWriter, r *http.Request) {
 				'NICEPay', 'Payment Gateway', $5, 'gateway/' || $6, 'gateway_receipt',
 				'application/json', 100, $7, 'verified', $8,
 				$9, $4, $4, $4
-			) RETURNING id`,
-			schoolID, ba.billID, ba.amount, now,
-			txNo, txID, rawHash, idemKey,
-			payerUserID).Scan(&pID)
-		if err != nil && !isUniqueViolation(err) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{"responseCode":"5000000","responseMessage":"General Error"}`))
-			return
+			) ON CONFLICT DO NOTHING RETURNING id`,
+			t.SchoolID, ba.billID, ba.amount, now,
+			t.TxNo, t.ID, correlation, fmt.Sprintf("gw-alloc:%s:%s", t.ID, ba.billID),
+			t.PayerUserID).Scan(&pID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
 		}
-
-		if pID != "" {
-			// Insert allocation
-			_, _ = dbTx.ExecContext(r.Context(),
-				`INSERT INTO bill_payment_allocations (school_id, payment_id, amount_idr, created_at)
-				 VALUES ($1, $2, $3, $4)`,
-				schoolID, pID, ba.amount, now)
-
-			// Recompute bill status
-			recomputeBillStatusInTx(r.Context(), dbTx, ba.billID)
+		if pID == "" {
+			continue
 		}
+		if _, err := dbTx.ExecContext(ctx,
+			`INSERT INTO bill_payment_allocations (school_id, payment_id, amount_idr, created_at) VALUES ($1, $2, $3, $4)`,
+			t.SchoolID, pID, ba.amount, now); err != nil {
+			return err
+		}
+		recomputeBillStatusInTx(ctx, dbTx, ba.billID)
 	}
-
-	if err := dbTx.Commit(); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"responseCode":"5000000","responseMessage":"General Error"}`))
-		return
-	}
-
-	// (6) Generate receipt and notify parent within ≤ 5 minutes (AC-29-02)
-	receiptNo, rErr := a.atomicNextReceiptNo(r.Context(), schoolID, now.Year())
-	if rErr == nil {
-		docKey, _ := a.generateReceiptDocument(r.Context(), schoolID, ReceiptDetails{
-			ReceiptNo:   receiptNo,
-			SchoolName:  "Sekolah Teratai Putih",
-			StudentName: "Siswa",
-			PayerName:   "Orang Tua",
-			AmountIDR:  totalIDR,
-			MethodLabel: methodKind,
-			Date:        now,
-			Items:       []string{txNo},
-		})
-
-		_, _ = a.DB.ExecContext(r.Context(),
-			`INSERT INTO receipts (school_id, receipt_no, source, source_id, object_key, sent_at, created_at)
-			 VALUES ($1, $2, 'gateway', $3, $4, now(), now())`,
-			schoolID, receiptNo, txID, docKey)
-
-		if a.Notification != nil {
-			_ = a.Notification.Notify(r.Context(), "receipt:"+receiptNo, client.Notification{
-				SchoolID: schoolID,
-				UserID:   payerUserID,
-				Type:     "receipt",
-				Title:    "Kuitansi Pembayaran " + receiptNo,
-				Body:     fmt.Sprintf("Pembayaran tagihan sebesar Rp %d via %s telah berhasil.", totalIDR, methodKind),
-				Data:     map[string]any{"receipt_no": receiptNo, "tx_no": txNo, "amount_idr": totalIDR},
-				Channels: []string{"in_app", "email"},
-			})
-		}
-	}
-
-	// (7) Daily journal posting to accounting engine (AC-IF-03)
-	if a.Accounting != nil {
-		// Fetch accounting accounts
-		clearingAcc := "1101-01"
-		feeExpenseAcc := "5101-01"
-		receivableAcc := "1102-01"
-		_ = a.DB.QueryRowContext(r.Context(),
-			`SELECT clearing_acc, fee_expense_acc, receivable_acc FROM gateway_accounts WHERE school_id = $1`,
-			schoolID).Scan(&clearingAcc, &feeExpenseAcc, &receivableAcc)
-
-		batch := client.JournalRequest{
-			SchoolID:    schoolID,
-			Source:      "gateway",
-			TransDate:   now.Format("2006-01-02"),
-			Reference:   fmt.Sprintf("pgw:%s:%s", schoolID, now.Format("2006-01-02")),
-			Description: "Penerimaan pembayaran gateway " + txNo,
-			Lines: []client.JournalLine{
-				{AccCode: clearingAcc, DebitIDR: totalIDR - feeIDR, CreditIDR: 0},
-				{AccCode: receivableAcc, DebitIDR: 0, CreditIDR: billsAmountIDR},
-			},
-		}
-		if feeIDR > 0 {
-			batch.Lines = append(batch.Lines, client.JournalLine{
-				AccCode: feeExpenseAcc, DebitIDR: feeIDR, CreditIDR: 0,
-			})
-		}
-
-		if a.Accounting != nil {
-			if _, jErr := a.Accounting.PostJournal(r.Context(), batch); jErr != nil {
-				// Queue exception to Core if accounting engine doesn't respond (AC-IF-03)
-				if a.Core != nil {
-					_ = a.Core.CreateException(r.Context(), client.ExceptionEvent{
-						SchoolID:       schoolID,
-						Kind:           "journal_posting",
-						Severity:       "normal",
-						CorrelationID:  batch.Reference,
-						ErrorMessage:   jErr.Error(),
-						PayloadSummary: map[string]any{"batch": batch},
-						MaxAttempts:    3,
-						IdempotencyKey: fmt.Sprintf("journal-post:%s:%s", schoolID, batch.Reference),
-					})
-				}
-			}
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"responseCode":"2000000","responseMessage":"Success"}`))
+	return nil
 }
 
-// markTransactionSuccess marks transaction as success and allocates bills
-func (a *App) markTransactionSuccess(ctx context.Context, txID string) error {
-	now := time.Now()
-	_, err := a.DB.ExecContext(ctx,
-		`UPDATE gateway_transactions SET status = 'success', paid_at = $1, updated_at = $1 WHERE id = $2`,
-		now, txID)
-	return err
+// issueGatewayReceipt creates and sends the receipt (AC-29-02) for every
+// purpose. Failures are retried by nothing here; they are logged in receipts.
+func (a *App) issueGatewayReceipt(ctx context.Context, t *gatewayTxState, now time.Time) {
+	receiptNo, err := a.atomicNextReceiptNo(ctx, t.SchoolID, now.Year())
+	if err != nil {
+		return
+	}
+	what := "Pembayaran tagihan"
+	if t.Purpose == PurposeWalletTopup {
+		what = "Top-up dompet"
+	}
+	docKey, _ := a.generateReceiptDocument(ctx, t.SchoolID, ReceiptDetails{
+		ReceiptNo:   receiptNo,
+		SchoolName:  "Sekolah Teratai Putih",
+		StudentName: "Siswa",
+		PayerName:   "Orang Tua",
+		AmountIDR:   t.TotalIDR,
+		MethodLabel: t.Kind,
+		Date:        now,
+		Items:       []string{t.TxNo},
+	})
+	_, _ = a.DB.ExecContext(ctx,
+		`INSERT INTO receipts (school_id, receipt_no, source, source_id, object_key, sent_at, created_at)
+		 VALUES ($1, $2, 'gateway', $3, $4, now(), now()) ON CONFLICT DO NOTHING`,
+		t.SchoolID, receiptNo, t.ID, docKey)
+	if a.Notification != nil {
+		_ = a.Notification.Notify(ctx, "receipt:"+receiptNo, client.Notification{
+			SchoolID: t.SchoolID,
+			UserID:   t.PayerUserID,
+			Type:     "receipt",
+			Title:    "Kuitansi Pembayaran " + receiptNo,
+			Body:     fmt.Sprintf("%s sebesar Rp %d via %s telah berhasil.", what, t.TotalIDR, t.Kind),
+			Data:     map[string]any{"receipt_no": receiptNo, "tx_no": t.TxNo, "amount_idr": t.TotalIDR, "purpose": t.Purpose},
+			Channels: []string{"in_app", "email"},
+		})
+	}
 }
 
 func recomputeBillStatusInTx(ctx context.Context, tx *sql.Tx, billID string) {
