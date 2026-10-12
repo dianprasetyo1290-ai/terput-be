@@ -1,7 +1,7 @@
 # PRD SEKOCI v1.0 → skci-teratai: Peta Gap & Urutan Task
 
 Sumber: `source/Master_PRD_SaaS_SEKOCI_Bagian1_v1.0.md` (menu 01–82) dan `source/Master_PRD_SaaS_SEKOCI_Bagian2_v1.0.md` (menu 83–101).
-Bagian 3–4 (menu 102–159) **tidak ada di zip**, jadi belum dipetakan.
+Bagian 3–4 (menu 102–159): `source/Master_PRD_SaaS_SEKOCI_Bagian3_v1.0.md` dan `source/Master_PRD_SaaS_SEKOCI_Bagian4_v1.0.md`. Pembagian task T9–T26, gelombang 3–5, nomor migrasi, dan default keputusan terbuka OQ-28–OQ-44 ada di **`PARALLEL-v2.md`**.
 
 Aturan kerja: `../../GEMINI.md`. Pengerjaan kode oleh Gemini, review oleh Claude.
 
