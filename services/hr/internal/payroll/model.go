@@ -78,6 +78,38 @@ type PayrollInput struct {
 	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
 }
 
+type PayrollInputView struct {
+	ID            string    `json:"id"`
+	SchoolID      string    `json:"school_id"`
+	Period        string    `json:"period"`
+	EmployeeID    string    `json:"employee_id"`
+	EmployeeName  string    `json:"employee_name"`
+	EmployeeNIP   string    `json:"employee_nip"`
+	ComponentID   string    `json:"component_id"`
+	ComponentName string    `json:"component_name"`
+	AmountIDR     int64     `json:"amount_idr"`
+	Source        string    `json:"source"`
+	Locked        bool      `json:"locked"`
+	PendingChange bool      `json:"pending_change,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+type PayrollInputChange struct {
+	ID              string    `json:"id"`
+	SchoolID        string    `json:"school_id"`
+	InputID         *string   `json:"input_id,omitempty"`
+	Period          string    `json:"period"`
+	EmployeeID      string    `json:"employee_id"`
+	ComponentID     string    `json:"component_id"`
+	BeforeAmountIDR int64     `json:"before_amount_idr"`
+	AfterAmountIDR  int64     `json:"after_amount_idr"`
+	Reason          string    `json:"reason"`
+	Status          string    `json:"status"`
+	ApprovalID      *string   `json:"approval_id,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
 type Payslip struct {
 	ID             string     `json:"id" db:"id"`
 	SchoolID       string     `json:"school_id" db:"school_id"`

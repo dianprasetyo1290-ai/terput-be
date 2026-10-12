@@ -200,11 +200,15 @@ type ApprovalRequest struct {
 
 // Request types hr sends to core (must match core model.KnownRequestTypes).
 const (
-	ReqTypeLeave         = "leave"
-	ReqTypeOvertime      = "overtime"
-	ReqTypeProfileChange = "profile_change"
-	ReqTypeRequisition   = "requisition"
-	ReqTypePayrollRun    = "payroll_run"
+	ReqTypeLeave                  = "leave"
+	ReqTypeOvertime               = "overtime"
+	ReqTypeProfileChange          = "profile_change"
+	ReqTypeRequisition            = "requisition"
+	ReqTypePayrollRun             = "payroll_run"
+	ReqTypeTrainingPaid           = "training_paid"
+	ReqTypeOffer                  = "offer"
+	ReqTypePayrollComponentChange = "payroll_component_change"
+	ReqTypePayrollInputChange     = "payroll_input_change"
 )
 
 // CreateApproval opens an approval in core and returns its id. source_service,

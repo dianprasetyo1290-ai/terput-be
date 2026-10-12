@@ -15,7 +15,7 @@ import (
 func (a *App) Router() http.Handler {
 	r := chi.NewRouter()
 
-	trHandler := training.NewHandler(training.NewStore(a.DB))
+	trHandler := training.NewHandler(training.NewStore(a.DB), a.Client)
 	atsHandler := ats.NewHandler(ats.NewStore(a.DB), a.Client)
 	payHandler := payroll.NewHandler(payroll.NewStore(a.DB), a.Client)
 
@@ -65,6 +65,7 @@ func (a *App) Router() http.Handler {
 		api.Get("/documents/{id}/download", a.DownloadDocument)
 
 		// ESS Training & Onboarding
+		api.Post("/me/training/enroll", trHandler.EnrollCourse)
 		api.Get("/me/training/assignments", trHandler.MyAssignments)
 		api.Get("/me/training/assignments/{assignmentId}/quiz", trHandler.MyQuiz)
 		api.Post("/me/training/assignments/{assignmentId}/quiz", trHandler.SubmitQuiz)
@@ -218,13 +219,20 @@ func (a *App) Router() http.Handler {
 			hr.Get("/ats/scorecard-templates", atsHandler.ListScorecardTemplates)
 			hr.Post("/ats/scorecard-templates", atsHandler.CreateScorecardTemplate)
 			hr.Post("/ats/interviews", atsHandler.ScheduleInterview)
+			hr.Get("/ats/offers", atsHandler.ListOffers)
 			hr.Post("/ats/offers", atsHandler.CreateOffer)
+			hr.Post("/ats/offers/{id}/submit", atsHandler.SubmitOffer)
+			hr.Post("/ats/offers/{id}/send", atsHandler.SendOffer)
 			hr.Get("/ats/settings", atsHandler.GetSettings)
 			hr.Get("/ats/talent-pool", atsHandler.ListTalentPool)
 
 			// Payroll Management
 			hr.Get("/payroll/components", payHandler.ListComponents)
 			hr.Post("/payroll/components", payHandler.CreateComponent)
+			hr.Post("/payroll/components/{id}/submit-approval", payHandler.SubmitComponentApproval)
+			hr.Get("/payroll/inputs", payHandler.ListInputs)
+			hr.Post("/payroll/inputs", payHandler.SaveInput)
+			hr.Post("/payroll/inputs/pull-attendance", payHandler.PullAttendance)
 			hr.Get("/payroll/runs", payHandler.ListRuns)
 			hr.Post("/payroll/runs", payHandler.CreateRun)
 			hr.Get("/payroll/runs/{id}", payHandler.GetRun)

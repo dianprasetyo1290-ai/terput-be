@@ -679,6 +679,154 @@ func (s *Store) CreateOffer(ctx context.Context, off Offer) (*Offer, error) {
 	return &off, nil
 }
 
+func (s *Store) GetOffer(ctx context.Context, schoolID, id string) (*Offer, error) {
+	query := `
+		SELECT o.id, o.school_id, o.application_id, coalesce(c.full_name, ''),
+		       o.position_id, coalesce(p.name, ''), o.start_date, o.employment_type,
+		       o.base_salary_enc, o.out_of_range, o.status, o.approval_id,
+		       coalesce(o.document_object_key, ''), o.responded_at, o.response_note, o.employee_id,
+		       o.created_at, o.updated_at
+		FROM offers o
+		LEFT JOIN applications a ON a.id = o.application_id
+		LEFT JOIN candidates c ON c.id = a.candidate_id
+		LEFT JOIN positions p ON p.id = o.position_id
+		WHERE o.school_id = $1 AND o.id = $2
+	`
+	var off Offer
+	var salaryEnc []byte
+	var startDate time.Time
+	err := s.DB.QueryRowContext(ctx, query, schoolID, id).Scan(
+		&off.ID, &off.SchoolID, &off.ApplicationID, &off.CandidateName,
+		&off.PositionID, &off.PositionName, &startDate, &off.EmploymentType,
+		&salaryEnc, &off.OutOfRange, &off.Status, &off.ApprovalID,
+		&off.DocumentObjectKey, &off.RespondedAt, &off.ResponseNote, &off.EmployeeID,
+		&off.CreatedAt, &off.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	off.StartDate = startDate.Format("2006-01-02")
+	var salary int64
+	_, _ = fmt.Sscanf(string(salaryEnc), "%d", &salary)
+	off.BaseSalaryIDR = salary
+	return &off, nil
+}
+
+func (s *Store) ListOffers(ctx context.Context, schoolID string, applicationID string) ([]Offer, error) {
+	query := `
+		SELECT o.id, o.school_id, o.application_id, coalesce(c.full_name, ''),
+		       o.position_id, coalesce(p.name, ''), o.start_date, o.employment_type,
+		       o.base_salary_enc, o.out_of_range, o.status, o.approval_id,
+		       coalesce(o.document_object_key, ''), o.responded_at, o.response_note, o.employee_id,
+		       o.created_at, o.updated_at
+		FROM offers o
+		LEFT JOIN applications a ON a.id = o.application_id
+		LEFT JOIN candidates c ON c.id = a.candidate_id
+		LEFT JOIN positions p ON p.id = o.position_id
+		WHERE o.school_id = $1`
+	args := []interface{}{schoolID}
+	if applicationID != "" {
+		query += " AND o.application_id = $2"
+		args = append(args, applicationID)
+	}
+	query += " ORDER BY o.created_at DESC"
+
+	rows, err := s.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []Offer
+	for rows.Next() {
+		var off Offer
+		var salaryEnc []byte
+		var startDate time.Time
+		if err := rows.Scan(
+			&off.ID, &off.SchoolID, &off.ApplicationID, &off.CandidateName,
+			&off.PositionID, &off.PositionName, &startDate, &off.EmploymentType,
+			&salaryEnc, &off.OutOfRange, &off.Status, &off.ApprovalID,
+			&off.DocumentObjectKey, &off.RespondedAt, &off.ResponseNote, &off.EmployeeID,
+			&off.CreatedAt, &off.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		off.StartDate = startDate.Format("2006-01-02")
+		var salary int64
+		_, _ = fmt.Sscanf(string(salaryEnc), "%d", &salary)
+		off.BaseSalaryIDR = salary
+		list = append(list, off)
+	}
+	return list, rows.Err()
+}
+
+func (s *Store) SubmitOffer(ctx context.Context, schoolID, id, approvalID string) error {
+	res, err := s.DB.ExecContext(ctx, `
+		UPDATE offers
+		SET status = 'pending_approval', approval_id = $3, updated_at = now()
+		WHERE id = $1 AND school_id = $2 AND status = 'draft'
+	`, id, schoolID, approvalID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrConflict
+	}
+	return nil
+}
+
+func (s *Store) SendOffer(ctx context.Context, schoolID, id string) error {
+	res, err := s.DB.ExecContext(ctx, `
+		UPDATE offers
+		SET status = 'sent', updated_at = now()
+		WHERE id = $1 AND school_id = $2 AND status = 'approved'
+	`, id, schoolID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrConflict
+	}
+	return nil
+}
+
+func (s *Store) ApplyOfferDecision(ctx context.Context, sourceID, decision string) error {
+	var targetStatus string
+	switch decision {
+	case "approved":
+		targetStatus = "approved"
+	case "rejected":
+		targetStatus = "rejected"
+	default:
+		return fmt.Errorf("keputusan tidak dikenal: %s", decision)
+	}
+
+	res, err := s.DB.ExecContext(ctx, `
+		UPDATE offers
+		SET status = $2, updated_at = now()
+		WHERE id = $1 AND status = 'pending_approval'
+	`, sourceID, targetStatus)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		var exists bool
+		_ = s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM offers WHERE id = $1)`, sourceID).Scan(&exists)
+		if !exists {
+			return ErrNotFound
+		}
+		// Already final -> idempotent no-op
+		return nil
+	}
+	return nil
+}
+
 // AcceptOffer processes candidate acceptance in one transaction
 func (s *Store) AcceptOffer(ctx context.Context, offerID string) error {
 	tx, err := s.DB.BeginTx(ctx, nil)

@@ -2,19 +2,26 @@ package training
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"skci/hr/internal/client"
 	"skci/hr/internal/common"
+	"skci/hr/internal/training/calc"
 )
 
 type Handler struct {
-	Store *Store
+	Store     *Store
+	Approvals *client.Client
 }
 
-func NewHandler(s *Store) *Handler {
-	return &Handler{Store: s}
+func NewHandler(s *Store, approvals *client.Client) *Handler {
+	return &Handler{Store: s, Approvals: approvals}
 }
 
 // -----------------------------------------------------------------------------
@@ -278,6 +285,113 @@ func (h *Handler) CreateAssignment(w http.ResponseWriter, r *http.Request) {
 }
 
 // ESS Endpoints
+
+// EnrollCourse allows an employee to self-enroll in a published course.
+// If the course is paid (cost_idr > 0, AC-99-02), it creates an approval request in Core
+// with request_type 'training_paid' and places the assignment into 'pending_approval'.
+func (h *Handler) EnrollCourse(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if claims == nil {
+		common.WriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	schoolID := common.EffectiveSchoolID(r)
+
+	// Resolve employee ID for this user account
+	var emp struct {
+		ID       string
+		FullName string
+	}
+	err := h.Store.DB.QueryRowContext(r.Context(), `
+		SELECT id, full_name FROM employees WHERE school_id = $1 AND (user_id = $2 OR id = $2)
+	`, schoolID, claims.UserID).Scan(&emp.ID, &emp.FullName)
+	if err != nil {
+		common.WriteError(w, http.StatusNotFound, "data pegawai tidak ditemukan untuk akun ini")
+		return
+	}
+
+	var body struct {
+		CourseID  string  `json:"course_id"`
+		SessionID *string `json:"session_id,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.WriteError(w, http.StatusBadRequest, "format json tidak valid")
+		return
+	}
+	if body.CourseID == "" {
+		common.WriteError(w, http.StatusBadRequest, "course_id wajib diisi")
+		return
+	}
+
+	course, err := h.Store.GetCourse(r.Context(), schoolID, body.CourseID)
+	if err != nil {
+		common.WriteError(w, http.StatusNotFound, "kursus tidak ditemukan")
+		return
+	}
+
+	needsApproval := calc.NeedsApproval(course.CostIDR)
+
+	tx, err := h.Store.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal memulai transaksi: "+err.Error())
+		return
+	}
+	defer tx.Rollback()
+
+	as, err := h.Store.EnrollTx(r.Context(), tx, schoolID, emp.ID, body.CourseID, body.SessionID, needsApproval)
+	if err != nil {
+		if errors.Is(err, ErrConflict) {
+			common.WriteError(w, http.StatusConflict, "Anda sudah terdaftar pada kursus ini")
+			return
+		}
+		if errors.Is(err, ErrNotFound) {
+			common.WriteError(w, http.StatusNotFound, "kursus tidak ditemukan")
+			return
+		}
+		common.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+
+	if needsApproval {
+		if h.Approvals == nil {
+			common.WriteError(w, http.StatusServiceUnavailable, "layanan approval tidak terkonfigurasi")
+			return
+		}
+		cost := course.CostIDR
+		appID, err := h.Approvals.CreateApproval(r.Context(), client.ApprovalRequest{
+			SchoolID:      schoolID,
+			RequestType:   client.ReqTypeTrainingPaid,
+			SourceID:      as.ID,
+			Title:         fmt.Sprintf("Pendaftaran Pelatihan: %s oleh %s", course.Title, emp.FullName),
+			Summary:       map[string]any{"course_title": course.Title, "cost_idr": course.CostIDR, "employee_name": emp.FullName},
+			AmountIDR:     &cost,
+			MakerUserID:   claims.UserID,
+			SubjectUserID: claims.UserID,
+		})
+		if err != nil {
+			log.Printf("training assignment %s: create approval: %v", as.ID, err)
+			status, msg := client.ApprovalErrorMessage(err)
+			common.WriteError(w, status, msg)
+			return
+		}
+		if err := h.Store.UpdateAssignmentApprovalTx(r.Context(), tx, as.ID, appID); err != nil {
+			common.WriteError(w, http.StatusInternalServerError, "gagal menyimpan approval id: "+err.Error())
+			return
+		}
+		as.ApprovalID = &appID
+	}
+
+	if err := tx.Commit(); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal menyimpan pendaftaran: "+err.Error())
+		return
+	}
+
+	as.CourseTitle = course.Title
+	as.EmployeeName = emp.FullName
+	as.DisplayStatus = calc.DisplayStatus(as.Status, as.DueDate, time.Now())
+	common.WriteJSON(w, http.StatusCreated, as, nil)
+}
+
 func (h *Handler) MyAssignments(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {

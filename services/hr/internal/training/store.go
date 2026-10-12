@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"skci/hr/internal/training/calc"
@@ -389,7 +390,7 @@ func (s *Store) ListAssignments(ctx context.Context, schoolID string, employeeID
 		WHERE a.school_id = $1`
 	args := []interface{}{schoolID}
 	if employeeID != "" {
-		query += " AND a.employee_id = $2"
+		query += " AND (a.employee_id = $2 OR e.user_id = $2)"
 		args = append(args, employeeID)
 	}
 	query += " ORDER BY a.created_at DESC"
@@ -416,6 +417,116 @@ func (s *Store) ListAssignments(ctx context.Context, schoolID string, employeeID
 		list = append(list, as)
 	}
 	return list, rows.Err()
+}
+
+func (s *Store) EnrollTx(ctx context.Context, tx *sql.Tx, schoolID, employeeID, courseID string, sessionID *string, needsApproval bool) (*Assignment, error) {
+	// 1. Check if course exists and is published
+	var quota *int
+	var status string
+	err := tx.QueryRowContext(ctx, `SELECT quota, status FROM courses WHERE id = $1 AND school_id = $2`, courseID, schoolID).Scan(&quota, &status)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if status != "published" {
+		return nil, fmt.Errorf("kursus belum dipublikasikan")
+	}
+
+	// 2. Check quota (AC-99-01)
+	var taken int
+	_ = tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM training_assignments
+		WHERE course_id = $1 AND school_id = $2 AND status NOT IN ('cancelled', 'rejected')
+	`, courseID, schoolID).Scan(&taken)
+	canEnroll, reason := calc.CanEnroll(quota, taken)
+	if !canEnroll {
+		return nil, fmt.Errorf("%s", reason)
+	}
+
+	// 3. Check if already enrolled
+	var existingCount int
+	_ = tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM training_assignments
+		WHERE school_id = $1 AND employee_id = $2 AND course_id = $3 AND status NOT IN ('cancelled', 'rejected')
+	`, schoolID, employeeID, courseID).Scan(&existingCount)
+	if existingCount > 0 {
+		return nil, ErrConflict
+	}
+
+	// 4. Determine initial status
+	assignStatus := "not_started"
+	if needsApproval {
+		assignStatus = "pending_approval"
+	}
+
+	var a Assignment
+	a.SchoolID = schoolID
+	a.EmployeeID = employeeID
+	a.CourseID = courseID
+	a.SessionID = sessionID
+	a.Source = "self"
+	a.Status = assignStatus
+
+	err = tx.QueryRowContext(ctx, `
+		INSERT INTO training_assignments (
+			school_id, employee_id, course_id, session_id, source, status, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, now(), now())
+		RETURNING id, created_at, updated_at
+	`, a.SchoolID, a.EmployeeID, a.CourseID, a.SessionID, a.Source, a.Status).Scan(&a.ID, &a.CreatedAt, &a.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+func (s *Store) UpdateAssignmentApprovalTx(ctx context.Context, tx *sql.Tx, assignmentID, approvalID string) error {
+	res, err := tx.ExecContext(ctx, `
+		UPDATE training_assignments
+		SET approval_id = $2, updated_at = now()
+		WHERE id = $1
+	`, assignmentID, approvalID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) ApplyTrainingPaidDecision(ctx context.Context, sourceID, decision string) error {
+	var targetStatus string
+	switch decision {
+	case "approved":
+		targetStatus = "not_started"
+	case "rejected":
+		targetStatus = "rejected"
+	default:
+		return fmt.Errorf("keputusan tidak dikenal: %s", decision)
+	}
+
+	res, err := s.DB.ExecContext(ctx, `
+		UPDATE training_assignments
+		SET status = $2, updated_at = now()
+		WHERE id = $1 AND status = 'pending_approval'
+	`, sourceID, targetStatus)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		var exists bool
+		_ = s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM training_assignments WHERE id = $1)`, sourceID).Scan(&exists)
+		if !exists {
+			return ErrNotFound
+		}
+		// Already final -> idempotent no-op
+		return nil
+	}
+	return nil
 }
 
 func (s *Store) MarkMaterialDone(ctx context.Context, assignmentID, materialID string) error {

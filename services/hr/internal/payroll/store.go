@@ -73,6 +73,292 @@ func (s *Store) CreateComponent(ctx context.Context, c PayComponent) (*PayCompon
 	return &c, nil
 }
 
+func (s *Store) GetComponent(ctx context.Context, schoolID, id string) (*PayComponent, error) {
+	var c PayComponent
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT id, school_id, code, name, kind, nature, taxable, bpjs_base, calc,
+		       default_amount_idr, rate_per_unit_idr, max_input_idr, sort, status,
+		       approval_id, created_at, updated_at
+		FROM pay_components
+		WHERE school_id = $1 AND id = $2 AND deleted_at IS NULL
+	`, schoolID, id).Scan(
+		&c.ID, &c.SchoolID, &c.Code, &c.Name, &c.Kind, &c.Nature, &c.Taxable,
+		&c.BPJSBase, &c.Calc, &c.DefaultAmountIDR, &c.RatePerUnitIDR, &c.MaxInputIDR,
+		&c.Sort, &c.Status, &c.ApprovalID, &c.CreatedAt, &c.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (s *Store) SubmitComponentApproval(ctx context.Context, schoolID, id, approvalID string) error {
+	res, err := s.DB.ExecContext(ctx, `
+		UPDATE pay_components
+		SET status = 'pending_approval', approval_id = $3, updated_at = now()
+		WHERE id = $1 AND school_id = $2
+	`, id, schoolID, approvalID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) ApplyComponentDecision(ctx context.Context, sourceID, decision string) error {
+	var targetStatus string
+	switch decision {
+	case "approved":
+		targetStatus = "active"
+	case "rejected":
+		targetStatus = "retired"
+	default:
+		return fmt.Errorf("keputusan tidak dikenal: %s", decision)
+	}
+
+	res, err := s.DB.ExecContext(ctx, `
+		UPDATE pay_components
+		SET status = $2, updated_at = now()
+		WHERE id = $1 AND status = 'pending_approval'
+	`, sourceID, targetStatus)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		var exists bool
+		_ = s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pay_components WHERE id = $1)`, sourceID).Scan(&exists)
+		if !exists {
+			return ErrNotFound
+		}
+		// Already final -> idempotent no-op
+		return nil
+	}
+	return nil
+}
+
+func (s *Store) ListInputs(ctx context.Context, schoolID, period string) ([]PayrollInputView, error) {
+	query := `
+		SELECT i.id, i.school_id, i.period, i.employee_id, coalesce(e.full_name, ''), coalesce(e.nip, ''),
+		       i.component_id, coalesce(c.name, ''), i.amount_idr, i.source, i.locked,
+		       EXISTS(SELECT 1 FROM payroll_input_changes pic WHERE pic.input_id = i.id AND pic.status = 'pending_approval'),
+		       i.created_at
+		FROM payroll_inputs i
+		JOIN pay_components c ON c.id = i.component_id
+		JOIN employees e ON e.id = i.employee_id
+		WHERE i.school_id = $1 AND i.period = $2
+		ORDER BY e.full_name ASC, c.sort ASC
+	`
+	rows, err := s.DB.QueryContext(ctx, query, schoolID, period)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []PayrollInputView
+	for rows.Next() {
+		var v PayrollInputView
+		if err := rows.Scan(
+			&v.ID, &v.SchoolID, &v.Period, &v.EmployeeID, &v.EmployeeName, &v.EmployeeNIP,
+			&v.ComponentID, &v.ComponentName, &v.AmountIDR, &v.Source, &v.Locked,
+			&v.PendingChange, &v.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		list = append(list, v)
+	}
+	return list, rows.Err()
+}
+
+func (s *Store) SaveInput(ctx context.Context, schoolID, period, employeeID, componentID string, amountIDR int64, reason string) (needsApproval bool, inputID string, changeID string, err error) {
+	// Check calendar cutoff_date
+	var cutoffDate time.Time
+	err = s.DB.QueryRowContext(ctx, `
+		SELECT cutoff_date FROM payroll_calendars WHERE school_id = $1 AND period = $2
+	`, schoolID, period).Scan(&cutoffDate)
+
+	isAfterCutoff := false
+	if err == nil {
+		today := time.Now()
+		todayDate := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, today.Location())
+		cutoffOnly := time.Date(cutoffDate.Year(), cutoffDate.Month(), cutoffDate.Day(), 0, 0, 0, 0, cutoffDate.Location())
+		if todayDate.After(cutoffOnly) {
+			isAfterCutoff = true
+		}
+	}
+
+	if isAfterCutoff {
+		// Cutoff passed -> record change in payroll_input_changes, requiring Core approval (FR-94-004)
+		var existingID string
+		var beforeAmount int64
+		qErr := s.DB.QueryRowContext(ctx, `
+			SELECT id, amount_idr FROM payroll_inputs
+			WHERE school_id = $1 AND period = $2 AND employee_id = $3 AND component_id = $4
+		`, schoolID, period, employeeID, componentID).Scan(&existingID, &beforeAmount)
+
+		var inpID *string
+		if qErr == nil {
+			inpID = &existingID
+		}
+
+		if reason == "" {
+			reason = "Penyesuaian input payroll setelah cutoff"
+		}
+
+		var chgID string
+		err = s.DB.QueryRowContext(ctx, `
+			INSERT INTO payroll_input_changes (
+				school_id, input_id, period, employee_id, component_id,
+				before_amount_idr, after_amount_idr, reason, status, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending_approval', now(), now())
+			RETURNING id
+		`, schoolID, inpID, period, employeeID, componentID, beforeAmount, amountIDR, reason).Scan(&chgID)
+		if err != nil {
+			return false, "", "", err
+		}
+		return true, existingID, chgID, nil
+	}
+
+	// Normal input before/on cutoff: upsert directly
+	var id string
+	err = s.DB.QueryRowContext(ctx, `
+		INSERT INTO payroll_inputs (
+			school_id, period, employee_id, component_id, amount_idr, source, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, 'manual', now(), now())
+		ON CONFLICT (school_id, period, employee_id, component_id)
+		DO UPDATE SET amount_idr = $5, updated_at = now()
+		RETURNING id
+	`, schoolID, period, employeeID, componentID, amountIDR).Scan(&id)
+	if err != nil {
+		return false, "", "", err
+	}
+	return false, id, "", nil
+}
+
+func (s *Store) UpdateInputChangeApproval(ctx context.Context, changeID, approvalID string) error {
+	_, err := s.DB.ExecContext(ctx, `
+		UPDATE payroll_input_changes
+		SET approval_id = $2, updated_at = now()
+		WHERE id = $1
+	`, changeID, approvalID)
+	return err
+}
+
+func (s *Store) ApplyInputChangeDecision(ctx context.Context, sourceID, decision string) error {
+	var targetStatus string
+	switch decision {
+	case "approved":
+		targetStatus = "approved"
+	case "rejected":
+		targetStatus = "rejected"
+	default:
+		return fmt.Errorf("keputusan tidak dikenal: %s", decision)
+	}
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var chg struct {
+		SchoolID       string
+		Period         string
+		EmployeeID     string
+		ComponentID    string
+		AfterAmountIDR int64
+		Status         string
+	}
+	err = tx.QueryRowContext(ctx, `
+		SELECT school_id, period, employee_id, component_id, after_amount_idr, status
+		FROM payroll_input_changes WHERE id = $1
+	`, sourceID).Scan(
+		&chg.SchoolID, &chg.Period, &chg.EmployeeID, &chg.ComponentID,
+		&chg.AfterAmountIDR, &chg.Status,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+
+	if chg.Status != "pending_approval" {
+		// Already decided (idempotent)
+		return nil
+	}
+
+	if targetStatus == "approved" {
+		// Apply to payroll_inputs
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO payroll_inputs (
+				school_id, period, employee_id, component_id, amount_idr, source, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, 'manual', now(), now())
+			ON CONFLICT (school_id, period, employee_id, component_id)
+			DO UPDATE SET amount_idr = $5, updated_at = now()
+		`, chg.SchoolID, chg.Period, chg.EmployeeID, chg.ComponentID, chg.AfterAmountIDR)
+		if err != nil {
+			return err
+		}
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		UPDATE payroll_input_changes
+		SET status = $2, updated_at = now()
+		WHERE id = $1
+	`, sourceID, targetStatus)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (s *Store) PullAttendance(ctx context.Context, schoolID, period string) (int, error) {
+	var overtimeCompID string
+	_ = s.DB.QueryRowContext(ctx, `
+		SELECT id FROM pay_components
+		WHERE school_id = $1 AND code = 'LEM' AND deleted_at IS NULL
+	`, schoolID).Scan(&overtimeCompID)
+
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT id FROM employees WHERE school_id = $1 AND status = 'active'
+	`, schoolID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	var count int
+	for rows.Next() {
+		var empID string
+		if err := rows.Scan(&empID); err != nil {
+			continue
+		}
+		if overtimeCompID != "" {
+			res, err := s.DB.ExecContext(ctx, `
+				INSERT INTO payroll_inputs (
+					school_id, period, employee_id, component_id, amount_idr, source, created_at, updated_at
+				) VALUES ($1, $2, $3, $4, 0, 'attendance', now(), now())
+				ON CONFLICT (school_id, period, employee_id, component_id) DO NOTHING
+			`, schoolID, period, empID, overtimeCompID)
+			if err == nil {
+				n, _ := res.RowsAffected()
+				if n > 0 {
+					count++
+				}
+			}
+		}
+	}
+	return count, nil
+}
+
 // -----------------------------------------------------------------------------
 // Payroll Runs
 // -----------------------------------------------------------------------------

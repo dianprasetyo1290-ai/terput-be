@@ -11,6 +11,7 @@ import (
 	"skci/hr/internal/common"
 	"skci/hr/internal/payroll"
 	"skci/hr/internal/store"
+	"skci/hr/internal/training"
 )
 
 // ApprovalCallbackRequest is the body core POSTs to callback_url once an
@@ -53,13 +54,21 @@ func (a *App) InternalApprovalCallback(w http.ResponseWriter, r *http.Request) {
 		err = payroll.NewStore(a.DB).ApplyRunDecision(ctx, body.SourceID, body.Decision)
 	case client.ReqTypeRequisition:
 		err = ats.NewStore(a.DB).ApplyRequisitionDecision(ctx, body.SourceID, body.Decision)
+	case client.ReqTypeTrainingPaid:
+		err = training.NewStore(a.DB).ApplyTrainingPaidDecision(ctx, body.SourceID, body.Decision)
+	case client.ReqTypeOffer:
+		err = ats.NewStore(a.DB).ApplyOfferDecision(ctx, body.SourceID, body.Decision)
+	case client.ReqTypePayrollComponentChange:
+		err = payroll.NewStore(a.DB).ApplyComponentDecision(ctx, body.SourceID, body.Decision)
+	case client.ReqTypePayrollInputChange:
+		err = payroll.NewStore(a.DB).ApplyInputChangeDecision(ctx, body.SourceID, body.Decision)
 	default:
 		common.Error(w, http.StatusUnprocessableEntity, fmt.Sprintf("Jenis approval '%s' tidak ditangani hr", body.RequestType))
 		return
 	}
 
 	switch {
-	case errors.Is(err, store.ErrNotFound), errors.Is(err, payroll.ErrNotFound), errors.Is(err, ats.ErrNotFound):
+	case errors.Is(err, store.ErrNotFound), errors.Is(err, payroll.ErrNotFound), errors.Is(err, ats.ErrNotFound), errors.Is(err, training.ErrNotFound):
 		common.Error(w, http.StatusNotFound, "Data sumber approval tidak ditemukan")
 		return
 	case err != nil:

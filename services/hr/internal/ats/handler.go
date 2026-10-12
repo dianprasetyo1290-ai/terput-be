@@ -386,6 +386,17 @@ func (h *Handler) MyInterviews(w http.ResponseWriter, r *http.Request) {
 // Offers Handlers
 // -----------------------------------------------------------------------------
 
+func (h *Handler) ListOffers(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	appID := r.URL.Query().Get("application_id")
+	list, err := h.Store.ListOffers(r.Context(), schoolID, appID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat daftar penawaran: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, list, nil)
+}
+
 func (h *Handler) CreateOffer(w http.ResponseWriter, r *http.Request) {
 	schoolID := common.EffectiveSchoolID(r)
 	var o Offer
@@ -401,6 +412,87 @@ func (h *Handler) CreateOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, created, nil)
+}
+
+func (h *Handler) SubmitOffer(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if claims == nil {
+		common.WriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	schoolID := common.EffectiveSchoolID(r)
+	id := chi.URLParam(r, "id")
+
+	off, err := h.Store.GetOffer(r.Context(), schoolID, id)
+	if err != nil {
+		common.WriteError(w, http.StatusNotFound, "penawaran kerja tidak ditemukan")
+		return
+	}
+	if off.Status != "draft" {
+		common.WriteError(w, http.StatusConflict, "hanya penawaran berstatus draft yang dapat diajukan")
+		return
+	}
+
+	var flags []string
+	if off.OutOfRange {
+		flags = append(flags, "salary_out_of_range")
+	}
+
+	appID, err := h.Approvals.CreateApproval(r.Context(), client.ApprovalRequest{
+		SchoolID:    schoolID,
+		RequestType: client.ReqTypeOffer,
+		SourceID:    off.ID,
+		Title:       fmt.Sprintf("Penawaran Kerja: %s - %s", off.CandidateName, off.PositionName),
+		Summary: map[string]any{
+			"candidate_name":  off.CandidateName,
+			"position_name":   off.PositionName,
+			"start_date":      off.StartDate,
+			"employment_type": off.EmploymentType,
+			"base_salary_idr": off.BaseSalaryIDR,
+			"out_of_range":    off.OutOfRange,
+		},
+		AmountIDR:   &off.BaseSalaryIDR,
+		Flags:       flags,
+		MakerUserID: claims.UserID,
+	})
+	if err != nil {
+		log.Printf("offer %s: create approval: %v", off.ID, err)
+		status, msg := client.ApprovalErrorMessage(err)
+		common.WriteError(w, status, msg)
+		return
+	}
+
+	if err := h.Store.SubmitOffer(r.Context(), schoolID, id, appID); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal mengajukan approval penawaran: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]string{
+		"message":     "penawaran diajukan untuk persetujuan",
+		"approval_id": appID,
+	}, nil)
+}
+
+func (h *Handler) SendOffer(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	id := chi.URLParam(r, "id")
+
+	off, err := h.Store.GetOffer(r.Context(), schoolID, id)
+	if err != nil {
+		common.WriteError(w, http.StatusNotFound, "penawaran kerja tidak ditemukan")
+		return
+	}
+	if off.Status != "approved" {
+		common.WriteError(w, http.StatusConflict, "penawaran harus disetujui (approved) sebelum dikirim ke kandidat")
+		return
+	}
+
+	if err := h.Store.SendOffer(r.Context(), schoolID, id); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal mengirim penawaran: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]string{
+		"message": "penawaran kerja berhasil dikirim ke kandidat",
+	}, nil)
 }
 
 func (h *Handler) PublicAcceptOffer(w http.ResponseWriter, r *http.Request) {

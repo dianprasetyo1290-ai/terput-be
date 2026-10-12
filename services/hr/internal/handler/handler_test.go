@@ -629,7 +629,293 @@ func TestHandlerE2E(t *testing.T) {
 		}
 	}
 
-	// 10. Role Gate Authorization: Pegawai cannot access /employees (Forbidden 403)
+	// 11. T5 Training Self-Enrollment & Paid Training Approval (training_paid)
+	{
+		call := func(method, path, body string, token string) *httptest.ResponseRecorder {
+			req := httptest.NewRequest(method, path, bytes.NewReader([]byte(body)))
+			if token == "internal" {
+				req.Header.Set("X-Internal-Key", testIntKey)
+			} else if token != "" {
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			router.ServeHTTP(rr, req)
+			return rr
+		}
+
+		// Seed a free course and a paid course
+		var freeCourseID, paidCourseID string
+		if err := testDB.QueryRow(`
+			INSERT INTO courses (school_id, title, objective, duration_minutes, provider, kind, cost_idr, quota, status)
+			VALUES ($1, 'Kursus Gratis', 'Tujuan', 60, 'Internal', 'online', 0, 50, 'published')
+			RETURNING id
+		`, schoolID).Scan(&freeCourseID); err != nil {
+			t.Fatalf("seed free course: %v", err)
+		}
+		if err := testDB.QueryRow(`
+			INSERT INTO courses (school_id, title, objective, duration_minutes, provider, kind, cost_idr, quota, status)
+			VALUES ($1, 'Sertifikasi Berbayar', 'Tujuan', 120, 'Vendor Luar', 'online', 750000, 20, 'published')
+			RETURNING id
+		`, schoolID).Scan(&paidCourseID); err != nil {
+			t.Fatalf("seed paid course: %v", err)
+		}
+
+		// 11a. Free course enrolls immediately as not_started
+		enrollFree := fmt.Sprintf(`{"course_id":"%s"}`, freeCourseID)
+		rr := call("POST", "/me/training/enroll", enrollFree, pegawaiToken)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("enroll free course failed (%d): %s", rr.Code, rr.Body.String())
+		}
+		var freeRes map[string]any
+		json.Unmarshal(rr.Body.Bytes(), &freeRes)
+		freeAssign := freeRes["data"].(map[string]any)
+		if freeAssign["status"] != "not_started" {
+			t.Fatalf("expected free course status not_started, got %v", freeAssign["status"])
+		}
+
+		// 11b. Paid course creates pending_approval and opens Core approval (training_paid)
+		enrollPaid := fmt.Sprintf(`{"course_id":"%s"}`, paidCourseID)
+		rr = call("POST", "/me/training/enroll", enrollPaid, pegawaiToken)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("enroll paid course failed (%d): %s", rr.Code, rr.Body.String())
+		}
+		var paidRes map[string]any
+		json.Unmarshal(rr.Body.Bytes(), &paidRes)
+		paidAssign := paidRes["data"].(map[string]any)
+		if paidAssign["status"] != "pending_approval" {
+			t.Fatalf("expected paid course status pending_approval, got %v", paidAssign["status"])
+		}
+		paidAssignID := paidAssign["id"].(string)
+
+		sent := approvalsSeen["training_paid"]
+		if sent == nil || sent["source_id"] != paidAssignID {
+			t.Fatalf("training_paid approval not sent with contract: %v", sent)
+		}
+		if int64(sent["amount_idr"].(float64)) != 750000 {
+			t.Fatalf("expected amount_idr 750000, got %v", sent["amount_idr"])
+		}
+
+		// 11c. Core callback approved sets status to not_started
+		cbPayload := fmt.Sprintf(`{"approval_id":"%s","source_id":"%s","request_type":"training_paid","decision":"approved","decided_by":"40000000-0000-0000-0000-000000000001","comment":"","decided_at":"2026-10-12T08:00:00+07:00"}`, fakeApprovalID, paidAssignID)
+		if rr = call("POST", "/internal/approval-callbacks", cbPayload, "internal"); rr.Code != http.StatusOK {
+			t.Fatalf("training_paid callback failed (%d): %s", rr.Code, rr.Body.String())
+		}
+		var finalStatus string
+		_ = testDB.QueryRow(`SELECT status FROM training_assignments WHERE id = $1`, paidAssignID).Scan(&finalStatus)
+		if finalStatus != "not_started" {
+			t.Fatalf("expected assignment status not_started after approve, got %s", finalStatus)
+		}
+	}
+
+	// 12. T4 ATS Offer Workflow & Core Approval (offer, salary_out_of_range)
+	{
+		call := func(method, path, body string, internal bool) *httptest.ResponseRecorder {
+			req := httptest.NewRequest(method, path, bytes.NewReader([]byte(body)))
+			if internal {
+				req.Header.Set("X-Internal-Key", testIntKey)
+			} else {
+				req.Header.Set("Authorization", "Bearer "+adminToken)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			router.ServeHTTP(rr, req)
+			return rr
+		}
+
+		// Seed candidate, application
+		var candID, appID string
+		candEmail := fmt.Sprintf("kandidat-%d@example.com", time.Now().UnixNano())
+		if err := testDB.QueryRow(`
+			INSERT INTO candidates (school_id, full_name, email, email_norm, consent_processing_at)
+			VALUES ($1, 'Kandidat Uji', $2, $2, now())
+			RETURNING id
+		`, schoolID, candEmail).Scan(&candID); err != nil {
+			t.Fatalf("seed candidate: %v", err)
+		}
+
+		var postID string
+		var reqID string
+		reqKey := fmt.Sprintf("req-offer-%d", time.Now().UnixNano())
+		if err := testDB.QueryRow(`
+			INSERT INTO requisitions (school_id, position_id, quantity, reason, status, exceeds_headcount, requested_by, idempotency_key)
+			VALUES ($1, $2, 1, 'addition', 'approved', false, '40000000-0000-0000-0000-000000000001', $3)
+			RETURNING id
+		`, schoolID, posID, reqKey).Scan(&reqID); err != nil {
+			t.Fatalf("seed req for offer: %v", err)
+		}
+		postSlug := fmt.Sprintf("lowongan-offer-%d", time.Now().UnixNano())
+		if err := testDB.QueryRow(`
+			INSERT INTO job_postings (school_id, requisition_id, slug, title, description, qualifications, employment_type, status)
+			VALUES ($1, $2, $3, 'Guru Fisika', 'Desc', 'Qual', 'tetap', 'open')
+			RETURNING id
+		`, schoolID, reqID, postSlug).Scan(&postID); err != nil {
+			t.Fatalf("seed posting for offer: %v", err)
+		}
+		var stageID string
+		stageCode := fmt.Sprintf("stg-%d", time.Now().UnixNano()%100000)
+		if err := testDB.QueryRow(`
+			INSERT INTO pipeline_stages (school_id, code, name, sort, kind)
+			VALUES ($1, $2, 'Lamaran Masuk', 1, 'normal')
+			RETURNING id
+		`, schoolID, stageCode).Scan(&stageID); err != nil {
+			t.Fatalf("seed stage for offer: %v", err)
+		}
+		if err := testDB.QueryRow(`
+			INSERT INTO applications (school_id, posting_id, candidate_id, stage_id, status, access_token_hash)
+			VALUES ($1, $2, $3, $4, 'active', 'tok-hash-test')
+			RETURNING id
+		`, schoolID, postID, candID, stageID).Scan(&appID); err != nil {
+			t.Fatalf("seed app for offer: %v", err)
+		}
+		// Update position with salary range [3m, 5m]
+		if _, err := testDB.Exec(`UPDATE positions SET salary_min_idr = 3000000, salary_max_idr = 5000000 WHERE id = $1`, posID); err != nil {
+			t.Fatalf("update pos salary range: %v", err)
+		}
+
+		// Create offer with salary 6.000.000 (exceeds position salary max 5.000.000 -> salary_out_of_range)
+		offerBody := fmt.Sprintf(`{
+			"application_id": "%s",
+			"position_id": "%s",
+			"start_date": "2026-11-01",
+			"employment_type": "tetap",
+			"base_salary_idr": 6000000
+		}`, appID, posID)
+		rr := call("POST", "/ats/offers", offerBody, false)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("create offer failed (%d): %s", rr.Code, rr.Body.String())
+		}
+		var oRes map[string]any
+		json.Unmarshal(rr.Body.Bytes(), &oRes)
+		offerID := oRes["data"].(map[string]any)["id"].(string)
+
+		// 12a. Send offer before approved must fail with 409
+		if rr = call("POST", "/ats/offers/"+offerID+"/send", "", false); rr.Code != http.StatusConflict {
+			t.Fatalf("send before approved must be 409, got %d", rr.Code)
+		}
+
+		// 12b. Submit offer opens Core approval with salary_out_of_range flag
+		if rr = call("POST", "/ats/offers/"+offerID+"/submit", "", false); rr.Code != http.StatusOK {
+			t.Fatalf("submit offer failed (%d): %s", rr.Code, rr.Body.String())
+		}
+		sent := approvalsSeen["offer"]
+		if sent == nil || sent["source_id"] != offerID {
+			t.Fatalf("offer approval not sent to Core: %v", sent)
+		}
+		flags, _ := sent["flags"].([]any)
+		hasFlag := false
+		for _, f := range flags {
+			if f == "salary_out_of_range" {
+				hasFlag = true
+			}
+		}
+		if !hasFlag {
+			t.Fatalf("expected flag salary_out_of_range in offer approval, got: %v", flags)
+		}
+
+		// 12c. Callback approved
+		cbPayload := fmt.Sprintf(`{"approval_id":"%s","source_id":"%s","request_type":"offer","decision":"approved","decided_by":"40000000-0000-0000-0000-000000000001","comment":"","decided_at":"2026-10-12T08:00:00+07:00"}`, fakeApprovalID, offerID)
+		if rr = call("POST", "/internal/approval-callbacks", cbPayload, true); rr.Code != http.StatusOK {
+			t.Fatalf("offer callback failed (%d): %s", rr.Code, rr.Body.String())
+		}
+		var oStatus string
+		_ = testDB.QueryRow(`SELECT status FROM offers WHERE id = $1`, offerID).Scan(&oStatus)
+		if oStatus != "approved" {
+			t.Fatalf("expected offer status approved, got %s", oStatus)
+		}
+
+		// 12d. Send offer after approved succeeds
+		if rr = call("POST", "/ats/offers/"+offerID+"/send", "", false); rr.Code != http.StatusOK {
+			t.Fatalf("send offer failed (%d): %s", rr.Code, rr.Body.String())
+		}
+		_ = testDB.QueryRow(`SELECT status FROM offers WHERE id = $1`, offerID).Scan(&oStatus)
+		if oStatus != "sent" {
+			t.Fatalf("expected offer status sent, got %s", oStatus)
+		}
+	}
+
+	// 13. T3 Payroll Component Change & Input Change after Cutoff
+	{
+		call := func(method, path, body string, internal bool) *httptest.ResponseRecorder {
+			req := httptest.NewRequest(method, path, bytes.NewReader([]byte(body)))
+			if internal {
+				req.Header.Set("X-Internal-Key", testIntKey)
+			} else {
+				req.Header.Set("Authorization", "Bearer "+adminToken)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			router.ServeHTTP(rr, req)
+			return rr
+		}
+
+		// 13a. Component approval submission
+		compCode := fmt.Sprintf("TJ_%d", time.Now().UnixNano()%100000)
+		compBody := fmt.Sprintf(`{"code":"%s","name":"Tunjangan Uji","kind":"earning","nature":"fixed","taxable":true,"bpjs_base":false,"calc":"fixed_amount","sort":10}`, compCode)
+		rr := call("POST", "/payroll/components", compBody, false)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("create component failed (%d): %s", rr.Code, rr.Body.String())
+		}
+		var compRes map[string]any
+		json.Unmarshal(rr.Body.Bytes(), &compRes)
+		compID := compRes["data"].(map[string]any)["id"].(string)
+
+		if rr = call("POST", "/payroll/components/"+compID+"/submit-approval", "", false); rr.Code != http.StatusOK {
+			t.Fatalf("submit component approval failed (%d): %s", rr.Code, rr.Body.String())
+		}
+		sent := approvalsSeen["payroll_component_change"]
+		if sent == nil || sent["source_id"] != compID {
+			t.Fatalf("payroll_component_change approval not sent: %v", sent)
+		}
+		cbPayload := fmt.Sprintf(`{"approval_id":"%s","source_id":"%s","request_type":"payroll_component_change","decision":"approved","decided_by":"40000000-0000-0000-0000-000000000001","comment":"","decided_at":"2026-10-12T08:00:00+07:00"}`, fakeApprovalID, compID)
+		if rr = call("POST", "/internal/approval-callbacks", cbPayload, true); rr.Code != http.StatusOK {
+			t.Fatalf("component approval callback failed (%d): %s", rr.Code, rr.Body.String())
+		}
+
+		// 13b. Payroll input change after cutoff date
+		yesterday := time.Now().AddDate(0, 0, -2).Format("2006-01-02")
+		payDate := time.Now().AddDate(0, 0, 5).Format("2006-01-02")
+		_, _ = testDB.Exec(`
+			INSERT INTO payroll_calendars (school_id, period, cutoff_date, pay_date)
+			VALUES ($1, '2026-10', $2, $3)
+			ON CONFLICT (school_id, period) DO UPDATE SET cutoff_date = $2
+		`, schoolID, yesterday, payDate)
+
+		inputBody := fmt.Sprintf(`{
+			"period": "2026-10",
+			"employee_id": "%s",
+			"component_id": "%s",
+			"amount_idr": 450000,
+			"reason": "Tambahan tugas khusus setelah cutoff"
+		}`, empID, compID)
+
+		rr = call("POST", "/payroll/inputs", inputBody, false)
+		if rr.Code != http.StatusAccepted {
+			t.Fatalf("input past cutoff must be 202 Accepted, got %d: %s", rr.Code, rr.Body.String())
+		}
+		var inpRes map[string]any
+		json.Unmarshal(rr.Body.Bytes(), &inpRes)
+		changeID := inpRes["data"].(map[string]any)["change_id"].(string)
+
+		sentInput := approvalsSeen["payroll_input_change"]
+		if sentInput == nil || sentInput["source_id"] != changeID {
+			t.Fatalf("payroll_input_change approval not sent: %v", sentInput)
+		}
+
+		// Callback approved
+		cbInputPayload := fmt.Sprintf(`{"approval_id":"%s","source_id":"%s","request_type":"payroll_input_change","decision":"approved","decided_by":"40000000-0000-0000-0000-000000000001","comment":"","decided_at":"2026-10-12T08:00:00+07:00"}`, fakeApprovalID, changeID)
+		if rr = call("POST", "/internal/approval-callbacks", cbInputPayload, true); rr.Code != http.StatusOK {
+			t.Fatalf("input change callback failed (%d): %s", rr.Code, rr.Body.String())
+		}
+
+		var appliedAmount int64
+		err := testDB.QueryRow(`SELECT amount_idr FROM payroll_inputs WHERE school_id = $1 AND period = '2026-10' AND employee_id = $2 AND component_id = $3`, schoolID, empID, compID).Scan(&appliedAmount)
+		if err != nil || appliedAmount != 450000 {
+			t.Fatalf("expected applied amount 450000, got %d (err: %v)", appliedAmount, err)
+		}
+	}
+
+	// 14. Role Gate Authorization: Pegawai cannot access /employees (Forbidden 403)
 	{
 		req := httptest.NewRequest("GET", "/employees", nil)
 		req.Header.Set("Authorization", "Bearer "+pegawaiToken)

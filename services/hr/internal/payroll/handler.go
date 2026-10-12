@@ -53,6 +53,160 @@ func (h *Handler) CreateComponent(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusCreated, created, nil)
 }
 
+func (h *Handler) SubmitComponentApproval(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if claims == nil {
+		common.WriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	schoolID := common.EffectiveSchoolID(r)
+	id := chi.URLParam(r, "id")
+
+	c, err := h.Store.GetComponent(r.Context(), schoolID, id)
+	if err != nil {
+		common.WriteError(w, http.StatusNotFound, "komponen gaji tidak ditemukan")
+		return
+	}
+
+	appID, err := h.Approvals.CreateApproval(r.Context(), client.ApprovalRequest{
+		SchoolID:    schoolID,
+		RequestType: client.ReqTypePayrollComponentChange,
+		SourceID:    c.ID,
+		Title:       fmt.Sprintf("Perubahan Komponen Gaji: %s (%s)", c.Name, c.Code),
+		Summary: map[string]any{
+			"code": c.Code, "name": c.Name, "kind": c.Kind,
+			"nature": c.Nature, "taxable": c.Taxable, "calc": c.Calc,
+		},
+		MakerUserID: claims.UserID,
+	})
+	if err != nil {
+		log.Printf("payroll component %s: create approval: %v", c.ID, err)
+		status, msg := client.ApprovalErrorMessage(err)
+		common.WriteError(w, status, msg)
+		return
+	}
+
+	if err := h.Store.SubmitComponentApproval(r.Context(), schoolID, id, appID); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal mengajukan approval: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]string{
+		"message":     "perubahan komponen diajukan untuk persetujuan",
+		"approval_id": appID,
+	}, nil)
+}
+
+// -----------------------------------------------------------------------------
+// Payroll Inputs
+// -----------------------------------------------------------------------------
+
+func (h *Handler) ListInputs(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	period := r.URL.Query().Get("period")
+	if period == "" {
+		common.WriteError(w, http.StatusBadRequest, "parameter period wajib diisi")
+		return
+	}
+
+	list, err := h.Store.ListInputs(r.Context(), schoolID, period)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat input payroll: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, list, nil)
+}
+
+func (h *Handler) SaveInput(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if claims == nil {
+		common.WriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	schoolID := common.EffectiveSchoolID(r)
+
+	var body struct {
+		Period      string `json:"period"`
+		EmployeeID  string `json:"employee_id"`
+		ComponentID string `json:"component_id"`
+		AmountIDR   int64  `json:"amount_idr"`
+		Reason      string `json:"reason,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.WriteError(w, http.StatusBadRequest, "format json tidak valid")
+		return
+	}
+	if body.Period == "" || body.EmployeeID == "" || body.ComponentID == "" {
+		common.WriteError(w, http.StatusBadRequest, "period, employee_id, dan component_id wajib diisi")
+		return
+	}
+
+	needsApproval, inputID, changeID, err := h.Store.SaveInput(
+		r.Context(), schoolID, body.Period, body.EmployeeID, body.ComponentID, body.AmountIDR, body.Reason,
+	)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal menyimpan input payroll: "+err.Error())
+		return
+	}
+
+	if needsApproval {
+		appID, err := h.Approvals.CreateApproval(r.Context(), client.ApprovalRequest{
+			SchoolID:    schoolID,
+			RequestType: client.ReqTypePayrollInputChange,
+			SourceID:    changeID,
+			Title:       fmt.Sprintf("Penyesuaian Input Payroll Periode %s (Lewat Cut-off)", body.Period),
+			Summary: map[string]any{
+				"period":       body.Period,
+				"employee_id":  body.EmployeeID,
+				"component_id": body.ComponentID,
+				"amount_idr":   body.AmountIDR,
+				"reason":       body.Reason,
+			},
+			AmountIDR:   &body.AmountIDR,
+			MakerUserID: claims.UserID,
+		})
+		if err != nil {
+			log.Printf("payroll input change %s: create approval: %v", changeID, err)
+			status, msg := client.ApprovalErrorMessage(err)
+			common.WriteError(w, status, msg)
+			return
+		}
+
+		_ = h.Store.UpdateInputChangeApproval(r.Context(), changeID, appID)
+		common.WriteJSON(w, http.StatusAccepted, map[string]any{
+			"message":        "Perubahan setelah batas cut-off memerlukan persetujuan Approval Center",
+			"needs_approval": true,
+			"change_id":      changeID,
+			"approval_id":    appID,
+		}, nil)
+		return
+	}
+
+	common.WriteJSON(w, http.StatusOK, map[string]any{
+		"message":        "Input payroll berhasil disimpan",
+		"needs_approval": false,
+		"input_id":       inputID,
+	}, nil)
+}
+
+func (h *Handler) PullAttendance(w http.ResponseWriter, r *http.Request) {
+	schoolID := common.EffectiveSchoolID(r)
+	period := r.URL.Query().Get("period")
+	if period == "" {
+		common.WriteError(w, http.StatusBadRequest, "parameter period wajib diisi")
+		return
+	}
+
+	count, err := h.Store.PullAttendance(r.Context(), schoolID, period)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal menarik data absensi: "+err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]any{
+		"message": fmt.Sprintf("Berhasil menarik data absensi untuk %d entri", count),
+		"count":   count,
+	}, nil)
+}
+
 // -----------------------------------------------------------------------------
 // Payroll Runs
 // -----------------------------------------------------------------------------

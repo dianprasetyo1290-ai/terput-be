@@ -131,12 +131,30 @@ $ npm run build       → ✓ built in 1.85s   BUILD_EXIT:0
 - web: `src/services/core/audit.ts`
 - file bersama (hanya tambah baris): `.env.example`, `docker-compose.yml`
 
-## 6. Sisa masalah / pertanyaan terbuka
-1. **T5 `training_paid` belum tersambung ke core.** `calc.NeedsApproval` ada, tetapi belum ada alur enrol mandiri yang membuat `pending_approval`. `POST /training/assignments` (admin) langsung membuat penugasan. Perlu endpoint enrol pegawai + approval `training_paid` + dispatch di `callbacks.go`. Ini fitur baru, jadi tidak dikerjakan di CEK.
-2. **T4 offer** (`offer`, `salary_out_of_range`, AC-92-01) belum melewati core. `POST /ats/offers` tidak membuat approval. Endpoint `submit/send` offer belum ada.
-3. **T3 perubahan komponen/statutori/input setelah cutoff** (`payroll_component_change`, `payroll_input_change`) belum lewat approval.
-4. hr masih punya `POST /leave-requests/{id}/approve|reject` dan `/overtime-requests/{id}/approve|reject` (keputusan langsung oleh hr_admin, melewati core dan maker-checker). Sekarang aman terhadap callback ganda (keduanya hanya mengubah baris `pending`), tetapi melanggar GEMINI §4 "approval lewat core". Perlu keputusan pemilik: dihapus, atau dibiarkan sebagai override HR yang diaudit.
-5. Alur approval `leave`, `overtime`, `profile_change`, `payroll_run`, `requisition`, `payment_correction`, `student_transfer/withdrawal` harus **dikonfigurasi di Approval Center** per sekolah. Tanpa itu, pengajuan sekarang ditolak dengan pesan 422 yang jelas (sesuai kontrak), bukan diam-diam menggantung.
-6. Academic (T7a) masih menyimpan `student_status_request` walau core menolak (hanya di-log). Penyelarasan ke pola transaksi seperti hr/billing perlu disepakati dengan pemilik T7a.
-7. Billing di compose belum menerima `NOTIFICATION_URL`/`ACCOUNTING_URL`. Diserahkan ke T14 (jurnal gateway) supaya tidak bentrok.
-8. Uji UI Playwright per gelombang belum dijalankan (mode paralel melarang dev server di port tetap).
+## 6. Status Masalah & Pertanyaan Terbuka
+- [x] **T5 `training_paid` (SELESAI):**
+  - Ditambahkan endpoint `POST /me/training/enroll` di `services/hr`.
+  - Pelatihan gratis (`cost_idr == 0`) langsung terdaftar (`not_started`).
+  - Pelatihan berbayar (`cost_idr > 0`) membuat penugasan `pending_approval` dan mengirim permintaan approval ke Core (`training_paid`).
+  - Callback Core di `callbacks.go` memperbarui status menjadi `not_started` (jika approved) atau `rejected`.
+  - Frontend ESS (`EssTrainingView.vue` & `training.service.ts`) mendukung pendaftaran mandiri dan badge status persetujuan biaya.
+- [x] **T4 offer approval & dispatch (SELESAI):**
+  - Ditambahkan endpoint `GET /ats/offers`, `POST /ats/offers/{id}/submit`, dan `POST /ats/offers/{id}/send`.
+  - Submit offer mengevaluasi rentang gaji posisi (`positions.salary_min_idr` / `salary_max_idr`) dan menyertakan flag `salary_out_of_range` ke Core jika di luar batas.
+  - Send offer dijaga ketat: mengembalikan HTTP 409 Conflict jika offer belum berstatus `approved`.
+  - Callback Core di `callbacks.go` mengubah status dari `pending_approval` menjadi `approved` (atau `rejected`).
+  - Frontend ATS (`ApplicationDetailView.vue` & `ats.service.ts`) menampilkan kartu penawaran kerja, tombol ajukan persetujuan Core, dan kirim ke kandidat setelah approved.
+- [x] **T3 payroll component & input cutoff changes (SELESAI):**
+  - Ditambahkan tabel `payroll_input_changes` (`0010_payroll.up.sql`).
+  - Ditambahkan endpoint `POST /payroll/components/{id}/submit-approval`, `GET /payroll/inputs`, `POST /payroll/inputs`, dan `POST /payroll/inputs/pull-attendance`.
+  - Penginputan payroll setelah tanggal `cutoff_date` (dari `payroll_calendars`) otomatis membuat record `payroll_input_changes` dengan status `pending_approval`, mengembalikan HTTP 202 Accepted, dan mengirim approval `payroll_input_change` ke Core.
+  - Komponen draft dapat diajukan ke Core (`payroll_component_change`).
+  - Callback Core di `callbacks.go` memperbarui komponen ke `active` atau menerapkan `payroll_input_changes` ke `payroll_inputs`.
+  - Frontend Payroll (`InputsView.vue`, `ComponentsView.vue`, & `payroll.service.ts`) tersambung penuh dengan data live dan penanganan approval setelah cut-off.
+
+### Masalah / Pertanyaan Tersisa:
+1. hr masih punya `POST /leave-requests/{id}/approve|reject` dan `/overtime-requests/{id}/approve|reject` (keputusan langsung oleh hr_admin, melewati core dan maker-checker). Sekarang aman terhadap callback ganda (keduanya hanya mengubah baris `pending`), tetapi melanggar GEMINI §4 "approval lewat core". Perlu keputusan pemilik: dihapus, atau dibiarkan sebagai override HR yang diaudit.
+2. Alur approval `leave`, `overtime`, `profile_change`, `payroll_run`, `requisition`, `payment_correction`, `student_transfer/withdrawal` harus **dikonfigurasi di Approval Center** per sekolah. Tanpa itu, pengajuan sekarang ditolak dengan pesan 422 yang jelas (sesuai kontrak), bukan diam-diam menggantung.
+3. Academic (T7a) masih menyimpan `student_status_request` walau core menolak (hanya di-log). Penyelarasan ke pola transaksi seperti hr/billing perlu disepakati dengan pemilik T7a.
+4. Billing di compose belum menerima `NOTIFICATION_URL`/`ACCOUNTING_URL`. Diserahkan ke T14 (jurnal gateway) supaya tidak bentrok.
+5. Uji UI Playwright per gelombang belum dijalankan (mode paralel melarang dev server di port tetap).
