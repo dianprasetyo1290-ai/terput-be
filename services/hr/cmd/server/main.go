@@ -45,6 +45,7 @@ func main() {
 
 	storageSvc := storage.NewLocal(cfg.StorageRoot, cfg.MaxUploadBytes)
 	apiClient := client.New(cfg.IdentityURL, cfg.CoreURL, cfg.NotificationURL, cfg.InternalKey)
+	apiClient.CallbackURL = cfg.HRPublicInternalURL + "/internal/approval-callbacks"
 
 	app := handler.NewApp(db, &cfg, cryptoSvc, storageSvc, apiClient)
 

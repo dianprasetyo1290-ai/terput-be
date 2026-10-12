@@ -16,8 +16,8 @@ func (a *App) Router() http.Handler {
 	r := chi.NewRouter()
 
 	trHandler := training.NewHandler(training.NewStore(a.DB))
-	atsHandler := ats.NewHandler(ats.NewStore(a.DB))
-	payHandler := payroll.NewHandler(payroll.NewStore(a.DB))
+	atsHandler := ats.NewHandler(ats.NewStore(a.DB), a.Client)
+	payHandler := payroll.NewHandler(payroll.NewStore(a.DB), a.Client)
 
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
