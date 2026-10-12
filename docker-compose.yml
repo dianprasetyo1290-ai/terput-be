@@ -346,6 +346,10 @@ services:
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
       IDENTITY_URL: http://identity:${IDENTITY_PORT}
       NOTIFICATION_URL: http://notification:${NOTIFICATION_PORT}
+      OPS_URL: http://ops:${OPS_PORT:-8093}
+      CORE_INTERNAL_URL: http://core:${CORE_PORT}
+      STORAGE_ROOT: /data/private
+    volumes: ["core_files:/data/private"]
     ports: ["${CORE_PORT}:${CORE_PORT}"]
 
   # ---------- hr (Teratai: HRIS & ESS) ----------
@@ -451,6 +455,7 @@ volumes:
   admission_files:
   billing_files:
   hr_files:
+  core_files:
 
 networks:
   default:
