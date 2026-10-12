@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"skci/billing/internal/client"
 	"skci/billing/internal/config"
@@ -41,6 +42,16 @@ type App struct {
 	Core         *client.Client
 	Notification *client.Client
 	Accounting   *client.Client
+
+	// T12 (kantin & dompet). IdentitySvc serves feature flags, role
+	// accounts and guardian lists (nil = features off, fail closed); Ops
+	// validates rooms (nil = stored unvalidated); PurposeCharger is the K1
+	// top-up charge implemented by T14 (nil = online top-up 503); Clock is
+	// a test clock (nil = time.Now).
+	IdentitySvc    *client.Client
+	Ops            *client.Client
+	PurposeCharger purposeCharger
+	Clock          func() time.Time
 }
 
 // New wires the application graph.
