@@ -2,8 +2,11 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -47,8 +50,16 @@ func (a *App) AdminCreateCorrection(w http.ResponseWriter, r *http.Request) {
 		req.Kind = "cancel"
 	}
 
+	// The correction row and its core approval are created together: when
+	// core refuses (422, no flow) nothing is stored and the message is shown.
+	tx, err := a.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	defer tx.Rollback()
 	var corrID string
-	err := a.DB.QueryRowContext(r.Context(),
+	err = tx.QueryRowContext(r.Context(),
 		`INSERT INTO payment_corrections (
 			school_id, source, source_id, kind, target_student_user_id, reason, status, requested_by, created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, now(), now())
@@ -59,7 +70,8 @@ func (a *App) AdminCreateCorrection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Submit approval request to Core if available (T1 §3)
+	// Submit approval request to Core if available (T1 §3). Core reaches the
+	// callback over BILLING_INTERNAL_URL (docker service name), never localhost.
 	if a.Core != nil {
 		resp, appErr := a.Core.RequestApproval(r.Context(), client.ApprovalRequest{
 			SchoolID:       schoolID,
@@ -69,15 +81,31 @@ func (a *App) AdminCreateCorrection(w http.ResponseWriter, r *http.Request) {
 			Title:          fmt.Sprintf("Koreksi Pembayaran (%s %s)", req.Source, req.Kind),
 			Summary:        map[string]any{"source": req.Source, "source_id": req.SourceID, "reason": req.Reason},
 			MakerUserID:    claims.UserID,
-			CallbackURL:    fmt.Sprintf("http://localhost:%s/internal/corrections/%s/callback", a.Config.Port, corrID),
+			CallbackURL:    a.Config.Gateway.BillingInternalURL + "/internal/corrections/" + corrID + "/callback",
 			CorrelationID:  corrID,
 			IdempotencyKey: fmt.Sprintf("corr-appr:%s", corrID),
 		})
-		if appErr == nil && resp.ID != "" {
-			_, _ = a.DB.ExecContext(r.Context(),
-				`UPDATE payment_corrections SET approval_id = $1 WHERE id = $2`, resp.ID, corrID)
+		if appErr != nil {
+			log.Printf("payment correction %s: request approval: %v", corrID, appErr)
+			var he *client.HTTPError
+			if errors.As(appErr, &he) && he.Status >= 400 && he.Status < 500 {
+				common.WriteError(w, http.StatusUnprocessableEntity, "Approval Center menolak pengajuan: "+he.Body)
+				return
+			}
+			common.WriteError(w, http.StatusBadGateway, "Approval Center tidak dapat dihubungi, pengajuan belum tersimpan")
+			return
 		}
-	} else if claims.ActiveRole == common.RoleFinanceManager || claims.ActiveRole == common.RoleAdmin || claims.ActiveRole == common.RoleSuperadmin {
+		if _, err := tx.ExecContext(r.Context(),
+			`UPDATE payment_corrections SET approval_id = $1 WHERE id = $2`, resp.ID, corrID); err != nil {
+			writeErr(w, err)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if a.Core == nil && (claims.ActiveRole == common.RoleFinanceManager || claims.ActiveRole == common.RoleAdmin || claims.ActiveRole == common.RoleSuperadmin) {
 		// If finance_manager submits directly without Core, apply correction (AC-29-04)
 		_ = a.applyPaymentCorrection(r.Context(), schoolID, corrID, claims.UserID)
 	}
@@ -102,21 +130,41 @@ type correctionCallbackPayload struct {
 func (a *App) CorrectionCallback(w http.ResponseWriter, r *http.Request) {
 	corrID := param(r, "id")
 	var req correctionCallbackPayload
-	_ = json.NewDecoder(r.Body).Decode(&req)
-
-	if req.Decision == "approved" {
-		var schoolID string
-		err := a.DB.QueryRowContext(r.Context(),
-			`SELECT school_id FROM payment_corrections WHERE id = $1`, corrID).Scan(&schoolID)
-		if err == nil {
-			_ = a.applyPaymentCorrection(r.Context(), schoolID, corrID, req.DecidedBy)
-		}
-	} else {
-		_, _ = a.DB.ExecContext(r.Context(),
-			`UPDATE payment_corrections SET status = 'rejected', updated_at = now() WHERE id = $1`, corrID)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (req.Decision != "approved" && req.Decision != "rejected") {
+		common.WriteError(w, http.StatusBadRequest, "invalid callback payload")
+		return
 	}
 
-	common.WriteSuccess(w, map[string]string{"status": "ok"}, nil)
+	var schoolID, status string
+	err := a.DB.QueryRowContext(r.Context(),
+		`SELECT school_id, status FROM payment_corrections WHERE id = $1`, corrID).Scan(&schoolID, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		common.WriteError(w, http.StatusNotFound, "correction not found")
+		return
+	}
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	// Idempotent: core may redeliver (Idempotency-Key approval:<id>).
+	if status != "pending" {
+		common.WriteSuccess(w, map[string]string{"status": status}, nil)
+		return
+	}
+
+	if req.Decision == "approved" {
+		err = a.applyPaymentCorrection(r.Context(), schoolID, corrID, req.DecidedBy)
+	} else {
+		_, err = a.DB.ExecContext(r.Context(),
+			`UPDATE payment_corrections SET status = 'rejected', updated_at = now() WHERE id = $1 AND status = 'pending'`, corrID)
+	}
+	if err != nil {
+		// 5xx makes core retry and, when exhausted, queue an exception.
+		writeErr(w, err)
+		return
+	}
+
+	common.WriteSuccess(w, map[string]string{"status": req.Decision}, nil)
 }
 
 // applyPaymentCorrection applies reversal and marks source as 'corrected' (AC-29-04).

@@ -2,19 +2,23 @@ package ats
 
 import (
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
+	"skci/hr/internal/client"
 	"skci/hr/internal/common"
 )
 
 type Handler struct {
-	Store *Store
+	Store     *Store
+	Approvals *client.Client
 }
 
-func NewHandler(s *Store) *Handler {
-	return &Handler{Store: s}
+func NewHandler(s *Store, approvals *client.Client) *Handler {
+	return &Handler{Store: s, Approvals: approvals}
 }
 
 // -----------------------------------------------------------------------------
@@ -55,15 +59,53 @@ func (h *Handler) CreateRequisition(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusCreated, created, nil)
 }
 
+// SubmitRequisition opens core approval requisition (flag exceeds_headcount
+// when the request is above the vacant headcount, AC-88-01) and only then
+// marks the draft pending_approval.
 func (h *Handler) SubmitRequisition(w http.ResponseWriter, r *http.Request) {
+	claims := common.FromCtx(r)
+	if claims == nil {
+		common.WriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	schoolID := common.EffectiveSchoolID(r)
 	id := chi.URLParam(r, "id")
 
-	if err := h.Store.SubmitRequisition(r.Context(), schoolID, id); err != nil {
+	req, err := h.Store.GetRequisition(r.Context(), schoolID, id)
+	if err != nil {
+		common.WriteError(w, http.StatusNotFound, "permintaan rekrutmen tidak ditemukan")
+		return
+	}
+	if req.Status != "draft" {
+		common.WriteError(w, http.StatusConflict, "hanya permintaan berstatus draft yang dapat diajukan")
+		return
+	}
+	var flags []string
+	if req.ExceedsHeadcount {
+		flags = append(flags, "exceeds_headcount")
+	}
+	appID, err := h.Approvals.CreateApproval(r.Context(), client.ApprovalRequest{
+		SchoolID:    schoolID,
+		RequestType: client.ReqTypeRequisition,
+		SourceID:    req.ID,
+		Title:       fmt.Sprintf("Permintaan %d tenaga kerja: %s", req.Quantity, req.PositionName),
+		Summary:     map[string]any{"position": req.PositionName, "quantity": req.Quantity, "reason": req.Reason},
+		AmountIDR:   req.BudgetIDR,
+		Flags:       flags,
+		MakerUserID: claims.UserID,
+	})
+	if err != nil {
+		log.Printf("requisition %s: create approval: %v", req.ID, err)
+		status, msg := client.ApprovalErrorMessage(err)
+		common.WriteError(w, status, msg)
+		return
+	}
+
+	if err := h.Store.SubmitRequisition(r.Context(), schoolID, id, appID); err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "gagal mengajukan persetujuan: "+err.Error())
 		return
 	}
-	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "permintaan diajukan untuk persetujuan"}, nil)
+	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "permintaan diajukan untuk persetujuan", "approval_id": appID}, nil)
 }
 
 // -----------------------------------------------------------------------------

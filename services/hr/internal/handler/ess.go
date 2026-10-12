@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"skci/hr/internal/client"
 	"skci/hr/internal/common"
 	"skci/hr/internal/model"
 	"skci/hr/internal/store"
@@ -24,6 +26,15 @@ func (a *App) getMeEmployee(r *http.Request) (*model.Employee, error) {
 	}
 	schoolID := a.effectiveSchoolID(r)
 	return store.GetEmployeeByUserID(r.Context(), a.DB, schoolID, claims.Subject)
+}
+
+// callerID is the JWT user id. ESS employees are looked up by it, so it is
+// both the maker and the subject of their approvals.
+func callerID(r *http.Request) string {
+	if claims := common.GetClaims(r.Context()); claims != nil {
+		return claims.Subject
+	}
+	return ""
 }
 
 func (a *App) MeEmployee(w http.ResponseWriter, r *http.Request) {
@@ -283,27 +294,36 @@ func (a *App) MeCreateLeaveRequest(w http.ResponseWriter, r *http.Request) {
 		IdempotencyKey: idemKey,
 	}
 
-	if err := store.CreateLeaveRequest(r.Context(), a.DB, &lr); err != nil {
+	// The request and its core approval are created together: if core refuses
+	// (e.g. flow not configured, 422) nothing is stored and the message is
+	// returned to the user, never auto-approved (T2 §approval).
+	tx, err := a.DB.BeginTx(r.Context(), nil)
+	if err != nil {
 		common.Error(w, http.StatusInternalServerError, "Gagal membuat permohonan cuti: "+err.Error())
 		return
 	}
-
-	// If employee has a supervisor, submit approval request to Core (BR-GEN-09 maker-checker)
-	if emp.CurrentSupervisorID != nil {
-		sup, err := store.GetEmployeeByID(r.Context(), a.DB, schoolID, *emp.CurrentSupervisorID)
-		if err == nil && sup.UserID != nil {
-			claims := common.GetClaims(r.Context())
-			requesterID := ""
-			if claims != nil {
-				requesterID = claims.Subject
-			}
-			appID, _ := a.Client.CreateApprovalRequest(r.Context(), schoolID, requesterID, *sup.UserID, "leave_request", lr.ID, fmt.Sprintf("Pengajuan cuti %g hari oleh %s", days, emp.FullName))
-			if appID != "" {
-				_ = store.UpdateLeaveRequestApproval(r.Context(), a.DB, lr.ID, appID)
-				lr.ApprovalID = &appID
-			}
-		}
+	defer tx.Rollback()
+	if err := store.CreateLeaveRequest(r.Context(), tx, &lr); err != nil {
+		common.Error(w, http.StatusInternalServerError, "Gagal membuat permohonan cuti: "+err.Error())
+		return
 	}
+	appID, err := a.Client.CreateApprovalRequest(r.Context(), schoolID, callerID(r), callerID(r),
+		client.ReqTypeLeave, lr.ID, fmt.Sprintf("Pengajuan cuti %g hari oleh %s", days, emp.FullName))
+	if err != nil {
+		log.Printf("leave request %s: create approval: %v", lr.ID, err)
+		status, msg := client.ApprovalErrorMessage(err)
+		common.Error(w, status, msg)
+		return
+	}
+	if err := store.UpdateLeaveRequestApproval(r.Context(), tx, lr.ID, appID); err != nil {
+		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan approval cuti: "+err.Error())
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan permohonan cuti: "+err.Error())
+		return
+	}
+	lr.ApprovalID = &appID
 
 	common.JSON(w, http.StatusCreated, lr)
 }
@@ -441,27 +461,33 @@ func (a *App) MeCreateOvertimeRequest(w http.ResponseWriter, r *http.Request) {
 		IdempotencyKey: idemKey,
 	}
 
-	if err := store.CreateOvertimeRequest(r.Context(), a.DB, &ot); err != nil {
+	tx, err := a.DB.BeginTx(r.Context(), nil)
+	if err != nil {
 		common.Error(w, http.StatusInternalServerError, "Gagal mengajukan lembur: "+err.Error())
 		return
 	}
-
-	// Trigger Core Approval if supervisor exists
-	if emp.CurrentSupervisorID != nil {
-		sup, err := store.GetEmployeeByID(r.Context(), a.DB, schoolID, *emp.CurrentSupervisorID)
-		if err == nil && sup.UserID != nil {
-			claims := common.GetClaims(r.Context())
-			requesterID := ""
-			if claims != nil {
-				requesterID = claims.Subject
-			}
-			appID, _ := a.Client.CreateApprovalRequest(r.Context(), schoolID, requesterID, *sup.UserID, "overtime_request", ot.ID, fmt.Sprintf("Pengajuan lembur %d menit (%s) oleh %s", ot.Minutes, ot.WorkDate, emp.FullName))
-			if appID != "" {
-				_ = store.UpdateOvertimeRequestApproval(r.Context(), a.DB, ot.ID, appID)
-				ot.ApprovalID = &appID
-			}
-		}
+	defer tx.Rollback()
+	if err := store.CreateOvertimeRequest(r.Context(), tx, &ot); err != nil {
+		common.Error(w, http.StatusInternalServerError, "Gagal mengajukan lembur: "+err.Error())
+		return
 	}
+	appID, err := a.Client.CreateApprovalRequest(r.Context(), schoolID, callerID(r), callerID(r),
+		client.ReqTypeOvertime, ot.ID, fmt.Sprintf("Pengajuan lembur %d menit (%s) oleh %s", ot.Minutes, ot.WorkDate, emp.FullName))
+	if err != nil {
+		log.Printf("overtime request %s: create approval: %v", ot.ID, err)
+		status, msg := client.ApprovalErrorMessage(err)
+		common.Error(w, status, msg)
+		return
+	}
+	if err := store.UpdateOvertimeRequestApproval(r.Context(), tx, ot.ID, appID); err != nil {
+		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan approval lembur: "+err.Error())
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan pengajuan lembur: "+err.Error())
+		return
+	}
+	ot.ApprovalID = &appID
 
 	common.JSON(w, http.StatusCreated, ot)
 }
@@ -522,10 +548,33 @@ func (a *App) MeCreateProfileChangeRequest(w http.ResponseWriter, r *http.Reques
 		NewValueEnc: valEnc,
 	}
 
-	if err := store.CreateProfileChangeRequest(r.Context(), a.DB, &pcr); err != nil {
+	tx, err := a.DB.BeginTx(r.Context(), nil)
+	if err != nil {
 		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan pengajuan perubahan profil: "+err.Error())
 		return
 	}
+	defer tx.Rollback()
+	if err := store.CreateProfileChangeRequest(r.Context(), tx, &pcr); err != nil {
+		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan pengajuan perubahan profil: "+err.Error())
+		return
+	}
+	appID, err := a.Client.CreateApprovalRequest(r.Context(), schoolID, callerID(r), callerID(r),
+		client.ReqTypeProfileChange, pcr.ID, fmt.Sprintf("Perubahan data %s oleh %s", body.Field, emp.FullName))
+	if err != nil {
+		log.Printf("profile change %s: create approval: %v", pcr.ID, err)
+		status, msg := client.ApprovalErrorMessage(err)
+		common.Error(w, status, msg)
+		return
+	}
+	if err := store.UpdateProfileChangeRequestApproval(r.Context(), tx, pcr.ID, appID); err != nil {
+		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan approval perubahan profil: "+err.Error())
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan pengajuan perubahan profil: "+err.Error())
+		return
+	}
+	pcr.ApprovalID = &appID
 
 	common.JSON(w, http.StatusCreated, pcr)
 }
