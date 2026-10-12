@@ -31,6 +31,10 @@ const (
 	ReqTypePayrollRun             = "payroll_run"
 	ReqTypePayrollInputChange     = "payroll_input_change"
 	ReqTypeTrainingPaid           = "training_paid"
+	ReqTypeRoomBooking            = "room_booking"
+	ReqTypeHealthProfileUpdate    = "health_profile_update"
+	ReqTypeCanteenSettlement      = "canteen_settlement"
+	ReqTypeWalletTransfer         = "wallet_transfer"
 )
 
 // RequestTypeLabels maps request_type to its human-readable Indonesian title.
@@ -56,6 +60,10 @@ var RequestTypeLabels = map[string]string{
 	ReqTypePayrollRun:             "Finalisasi Payroll",
 	ReqTypePayrollInputChange:     "Perubahan Input Payroll",
 	ReqTypeTrainingPaid:           "Pelatihan Berbayar",
+	ReqTypeRoomBooking:            "Peminjaman Ruang",
+	ReqTypeHealthProfileUpdate:    "Pembaruan Profil Kesehatan",
+	ReqTypeCanteenSettlement:      "Pencairan Dana Kantin",
+	ReqTypeWalletTransfer:         "Transfer Saldo Dompet",
 }
 
 // KnownRequestTypes lists all supported request types.
@@ -81,6 +89,10 @@ var KnownRequestTypes = []string{
 	ReqTypePayrollRun,
 	ReqTypePayrollInputChange,
 	ReqTypeTrainingPaid,
+	ReqTypeRoomBooking,
+	ReqTypeHealthProfileUpdate,
+	ReqTypeCanteenSettlement,
+	ReqTypeWalletTransfer,
 }
 
 // Request statuses
