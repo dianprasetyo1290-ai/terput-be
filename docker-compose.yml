@@ -381,6 +381,44 @@ services:
     volumes: ["hr_files:/data/private"]
     ports: ["${HR_PORT}:${HR_PORT}"]
 
+  # ---------- studentlife (Teratai: Kesehatan Sekolah, T10; konseling/kegiatan/PKL T20–T22) ----------
+  studentlife-migrate:
+    image: migrate/migrate:v4.18.1
+    volumes: ["./services/studentlife/migrations:/migrations"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${STUDENTLIFE_DB_NAME:-teratai_studentlife}?sslmode=disable", "up"]
+    restart: "no"
+
+  studentlife:
+    build: ./services/studentlife
+    restart: unless-stopped
+    depends_on:
+      studentlife-migrate:
+        condition: service_completed_successfully
+      identity:
+        condition: service_started
+    environment:
+      PORT: ${STUDENTLIFE_PORT:-8094}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${STUDENTLIFE_DB_NAME:-teratai_studentlife}?sslmode=disable
+      APP_ENV: ${APP_ENV:-production}
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      STUDENTLIFE_ENC_KEY: ${STUDENTLIFE_ENC_KEY}
+      STUDENTLIFE_BLIND_KEY: ${STUDENTLIFE_BLIND_KEY}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      IDENTITY_URL: http://identity:${IDENTITY_PORT}
+      ACADEMIC_URL: http://academic:${ACADEMIC_PORT}
+      ATTENDANCE_URL: http://attendance:${ATTENDANCE_PORT}
+      NOTIFICATION_URL: http://notification:${NOTIFICATION_PORT}
+      CORE_URL: http://core:${CORE_PORT:-8091}
+      OPS_URL: ${STUDENTLIFE_OPS_URL:-}
+      STUDENTLIFE_PUBLIC_INTERNAL_URL: http://studentlife:${STUDENTLIFE_PORT:-8094}
+      PORTAL_URL: ${PORTAL_URL:-}
+      JOB_INTERVAL_SECONDS: ${STUDENTLIFE_JOB_INTERVAL_SECONDS:-300}
+      JOB_MAX_ATTEMPTS: ${STUDENTLIFE_JOB_MAX_ATTEMPTS:-5}
+    ports: ["${STUDENTLIFE_PORT:-8094}:${STUDENTLIFE_PORT:-8094}"]
+
   # ---------- accounting ----------
   # Laravel, served under /accounting/ by `web` (see web/nginx.conf). No
   # accounting-migrate sidecar: its entrypoint migrates only the shared `public`
@@ -443,6 +481,7 @@ services:
       - billing
       - core
       - hr
+      - studentlife
     networks:
       - default
       - edge
