@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
+	"skci/notification/internal/campaign"
 	"skci/notification/internal/common"
 )
 
@@ -15,6 +16,9 @@ type RouterConfig struct {
 	JWTSecret   string
 	InternalKey string
 	CORSOrigins []string
+
+	// Campaign mounts menu 147 routes (nil in tests that do not need them).
+	Campaign *campaign.Handler
 }
 
 // NewRouter builds the HTTP handler.
@@ -56,7 +60,31 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 		pr.Get("/chat/threads/{id}/messages", h.ListMessages)
 		pr.Post("/chat/threads/{id}/messages", h.CreateMessage)
 		pr.Post("/chat/threads/{id}/read", h.MarkThreadRead)
+
+		// T13 teacher–parent chat (FR-148-*).
+		pr.Post("/chat/teacher-parent/threads", h.CreateTeacherParentThread)
+		pr.Get("/chat/teacher-parent/students", h.TeacherParentStudents)
+		pr.Get("/chat/teacher-parent/contacts", h.TeacherParentContacts)
+		pr.Post("/chat/threads/{id}/attachments", h.UploadAttachment)
+		pr.Post("/chat/threads/{id}/archive", h.ArchiveThread)
+		pr.Get("/chat/messages/{id}/attachment", h.DownloadAttachment)
+		pr.Post("/chat/messages/{id}/report", h.ReportMessage)
+		pr.Get("/chat/moderation/reports", h.ListReports)
+		pr.Get("/chat/moderation/reports/{id}", h.GetReport)
+		pr.Post("/chat/moderation/reports/{id}/review", h.ReviewReport)
+		pr.Get("/chat-settings", h.GetChatSettings)
+		pr.Put("/chat-settings", h.PutChatSettings)
+
+		if cfg.Campaign != nil {
+			cfg.Campaign.Mount(pr)
+		}
 	})
+
+	// T13 public + provider endpoints (no JWT).
+	if cfg.Campaign != nil {
+		r.Get("/public/unsubscribe", cfg.Campaign.PublicUnsubscribe)
+		r.Post("/webhooks/whatsapp", cfg.Campaign.WhatsAppWebhook)
+	}
 
 	// Service-to-service (X-Internal-Key): send notifications, manage
 	// templates, retry failed deliveries.
@@ -71,6 +99,10 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 		ir.Get("/internal/notification-templates/{id}", h.InternalGetTemplate)
 		ir.Put("/internal/notification-templates/{id}", h.InternalUpdateTemplate)
 		ir.Delete("/internal/notification-templates/{id}", h.InternalDeleteTemplate)
+
+		if cfg.Campaign != nil {
+			ir.Post("/internal/marketing-consents", cfg.Campaign.InternalSetConsent)
+		}
 	})
 
 	return r

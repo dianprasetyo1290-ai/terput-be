@@ -113,7 +113,20 @@ type ChatThread struct {
 	Participants  []ChatParticipant `json:"participants,omitempty"`
 	MessageCount  int               `json:"message_count"`
 	LastMessageAt *time.Time        `json:"last_message_at,omitempty"`
+
+	// T13 teacher–parent extension (kind general = the 0002 behaviour).
+	Kind           string     `json:"kind"`
+	StudentUserID  *string    `json:"student_user_id,omitempty"`
+	TeacherUserID  *string    `json:"teacher_user_id,omitempty"`
+	GuardianUserID *string    `json:"guardian_user_id,omitempty"`
+	ArchivedAt     *time.Time `json:"archived_at,omitempty"`
 }
+
+// Chat thread kinds.
+const (
+	ChatKindGeneral       = "general"
+	ChatKindTeacherParent = "teacher_parent"
+)
 
 // Closed reports whether the thread was closed.
 func (t ChatThread) Closed() bool { return t.ClosedAt != nil }
@@ -137,4 +150,46 @@ type ChatMessage struct {
 	CreatedAt     time.Time `json:"created_at"`
 	ReadBy        []string  `json:"read_by,omitempty"`
 	ReadCount     int       `json:"read_count"`
+
+	AttachmentName      *string `json:"attachment_name,omitempty"`
+	AttachmentMime      *string `json:"attachment_mime,omitempty"`
+	AttachmentSize      *int64  `json:"attachment_size,omitempty"`
+	OutsideServiceHours bool    `json:"outside_service_hours"`
+}
+
+// ChatSettings is a school's chat configuration (FR-148-003, attachments).
+type ChatSettings struct {
+	SchoolID           string  `json:"school_id"`
+	ServiceStart       *string `json:"service_start"`
+	ServiceEnd         *string `json:"service_end"`
+	ServiceDays        []int   `json:"service_days"`
+	MaxAttachmentBytes int64   `json:"max_attachment_bytes"`
+}
+
+// DefaultMaxAttachmentBytes mirrors the DB default (5 MB, FR-16-002) for a
+// school without a chat_settings row.
+const DefaultMaxAttachmentBytes int64 = 5 << 20
+
+// Chat report statuses.
+const (
+	ReportOpen      = "open"
+	ReportReviewed  = "reviewed"
+	ReportDismissed = "dismissed"
+)
+
+// ChatMessageReport is a report of an inappropriate message (FR-148-004).
+type ChatMessageReport struct {
+	ID             string     `json:"id"`
+	SchoolID       string     `json:"school_id"`
+	MessageID      string     `json:"message_id"`
+	ThreadID       string     `json:"thread_id"`
+	ReporterUserID string     `json:"reporter_user_id"`
+	Reason         string     `json:"reason"`
+	Status         string     `json:"status"`
+	ReviewedBy     *string    `json:"reviewed_by,omitempty"`
+	ReviewNote     *string    `json:"review_note,omitempty"`
+	ReviewedAt     *time.Time `json:"reviewed_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	MessageBody    string     `json:"message_body"`
+	MessageSender  string     `json:"message_sender_user_id"`
 }

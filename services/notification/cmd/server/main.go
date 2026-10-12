@@ -4,18 +4,28 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/joho/godotenv"
 
+	"skci/notification/internal/campaign"
 	"skci/notification/internal/client"
 	"skci/notification/internal/common"
 	"skci/notification/internal/config"
 	"skci/notification/internal/handler"
+	"skci/notification/internal/jobs"
 	"skci/notification/internal/provider"
+	"skci/notification/internal/storage"
 	"skci/notification/internal/store"
 )
+
+// maxAttachmentCeiling is the storage-level hard cap; the per-school limit
+// (chat_settings.max_attachment_bytes) is enforced before it in the handler.
+const maxAttachmentCeiling = 50 << 20
 
 func main() {
 	_ = godotenv.Load()
@@ -45,14 +55,51 @@ func main() {
 		log.Fatal("refusing to start: a no-op delivery provider is not allowed in production")
 	}
 
-	h := handler.New(store.New(db), client.New(cfg.IdentityURL, cfg.InternalKey), delivery, prod)
+	loc, err := time.LoadLocation(cfg.Timezone)
+	if err != nil {
+		log.Fatalf("SCHOOL_TIMEZONE: %v", err)
+	}
+	whatsapp, err := provider.NewWhatsApp(cfg.WhatsAppProvider, cfg.WhatsAppWebhookSecret, cfg.WhatsAppStopKeywords)
+	if err != nil {
+		log.Fatalf("whatsapp provider: %v", err)
+	}
+
+	identity := client.New(cfg.IdentityURL, cfg.InternalKey)
+	academic := client.New(cfg.AcademicURL, cfg.InternalKey)
+	core := client.New(cfg.CoreURL, cfg.InternalKey)
+	audit := func(ctx context.Context, e client.AuditEvent) {
+		if err := core.Audit(ctx, e); err != nil {
+			log.Printf("core audit (%s %s): %v", e.EntityType, e.Action, err)
+		}
+	}
+
+	st := store.New(db)
+	h := handler.New(st, identity, delivery, prod)
+	h.Relations = client.Relations{Identity: identity, Academic: academic}
+	h.Attachments = storage.NewLocal(cfg.StorageRoot, maxAttachmentCeiling)
+	h.Audit = audit
+	h.Location = loc
+
+	campaignSvc := &campaign.Service{
+		Store:  campaign.NewStore(db),
+		InApp:  st,
+		Source: campaign.ClientSource{Identity: identity, Academic: academic, Admission: client.New(cfg.AdmissionURL, cfg.InternalKey)},
+		Email:  delivery, WhatsApp: whatsapp, Audit: audit,
+		UnsubscribeSecret: cfg.UnsubscribeSecret, PublicURL: cfg.PublicURL, Loc: loc,
+	}
+	runner := jobs.NewRunner(db, cfg.CampaignJobInterval)
+	runner.Register("campaign_dispatch", func(ctx context.Context, _ *sql.DB) error { return campaignSvc.RunDue(ctx) })
+	runner.Start()
+	defer runner.Stop()
+
 	router := handler.NewRouter(h, handler.RouterConfig{
 		JWTSecret:   cfg.JWTSecret,
 		InternalKey: cfg.InternalKey,
 		CORSOrigins: cfg.CORSOrigins,
+		Campaign:    campaign.NewHandler(campaignSvc),
 	})
 
-	log.Printf("notification-service listening on :%s (%s, provider=%s)", cfg.Port, cfg.AppEnv, delivery.Name())
+	log.Printf("notification-service listening on :%s (%s, provider=%s, whatsapp=%v)", cfg.Port, cfg.AppEnv, delivery.Name(), whatsapp != nil)
 	if err := http.ListenAndServe(":"+cfg.Port, router); err != nil {
 		log.Fatalf("server error: %v", err)
 	}

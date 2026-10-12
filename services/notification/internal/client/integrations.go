@@ -317,3 +317,112 @@ func (c *Client) Audit(ctx context.Context, e AuditEvent) error {
 	}
 	return c.PostJSON(ctx, "/internal/audit", "", e, nil)
 }
+
+// StudentTeacher is one teacher of a student's current classroom.
+type StudentTeacher struct {
+	UserID string `json:"user_id"`
+	Label  string `json:"label"` // "Wali kelas" or the subject name
+}
+
+// StudentTeachers lists the wali kelas and subject teachers of a student's
+// current classroom (academic).
+func (c *Client) StudentTeachers(ctx context.Context, schoolID, studentUserID string) ([]StudentTeacher, error) {
+	var sc struct {
+		ClassroomID string `json:"classroom_id"`
+	}
+	if err := c.Get(ctx, "/students/"+url.PathEscape(studentUserID)+"/classroom?school_id="+url.QueryEscape(schoolID), &sc); err != nil {
+		return nil, err
+	}
+	if sc.ClassroomID == "" {
+		return []StudentTeacher{}, nil
+	}
+	var cl Classroom
+	if err := c.Get(ctx, "/classrooms/"+url.PathEscape(sc.ClassroomID)+"?school_id="+url.QueryEscape(schoolID), &cl); err != nil {
+		return nil, err
+	}
+	var subjects []struct {
+		TeacherUserID *string `json:"teacher_user_id"`
+		SubjectName   *string `json:"subject_name"`
+		IsActive      bool    `json:"is_active"`
+	}
+	if err := c.Get(ctx, "/classrooms/"+url.PathEscape(sc.ClassroomID)+"/subjects?school_id="+url.QueryEscape(schoolID), &subjects); err != nil {
+		return nil, err
+	}
+	labels := map[string][]string{}
+	var order []string
+	add := func(id, label string) {
+		if _, ok := labels[id]; !ok {
+			order = append(order, id)
+		}
+		labels[id] = append(labels[id], label)
+	}
+	if cl.HomeroomTeacherUserID != nil && *cl.HomeroomTeacherUserID != "" {
+		add(*cl.HomeroomTeacherUserID, "Wali kelas")
+	}
+	for _, s := range subjects {
+		if s.TeacherUserID == nil || *s.TeacherUserID == "" || !s.IsActive {
+			continue
+		}
+		name := "Guru mata pelajaran"
+		if s.SubjectName != nil {
+			name = *s.SubjectName
+		}
+		add(*s.TeacherUserID, name)
+	}
+	out := make([]StudentTeacher, 0, len(order))
+	for _, id := range order {
+		out = append(out, StudentTeacher{UserID: id, Label: strings.Join(labels[id], ", ")})
+	}
+	return out, nil
+}
+
+// Relations answers the BR-COM-02 relation questions from identity and
+// academic. Every method fails closed: callers deny on error.
+type Relations struct {
+	Identity *Client
+	Academic *Client
+}
+
+// UserRoles implements handler.Relations.
+func (r Relations) UserRoles(ctx context.Context, schoolID, userID string) ([]string, error) {
+	return r.Identity.UserRoles(ctx, schoolID, userID)
+}
+
+// UserName returns a user's display name ("" when unknown).
+func (r Relations) UserName(ctx context.Context, userID string) string {
+	u, err := r.Identity.GetUser(ctx, userID)
+	if err != nil || u == nil {
+		return ""
+	}
+	return u.Name
+}
+
+// TeacherStudentIDs implements handler.Relations.
+func (r Relations) TeacherStudentIDs(ctx context.Context, schoolID, teacherID string) (map[string]bool, error) {
+	return r.Academic.TeacherStudentIDs(ctx, schoolID, teacherID)
+}
+
+// GuardianHasAccess implements handler.Relations.
+func (r Relations) GuardianHasAccess(ctx context.Context, schoolID, guardianID, studentID string) (bool, error) {
+	return r.Identity.GuardianHasAccess(ctx, schoolID, guardianID, studentID)
+}
+
+// GuardianChildren implements handler.Relations.
+func (r Relations) GuardianChildren(ctx context.Context, schoolID, guardianID string) ([]string, error) {
+	return r.Identity.GuardianChildren(ctx, schoolID, guardianID)
+}
+
+// StudentGuardians implements handler.Relations.
+func (r Relations) StudentGuardians(ctx context.Context, schoolID, studentID string) ([]StudentGuardian, error) {
+	return r.Identity.StudentGuardians(ctx, schoolID, studentID)
+}
+
+// StudentTeachers implements handler.Relations.
+func (r Relations) StudentTeachers(ctx context.Context, schoolID, studentID string) ([]StudentTeacher, error) {
+	return r.Academic.StudentTeachers(ctx, schoolID, studentID)
+}
+
+// UsersByRole implements handler.Relations.
+func (r Relations) UsersByRole(ctx context.Context, schoolID, role string) ([]UserProfile, error) {
+	return r.Identity.UsersByRole(ctx, schoolID, role)
+}

@@ -32,6 +32,10 @@ type fakeStore struct {
 	participants map[string]map[string]string // threadID -> userID -> role
 	messages     map[string][]*model.ChatMessage
 	reads        map[string]map[string]bool // messageID -> userID -> read
+
+	// T13 (lazily initialised in fakechat_test.go)
+	chatSettings map[string]*model.ChatSettings
+	reports      map[string]*model.ChatMessageReport
 }
 
 func newFakeStore() *fakeStore {
@@ -385,7 +389,13 @@ func (f *fakeStore) CreateChatThread(_ context.Context, in store.CreateThreadInp
 	defer f.mu.Unlock()
 	t := &model.ChatThread{
 		ID: newID(), SchoolID: in.SchoolID, Subject: in.Subject,
-		CreatedBy: in.CreatedBy, CreatedAt: time.Now(),
+		CreatedBy: in.CreatedBy, CreatedAt: time.Now(), Kind: in.Kind,
+	}
+	if t.Kind == "" {
+		t.Kind = model.ChatKindGeneral
+	}
+	if in.Kind == model.ChatKindTeacherParent {
+		t.StudentUserID, t.TeacherUserID, t.GuardianUserID = &in.StudentUserID, &in.TeacherUserID, &in.GuardianUserID
 	}
 	f.threads[t.ID] = t
 	f.participants[t.ID] = map[string]string{}
@@ -505,6 +515,8 @@ func (f *fakeStore) CreateChatMessage(_ context.Context, in store.CreateMessageI
 	m := &model.ChatMessage{
 		ID: newID(), ThreadID: in.ThreadID, SenderUserID: in.SenderUserID,
 		Body: in.Body, AttachmentKey: in.AttachmentKey, CreatedAt: time.Now(),
+		AttachmentName: in.AttachmentName, AttachmentMime: in.AttachmentMime, AttachmentSize: in.AttachmentSize,
+		OutsideServiceHours: in.OutsideServiceHours,
 	}
 	f.messages[in.ThreadID] = append(f.messages[in.ThreadID], m)
 	c := *m
