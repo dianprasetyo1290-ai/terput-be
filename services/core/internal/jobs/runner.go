@@ -20,6 +20,8 @@ type Runner struct {
 	Client      *client.Client
 	Interval    time.Duration
 	MaxAttempts int
+	// ServiceDeskSLA is the nil-safe service desk SLA/escalation job (T11).
+	ServiceDeskSLA func(ctx context.Context) error
 }
 
 func NewRunner(db *sql.DB, st store.Store, cl *client.Client, interval time.Duration, maxAttempts int) *Runner {
@@ -53,6 +55,14 @@ func (r *Runner) RunOnce(ctx context.Context) {
 			log.Printf("callback retry job error: %v", err)
 		}
 	})
+
+	if r.ServiceDeskSLA != nil {
+		r.withAdvisoryLock(ctx, "core_service_desk_sla_job", func() {
+			if err := r.ServiceDeskSLA(ctx); err != nil {
+				log.Printf("service desk sla job error: %v", err)
+			}
+		})
+	}
 }
 
 func (r *Runner) withAdvisoryLock(ctx context.Context, jobName string, fn func()) {

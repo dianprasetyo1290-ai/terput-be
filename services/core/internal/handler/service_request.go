@@ -265,7 +265,11 @@ func (h *Handler) CreateParentServiceRequest(w http.ResponseWriter, r *http.Requ
 		common.WriteError(w, http.StatusInternalServerError, "gagal membuat permintaan layanan: "+err.Error())
 		return
 	}
-	h.bg(func(ctx context.Context) { h.notifyServiceRequestHandlers(ctx, created, cat) })
+	// BR-SD-01: a request handled as a service desk ticket is announced by
+	// the ticket (one change = one notification), not by menu 81.
+	if h.ServiceDesk == nil || !h.ServiceDesk.FromServiceRequest(r.Context(), *created) {
+		h.bg(func(ctx context.Context) { h.notifyServiceRequestHandlers(ctx, created, cat) })
+	}
 	common.WriteJSON(w, http.StatusCreated, created, nil)
 }
 
@@ -385,6 +389,10 @@ func (h *Handler) UpdateServiceRequestStatus(w http.ResponseWriter, r *http.Requ
 	schoolID := common.EffectiveSchoolID(r)
 	id := chi.URLParam(r, "id")
 
+	if h.serviceDeskGuard(w, r, schoolID, id) {
+		return
+	}
+
 	var input updateStatusInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		common.WriteError(w, http.StatusBadRequest, "format json tidak valid")
@@ -417,6 +425,10 @@ func (h *Handler) UpdateServiceRequestResult(w http.ResponseWriter, r *http.Requ
 
 	schoolID := common.EffectiveSchoolID(r)
 	id := chi.URLParam(r, "id")
+
+	if h.serviceDeskGuard(w, r, schoolID, id) {
+		return
+	}
 
 	var input updateResultInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {

@@ -37,6 +37,7 @@ type Client struct {
 	HRURL           string
 	InternalKey     string
 	HTTP            *http.Client
+	OpsURL          string // T11: ops facility work orders & rooms (T9 §4.2)
 }
 
 func New(notifURL, identityURL, hrURL, internalKey string) *Client {

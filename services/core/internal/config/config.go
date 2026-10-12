@@ -26,6 +26,13 @@ type Config struct {
 	AuditExportMaxRows int
 	SentryDSN          string
 	SentryEnvironment  string
+	// Service Desk (T11): ops work orders, private attachments, SLA clock zone.
+	OpsURL         string
+	StorageRoot    string
+	MaxUploadBytes int64
+	SchoolTimezone string
+	// SelfInternalURL is core's own base URL, used for exception retry_url.
+	SelfInternalURL string
 }
 
 // Load reads and validates configuration from environment variables.
@@ -45,7 +52,12 @@ func Load() (Config, error) {
 		AuditExportMaxRows:  integer("AUDIT_EXPORT_MAX_ROWS", 10000),
 		SentryDSN:           os.Getenv("SENTRY_DSN"),
 		SentryEnvironment:   env("SENTRY_ENVIRONMENT", "development"),
+		OpsURL:              os.Getenv("OPS_URL"),
+		StorageRoot:         env("STORAGE_ROOT", "./data/private"),
+		MaxUploadBytes:      int64(integer("MAX_UPLOAD_BYTES", 10<<20)),
+		SchoolTimezone:      env("SCHOOL_TIMEZONE", "Asia/Jakarta"),
 	}
+	c.SelfInternalURL = env("CORE_INTERNAL_URL", "http://localhost:"+c.Port)
 
 	if c.JobIntervalSeconds <= 0 || c.CallbackMaxAttempts <= 0 || c.AuditExportMaxRows <= 0 {
 		return Config{}, errors.New("JOB_INTERVAL_SECONDS, CALLBACK_MAX_ATTEMPTS and AUDIT_EXPORT_MAX_ROWS must be positive")
