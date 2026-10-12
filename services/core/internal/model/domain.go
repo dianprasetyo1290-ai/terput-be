@@ -35,6 +35,12 @@ const (
 	ReqTypeHealthProfileUpdate    = "health_profile_update"
 	ReqTypeCanteenSettlement      = "canteen_settlement"
 	ReqTypeWalletTransfer         = "wallet_transfer"
+	ReqTypePurchaseRequest        = "purchase_request"
+	ReqTypePurchaseOrder          = "purchase_order"
+	ReqTypeStockAdjustment        = "stock_adjustment"
+	ReqTypeVendorBankChange       = "vendor_bank_change"
+	ReqTypeDisciplineAppeal       = "discipline_appeal"
+	ReqTypeEvent                  = "event"
 )
 
 // RequestTypeLabels maps request_type to its human-readable Indonesian title.
@@ -64,6 +70,12 @@ var RequestTypeLabels = map[string]string{
 	ReqTypeHealthProfileUpdate:    "Pembaruan Profil Kesehatan",
 	ReqTypeCanteenSettlement:      "Pencairan Dana Kantin",
 	ReqTypeWalletTransfer:         "Transfer Saldo Dompet",
+	ReqTypePurchaseRequest:        "Permintaan Pembelian (PR)",
+	ReqTypePurchaseOrder:          "Pesanan Pembelian (PO)",
+	ReqTypeStockAdjustment:        "Penyesuaian Stok (Stock Opname)",
+	ReqTypeVendorBankChange:       "Perubahan Rekening Vendor",
+	ReqTypeDisciplineAppeal:       "Banding Disiplin Siswa",
+	ReqTypeEvent:                  "Kegiatan/Event Sekolah",
 }
 
 // KnownRequestTypes lists all supported request types.
@@ -93,6 +105,12 @@ var KnownRequestTypes = []string{
 	ReqTypeHealthProfileUpdate,
 	ReqTypeCanteenSettlement,
 	ReqTypeWalletTransfer,
+	ReqTypePurchaseRequest,
+	ReqTypePurchaseOrder,
+	ReqTypeStockAdjustment,
+	ReqTypeVendorBankChange,
+	ReqTypeDisciplineAppeal,
+	ReqTypeEvent,
 }
 
 // Request statuses
