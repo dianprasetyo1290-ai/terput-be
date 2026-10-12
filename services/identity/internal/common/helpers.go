@@ -103,12 +103,49 @@ const (
 	RoleAuditor        = "auditor"
 	RoleFinanceManager = "finance_manager"
 	RolePegawai        = "pegawai"
+
+	// Operasional sekolah, PRD Bagian 3–4 (T9, migration 0017). Names are
+	// the contract for T10–T26 (docs/prd-sekoci/tasks/T9 §2).
+	RoleInventoryOfficer   = "inventory_officer"
+	RoleProcurementOfficer = "procurement_officer"
+	RoleAssetOfficer       = "asset_officer"
+	RolePustakawan         = "pustakawan"
+	RoleFacilityOfficer    = "facility_officer"
+	RoleTeknisi            = "teknisi"
+	RoleTransportOfficer   = "transport_officer"
+	RolePendampingTrans    = "pendamping_transport"
+	RolePengemudi          = "pengemudi"
+	RoleCanteenAdmin       = "canteen_admin"
+	RoleCanteenOperator    = "canteen_operator"
+	RolePetugasUKS         = "petugas_uks"
+	RoleKonselor           = "konselor"
+	RoleKesiswaan          = "kesiswaan"
+	RoleEventCoordinator   = "event_coordinator"
+	RolePembinaEkskul      = "pembina_ekskul"
+	RoleServiceDeskAgent   = "servicedesk_agent"
+	RoleServiceDeskManager = "servicedesk_manager"
+	RoleKoordinatorPKL     = "koordinator_pkl"
+	RolePembimbingPKL      = "pembimbing_pkl"
+	RolePembimbingIndustri = "pembimbing_industri"
+	RoleQACoordinator      = "qa_coordinator"
+	RoleOperatorDapodik    = "operator_dapodik"
+	RoleHumas              = "humas"
+	RoleBIAnalyst          = "bi_analyst"
 )
 
-var AllRoles = []string{
+// OpsRoles are the 25 Bagian 3–4 roles added by migration 0017.
+var OpsRoles = []string{
+	RoleInventoryOfficer, RoleProcurementOfficer, RoleAssetOfficer, RolePustakawan, RoleFacilityOfficer, RoleTeknisi,
+	RoleTransportOfficer, RolePendampingTrans, RolePengemudi, RoleCanteenAdmin, RoleCanteenOperator, RolePetugasUKS,
+	RoleKonselor, RoleKesiswaan, RoleEventCoordinator, RolePembinaEkskul, RoleServiceDeskAgent, RoleServiceDeskManager,
+	RoleKoordinatorPKL, RolePembimbingPKL, RolePembimbingIndustri, RoleQACoordinator, RoleOperatorDapodik, RoleHumas,
+	RoleBIAnalyst,
+}
+
+var AllRoles = append([]string{
 	RoleSuperadmin, RoleAdmin, RoleGuru, RoleSiswa, RoleOrangTua, RoleWalikelas, RoleKepalaSekolah, RoleKepalaYayasan, RolePengawas,
 	RoleHRAdmin, RoleHRManager, RolePayrollOfficer, RoleRecruiter, RoleTrainingAdmin, RoleAuditor, RoleFinanceManager, RolePegawai,
-}
+}, OpsRoles...)
 
 var DashboardRoles = map[string]bool{
 	RoleSuperadmin: true,

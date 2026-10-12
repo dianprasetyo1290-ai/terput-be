@@ -63,6 +63,17 @@ func (a *App) SetSchoolFeature(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "enabled is required")
 		return
 	}
+	if req.Enabled {
+		existing, err := store.SchoolFeatureMap(a.DB, schoolID)
+		if err != nil {
+			common.WriteError(w, http.StatusInternalServerError, "failed to load school features")
+			return
+		}
+		if len(store.MissingRequirements(key, existing)) > 0 {
+			common.WriteError(w, http.StatusUnprocessableEntity, "Aktifkan modul Fasilitas terlebih dahulu")
+			return
+		}
+	}
 	updatedBy := ""
 	if c := common.FromCtx(r); c != nil {
 		updatedBy = c.UserID

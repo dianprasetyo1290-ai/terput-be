@@ -114,6 +114,15 @@ type GuardianChild struct {
 	NISN          *string `json:"nisn"`
 }
 
+// StudentGuardian is one active guardian of a student, returned by the
+// internal GET /internal/students/{id}/guardians read (T9 §4.1; used by
+// studentlife/ops to notify or ask consent from parents).
+type StudentGuardian struct {
+	GuardianUserID string `json:"guardian_user_id"`
+	Relationship   string `json:"relationship"`
+	IsPrimary      bool   `json:"is_primary"`
+}
+
 type ConversionMapping struct {
 	SchoolID       string  `json:"school_id"`
 	Source         string  `json:"source"`

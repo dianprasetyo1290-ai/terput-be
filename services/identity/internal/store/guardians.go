@@ -97,6 +97,33 @@ func GuardianStudentAccess(db *sql.DB, schoolID, guardianUserID, studentUserID s
 	return allowed, err
 }
 
+// StudentGuardians backs GET /internal/students/{studentUserId}/guardians:
+// the active links of one student at one school, under the same
+// role-consistency rules as LinkedGuardianChildren (guardian holds an active
+// orang_tua role there, student an active siswa role). Another school's
+// links never appear.
+func StudentGuardians(db *sql.DB, schoolID, studentUserID string) ([]model.StudentGuardian, error) {
+	rows, err := db.Query(`SELECT gl.guardian_user_id, gl.relationship, gl.is_primary
+		FROM guardian_links gl
+		JOIN users u ON u.id=gl.student_user_id AND u.deleted_at IS NULL
+		JOIN user_school_roles sr ON sr.user_id=u.id AND sr.school_id=gl.school_id AND sr.role='siswa' AND sr.status='active'
+		WHERE gl.school_id=$1 AND gl.student_user_id=$2 AND gl.status='active' AND `+guardianActiveRoleSQL+`
+		ORDER BY gl.is_primary DESC, gl.created_at, gl.guardian_user_id`, schoolID, studentUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.StudentGuardian{}
+	for rows.Next() {
+		var g model.StudentGuardian
+		if err := rows.Scan(&g.GuardianUserID, &g.Relationship, &g.IsPrimary); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
 func ScanGuardianLink(row interface{ Scan(...interface{}) error }) (model.GuardianLink, error) {
 	var link model.GuardianLink
 	err := row.Scan(&link.ID, &link.SchoolID, &link.GuardianUserID, &link.StudentUserID, &link.Relationship,
