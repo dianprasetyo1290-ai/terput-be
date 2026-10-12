@@ -160,11 +160,13 @@ func (s *Service) CreateTicket(ctx context.Context, cat *Category, n NewTicket) 
 // FromServiceRequest turns a menu 81 request into a ticket when the school
 // runs the service desk (BR-SD-01). It never fails the menu 81 flow: no
 // feature / no category → nothing happens; an error lands in the exception queue.
-func (s *Service) FromServiceRequest(ctx context.Context, sr model.ServiceRequest) {
+// Returns true when the request is now handled by a ticket.
+func (s *Service) FromServiceRequest(ctx context.Context, sr model.ServiceRequest) bool {
 	if !s.FeatureEnabled(ctx, sr.SchoolID) {
-		return
+		return false
 	}
-	if _, err := s.TicketFromServiceRequest(ctx, sr); err != nil && !errors.Is(err, ErrNotFound) {
+	_, err := s.TicketFromServiceRequest(ctx, sr)
+	if err != nil && !errors.Is(err, ErrNotFound) {
 		log.Printf("service desk: ticket from service request %s: %v", sr.ID, err)
 		retry := s.Config.SelfInternalURL + "/internal/service-desk/from-service-request/" + sr.ID + "?school_id=" + sr.SchoolID
 		_, _, xerr := s.Core.UpsertException(ctx, model.IntegrationException{
@@ -177,6 +179,7 @@ func (s *Service) FromServiceRequest(ctx context.Context, sr model.ServiceReques
 			log.Printf("service desk: exception for %s: %v", sr.ID, xerr)
 		}
 	}
+	return err == nil
 }
 
 // TicketFromServiceRequest returns ErrNotFound when no category maps the request.

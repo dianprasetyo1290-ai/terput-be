@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -43,6 +44,9 @@ type Client struct {
 	CoreURL     string
 	NotifURL    string
 	InternalKey string
+	// CallbackURL is where core POSTs approval decisions:
+	// {HR_PUBLIC_INTERNAL_URL}/internal/approval-callbacks (T2 §approval).
+	CallbackURL string
 	HTTP        *http.Client
 
 	featMu    sync.Mutex
@@ -185,6 +189,8 @@ type ApprovalRequest struct {
 	SourceID       string         `json:"source_id"`
 	Title          string         `json:"title"`
 	Summary        map[string]any `json:"summary"`
+	AmountIDR      *int64         `json:"amount_idr,omitempty"`
+	Flags          []string       `json:"flags,omitempty"`
 	MakerUserID    string         `json:"maker_user_id"`
 	SubjectUserID  string         `json:"subject_user_id,omitempty"`
 	CallbackURL    string         `json:"callback_url"`
@@ -192,28 +198,64 @@ type ApprovalRequest struct {
 	IdempotencyKey string         `json:"idempotency_key"`
 }
 
-// CreateApproval opens an approval in core and returns its id.
+// Request types hr sends to core (must match core model.KnownRequestTypes).
+const (
+	ReqTypeLeave         = "leave"
+	ReqTypeOvertime      = "overtime"
+	ReqTypeProfileChange = "profile_change"
+	ReqTypeRequisition   = "requisition"
+	ReqTypePayrollRun    = "payroll_run"
+)
+
+// CreateApproval opens an approval in core and returns its id. source_service,
+// callback_url and the correlation/idempotency defaults are filled here so
+// every hr caller sends the same contract.
 func (c *Client) CreateApproval(ctx context.Context, req ApprovalRequest) (string, error) {
+	req.SourceService = "hr"
+	if req.CallbackURL == "" {
+		req.CallbackURL = c.CallbackURL
+	}
+	if req.IdempotencyKey == "" {
+		req.IdempotencyKey = req.RequestType + ":" + req.SourceID
+	}
+	if req.CorrelationID == "" {
+		req.CorrelationID = req.IdempotencyKey
+	}
+	if req.Summary == nil {
+		req.Summary = map[string]any{}
+	}
 	var res struct {
 		ID string `json:"id"`
 	}
 	err := c.do(ctx, http.MethodPost, c.CoreURL+"/internal/approvals", req, req.IdempotencyKey, &res)
+	if err == nil && res.ID == "" {
+		err = fmt.Errorf("core tidak mengembalikan id approval")
+	}
 	return res.ID, err
 }
 
-// CreateApprovalRequest is a convenience wrapper for CreateApproval.
-func (c *Client) CreateApprovalRequest(ctx context.Context, schoolID, makerUserID, approverUserID, requestType, sourceID, title string) (string, error) {
+// CreateApprovalRequest opens an approval whose subject is the requesting
+// employee (core resolves direct_supervisor from subject_user_id, T1 §4.2).
+func (c *Client) CreateApprovalRequest(ctx context.Context, schoolID, makerUserID, subjectUserID, requestType, sourceID, title string) (string, error) {
 	return c.CreateApproval(ctx, ApprovalRequest{
-		SchoolID:       schoolID,
-		RequestType:    requestType,
-		SourceService:  "hr",
-		SourceID:       sourceID,
-		Title:          title,
-		MakerUserID:    makerUserID,
-		SubjectUserID:  approverUserID,
-		CallbackURL:    c.CoreURL + "/internal/approval-callbacks",
-		IdempotencyKey: fmt.Sprintf("%s:%s", requestType, sourceID),
+		SchoolID:      schoolID,
+		RequestType:   requestType,
+		SourceID:      sourceID,
+		Title:         title,
+		MakerUserID:   makerUserID,
+		SubjectUserID: subjectUserID,
 	})
+}
+
+// ApprovalErrorMessage turns a CreateApproval error into a user-facing
+// message (core's 4xx message, e.g. "alur approval leave belum dikonfigurasi")
+// plus the HTTP status the source should answer with.
+func ApprovalErrorMessage(err error) (int, string) {
+	var he *HTTPError
+	if errors.As(err, &he) && he.Status >= 400 && he.Status < 500 {
+		return http.StatusUnprocessableEntity, "Approval Center menolak pengajuan: " + he.Message()
+	}
+	return http.StatusBadGateway, "Approval Center tidak dapat dihubungi, pengajuan belum tersimpan"
 }
 
 // CancelApproval withdraws a pending approval in core.

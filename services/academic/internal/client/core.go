@@ -14,7 +14,10 @@ import (
 type CoreClient struct {
 	BaseURL     string
 	InternalKey string
-	HTTPClient  *http.Client
+	// CallbackBaseURL is academic's own internal URL as core reaches it
+	// (ACADEMIC_INTERNAL_URL); core rejects a relative callback_url.
+	CallbackBaseURL string
+	HTTPClient      *http.Client
 }
 
 func NewCoreClient() *CoreClient {
@@ -26,10 +29,15 @@ func NewCoreClient() *CoreClient {
 	if key == "" {
 		key = "change-me"
 	}
+	callbackBase := os.Getenv("ACADEMIC_INTERNAL_URL")
+	if callbackBase == "" {
+		callbackBase = "http://academic:8082"
+	}
 	return &CoreClient{
-		BaseURL:     strings.TrimRight(base, "/"),
-		InternalKey: key,
-		HTTPClient:  &http.Client{Timeout: 5 * time.Second},
+		BaseURL:         strings.TrimRight(base, "/"),
+		InternalKey:     key,
+		CallbackBaseURL: strings.TrimRight(callbackBase, "/"),
+		HTTPClient:      &http.Client{Timeout: 5 * time.Second},
 	}
 }
 

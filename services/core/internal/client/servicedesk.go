@@ -33,24 +33,6 @@ func (c *Client) SchoolFeatures(ctx context.Context, schoolID string) (map[strin
 	return out, nil
 }
 
-// GuardianHasStudent checks an active guardian link (identity
-// GET /internal/guardians/{g}/students/{s}/access; 404 = no access).
-func (c *Client) GuardianHasStudent(ctx context.Context, schoolID, guardianUserID, studentUserID string) (bool, error) {
-	if c.IdentityURL == "" {
-		return false, ErrNotConfigured
-	}
-	full := fmt.Sprintf("%s/internal/guardians/%s/students/%s/access?school_id=%s", c.IdentityURL,
-		url.PathEscape(guardianUserID), url.PathEscape(studentUserID), url.QueryEscape(schoolID))
-	var out struct {
-		Allowed bool `json:"allowed"`
-	}
-	err := c.getJSON(ctx, full, &out)
-	if err == ErrNotFound {
-		return false, nil
-	}
-	return out.Allowed, err
-}
-
 // UserRef is a user id with its display name.
 type UserRef struct {
 	ID   string `json:"id"`

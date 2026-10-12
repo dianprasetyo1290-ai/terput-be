@@ -296,7 +296,9 @@ func midnight(t time.Time) time.Time {
 	return time.Date(y, m, d, 0, 0, 0, 0, t.Location())
 }
 
-func at(day time.Time, minute int) time.Time { return midnight(day).Add(time.Duration(minute) * time.Minute) }
+func at(day time.Time, minute int) time.Time {
+	return midnight(day).Add(time.Duration(minute) * time.Minute)
+}
 
 // maxScanDays bounds every calendar walk (a calendar whose open days are all
 // holidays for longer than this is treated as unconfigured).

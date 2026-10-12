@@ -230,6 +230,25 @@ func (c *Client) UsersByRole(ctx context.Context, schoolID, role string) ([]stri
 	return ids, nil
 }
 
+// GuardianHasStudent reports whether an active guardian link connects the
+// guardian to the student in the school (identity GET
+// /internal/guardians/{g}/students/{s}/access; 404 = no link).
+func (c *Client) GuardianHasStudent(ctx context.Context, schoolID, guardianUserID, studentUserID string) (bool, error) {
+	if c.IdentityURL == "" {
+		return false, ErrNotConfigured
+	}
+	q := url.Values{"school_id": {schoolID}}
+	var res struct {
+		Allowed bool `json:"allowed"`
+	}
+	err := c.getJSON(ctx, c.IdentityURL+"/internal/guardians/"+url.PathEscape(guardianUserID)+
+		"/students/"+url.PathEscape(studentUserID)+"/access?"+q.Encode(), &res)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	return res.Allowed, err
+}
+
 // Notice is one in-app notification fanned out to several users.
 type Notice struct {
 	SchoolID string

@@ -1,13 +1,17 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 
+	"skci/core/internal/client"
 	"skci/core/internal/common"
 	"skci/core/internal/model"
 	"skci/core/internal/store"
@@ -191,6 +195,11 @@ func (h *Handler) CreateParentServiceRequest(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if !claims.HasRole(common.RoleParent) {
+		common.WriteError(w, http.StatusForbidden, "hanya orang tua yang dapat mengajukan permintaan layanan")
+		return
+	}
+
 	schoolID := common.EffectiveSchoolID(r)
 	var req createServiceRequestInput
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -217,9 +226,28 @@ func (h *Handler) CreateParentServiceRequest(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if cat.RequiresStudent && (req.StudentUserID == nil || strings.TrimSpace(*req.StudentUserID) == "") {
+	if req.StudentUserID != nil && strings.TrimSpace(*req.StudentUserID) == "" {
+		req.StudentUserID = nil
+	}
+	if cat.RequiresStudent && req.StudentUserID == nil {
 		common.WriteError(w, http.StatusBadRequest, "siswa wajib dipilih untuk kategori layanan ini")
 		return
+	}
+	// The parent may only file for a student they are an active guardian of.
+	// Fails closed when identity cannot answer.
+	if req.StudentUserID != nil {
+		linked, err := false, client.ErrNotConfigured
+		if h.Client != nil {
+			linked, err = h.Client.GuardianHasStudent(r.Context(), schoolID, claims.GetUserID(), *req.StudentUserID)
+		}
+		if err != nil {
+			common.WriteError(w, http.StatusServiceUnavailable, "verifikasi wali siswa tidak tersedia, coba lagi nanti")
+			return
+		}
+		if !linked {
+			common.WriteError(w, http.StatusForbidden, "Anda bukan wali aktif siswa ini")
+			return
+		}
 	}
 
 	sr := model.ServiceRequest{
@@ -237,10 +265,36 @@ func (h *Handler) CreateParentServiceRequest(w http.ResponseWriter, r *http.Requ
 		common.WriteError(w, http.StatusInternalServerError, "gagal membuat permintaan layanan: "+err.Error())
 		return
 	}
-	if h.ServiceDesk != nil {
-		h.ServiceDesk.FromServiceRequest(r.Context(), *created)
+	// BR-SD-01: a request handled as a service desk ticket is announced by
+	// the ticket (one change = one notification), not by menu 81.
+	if h.ServiceDesk == nil || !h.ServiceDesk.FromServiceRequest(r.Context(), *created) {
+		h.bg(func(ctx context.Context) { h.notifyServiceRequestHandlers(ctx, created, cat) })
 	}
 	common.WriteJSON(w, http.StatusCreated, created, nil)
+}
+
+// notifyServiceRequestHandlers tells every holder of the category's
+// handler_role that a new request is waiting (FR-07-002 notification pattern).
+func (h *Handler) notifyServiceRequestHandlers(ctx context.Context, sr *model.ServiceRequest, cat *model.ServiceRequestCategory) {
+	if h.Client == nil {
+		return
+	}
+	staff, err := h.Client.UsersByRole(ctx, sr.SchoolID, cat.HandlerRole)
+	if err != nil {
+		log.Printf("service request %s: resolve %s: %v", sr.ID, cat.HandlerRole, err)
+		return
+	}
+	err = h.Client.NotifyUsers(ctx, client.Notice{
+		SchoolID: sr.SchoolID,
+		KeyBase:  "service_request:" + sr.ID + ":submitted",
+		Type:     "service_request",
+		Title:    "Permintaan Layanan Baru",
+		Body:     fmt.Sprintf("%s: %s", cat.Name, sr.Subject),
+		Data:     map[string]any{"service_request_id": sr.ID, "category_id": cat.ID},
+	}, staff)
+	if err != nil {
+		log.Printf("service request %s: notify handlers: %v", sr.ID, err)
+	}
 }
 
 func (h *Handler) ListParentServiceRequests(w http.ResponseWriter, r *http.Request) {

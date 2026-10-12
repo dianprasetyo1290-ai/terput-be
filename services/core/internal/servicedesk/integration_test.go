@@ -47,13 +47,13 @@ func newID() string {
 // fakes records what the downstream services received.
 type fakes struct {
 	mu          sync.Mutex
-	features    map[string]bool              // school → service_desk on
-	guardians   map[string]bool              // guardian|student
-	roleUsers   map[string][]client.UserRef  // role → users
-	notifyKeys  []string                     // Idempotency-Key per notification
-	woKeys      []string                     // Idempotency-Key per work-order POST
-	woByKey     map[string]client.WorkOrder  // ops idempotency store
-	woFailFirst bool                         // create the order but answer 500 once
+	features    map[string]bool             // school → service_desk on
+	guardians   map[string]bool             // guardian|student
+	roleUsers   map[string][]client.UserRef // role → users
+	notifyKeys  []string                    // Idempotency-Key per notification
+	woKeys      []string                    // Idempotency-Key per work-order POST
+	woByKey     map[string]client.WorkOrder // ops idempotency store
+	woFailFirst bool                        // create the order but answer 500 once
 	opsDown     bool
 }
 
@@ -201,6 +201,18 @@ func setup(t *testing.T) *env {
 	return e
 }
 
+// waitFor polls a background side effect (menu 81 notifies in a goroutine).
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	for i := 0; i < 100; i++ {
+		if cond() {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("kondisi tidak tercapai")
+}
+
 func token(t *testing.T, userID, schoolID, role string) string {
 	t.Helper()
 	claims := common.Claims{UserID: userID, SchoolID: schoolID, ActiveRole: role, Roles: []string{role},
@@ -335,6 +347,9 @@ func TestBRSD01_ServiceRequestBecomesTicket(t *testing.T) {
 		"resolution_value": 2, "resolution_unit": "business_days", "warn_bp": 8000, "effective_from": "2026-01-01",
 	}), 200)
 
+	e.f.mu.Lock()
+	e.f.roleUsers["admin"] = []client.UserRef{{ID: newID(), Name: "Admin TU"}}
+	e.f.mu.Unlock()
 	parent := newID()
 	pTok := token(t, parent, s.id, "orang_tua")
 	sr := e.must(e.do("POST", "/parent/service-requests", pTok, map[string]any{
@@ -342,6 +357,9 @@ func TestBRSD01_ServiceRequestBecomesTicket(t *testing.T) {
 	srID := sr["id"].(string)
 
 	link := e.must(e.do("GET", "/service-desk/service-requests/"+srID+"/ticket", pTok, nil), 200).data()
+	if n := e.f.notifications("service_request:" + srID); n != 0 {
+		t.Fatalf("SR bertiket tidak boleh mengirim notifikasi menu 81 terpisah, got %d", n)
+	}
 	ticketID := link["ticket_id"].(string)
 	if !strings.HasPrefix(link["number"].(string), "SD-2026-") {
 		t.Fatalf("nomor tiket %v", link["number"])
@@ -434,6 +452,9 @@ func TestBRSD01_FeatureOffOrUnmappedKeepsMenu81(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
 
+	e.f.mu.Lock()
+	e.f.roleUsers["admin"] = []client.UserRef{{ID: newID(), Name: "Admin TU"}}
+	e.f.mu.Unlock()
 	off := e.newSchool(false)
 	srCat, _ := e.core.CreateServiceRequestCategory(ctx, model.ServiceRequestCategory{
 		SchoolID: off.id, Name: "Surat", HandlerRole: "admin", Active: true})
@@ -441,6 +462,7 @@ func TestBRSD01_FeatureOffOrUnmappedKeepsMenu81(t *testing.T) {
 	sr := e.must(e.do("POST", "/parent/service-requests", pTok, map[string]any{
 		"category_id": srCat.ID, "subject": "A", "description": "B"}), 201).data()
 	e.must(e.do("GET", "/service-desk/service-requests/"+sr["id"].(string)+"/ticket", pTok, nil), 404)
+	waitFor(t, func() bool { return e.f.notifications("service_request:"+sr["id"].(string)) == 1 })
 	e.must(e.do("GET", "/service-desk/tickets", off.mTok, nil), 403)
 	e.must(e.do("GET", "/me/tickets", pTok, nil), 403)
 	// menu 81 still works

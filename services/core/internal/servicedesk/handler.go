@@ -919,7 +919,9 @@ func (s *Service) AgentFile(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (s *Service) Report(w http.ResponseWriter, r *http.Request) {
-	c, ok := allow(w, r, func(role string) bool { return role == RoleManager || role == common.RoleKepalaSekolah || isAdmin(role) })
+	c, ok := allow(w, r, func(role string) bool {
+		return role == RoleManager || role == common.RoleKepalaSekolah || isAdmin(role)
+	})
 	if !ok {
 		return
 	}

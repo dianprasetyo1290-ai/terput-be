@@ -159,16 +159,63 @@ func (s *Store) CreateRequisition(ctx context.Context, req Requisition) (*Requis
 	return &req, nil
 }
 
-func (s *Store) SubmitRequisition(ctx context.Context, schoolID, id string) error {
+// GetRequisition returns one requisition of the school.
+func (s *Store) GetRequisition(ctx context.Context, schoolID, id string) (*Requisition, error) {
+	var r Requisition
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT r.id, r.school_id, r.position_id, COALESCE(p.name, '') as position_name,
+		       r.department_id, r.quantity, r.reason, r.replaces_employee_id, r.qualifications,
+		       r.budget_idr, r.exceeds_headcount, r.status, r.filled_count, r.approval_id,
+		       r.requested_by, r.idempotency_key, r.created_at, r.updated_at
+		FROM requisitions r
+		LEFT JOIN positions p ON r.position_id = p.id
+		WHERE r.id = $1 AND r.school_id = $2`, id, schoolID).Scan(
+		&r.ID, &r.SchoolID, &r.PositionID, &r.PositionName, &r.DepartmentID, &r.Quantity,
+		&r.Reason, &r.ReplacesEmployeeID, &r.Qualifications, &r.BudgetIDR, &r.ExceedsHeadcount,
+		&r.Status, &r.FilledCount, &r.ApprovalID, &r.RequestedBy, &r.IdempotencyKey,
+		&r.CreatedAt, &r.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+// SubmitRequisition moves a draft to pending_approval and links its core
+// approval (T4: core approval requisition with flags).
+func (s *Store) SubmitRequisition(ctx context.Context, schoolID, id, approvalID string) error {
 	res, err := s.DB.ExecContext(ctx, `
 		UPDATE requisitions
-		SET status = 'pending_approval', updated_at = NOW()
-		WHERE id = $1 AND school_id = $2 AND status = 'draft'`, id, schoolID)
+		SET status = 'pending_approval', approval_id = $3::uuid, updated_at = NOW()
+		WHERE id = $1 AND school_id = $2 AND status = 'draft'`, id, schoolID, approvalID)
 	if err != nil {
 		return err
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ApplyRequisitionDecision applies core's approval callback once; a repeated
+// callback on a requisition no longer pending is a no-op.
+func (s *Store) ApplyRequisitionDecision(ctx context.Context, id, decision string) error {
+	res, err := s.DB.ExecContext(ctx, `UPDATE requisitions SET status = $2, updated_at = NOW() WHERE id = $1 AND status = 'pending_approval'`, id, decision)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return nil
+	}
+	var exists bool
+	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM requisitions WHERE id = $1)`, id).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
 		return ErrNotFound
 	}
 	return nil
