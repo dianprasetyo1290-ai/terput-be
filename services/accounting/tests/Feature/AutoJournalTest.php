@@ -38,9 +38,12 @@ class AutoJournalTest extends TestCase
 
     private function seedReferenceData(): void
     {
+        DB::table('mst_currency')->insertOrIgnore([
+            'curr_code' => 'Rp', 'curr_name' => 'Rupiah', 'rate_system' => 'N', 'created_at' => now(), 'updated_at' => now(),
+        ]);
         DB::table('mst_user')->insertOrIgnore([
             'user_id' => 'SYS_USER',
-            'name' => 'System User',
+            'user_name' => 'System User',
             'email' => 'sys@accounting.test',
             'password' => bcrypt('secret'),
             'created_at' => now(),
