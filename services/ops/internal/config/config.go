@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"os"
 	"strconv"
@@ -21,7 +22,10 @@ type Config struct {
 	NotificationURL      string
 	HRURL                string
 	BillingURL           string
+	AccountingURL        string
 	OpsPublicInternalURL string
+	OpsEncKey            []byte
+	OpsBlindKey          string
 	StorageRoot          string
 	MaxUploadBytes       int64
 	JobInterval          time.Duration
@@ -32,6 +36,20 @@ type Config struct {
 }
 
 func Load() (Config, error) {
+	encKeyB64 := os.Getenv("OPS_ENC_KEY")
+	if strings.TrimSpace(encKeyB64) == "" {
+		encKeyB64 = "change-me"
+	}
+	encKey, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encKeyB64))
+	if err != nil || len(encKey) != 32 {
+		return Config{}, errors.New("OPS_ENC_KEY must be valid 32 bytes base64 encoded")
+	}
+
+	blindKey := strings.TrimSpace(os.Getenv("OPS_BLIND_KEY"))
+	if blindKey == "" {
+		blindKey = "change-me"
+	}
+
 	c := Config{
 		AppEnv:               env("APP_ENV", "development"),
 		Port:                 env("OPS_PORT", env("PORT", "8093")),
@@ -44,7 +62,10 @@ func Load() (Config, error) {
 		NotificationURL:      trim(env("NOTIFICATION_URL", "http://localhost:8089")),
 		HRURL:                trim(env("HR_URL", "http://localhost:8092")),
 		BillingURL:           trim(env("BILLING_URL", "http://localhost:8090")),
+		AccountingURL:        trim(env("ACCOUNTING_URL", "http://localhost:8000")),
 		OpsPublicInternalURL: trim(env("OPS_PUBLIC_INTERNAL_URL", "http://localhost:8093")),
+		OpsEncKey:            encKey,
+		OpsBlindKey:          blindKey,
 		StorageRoot:          env("STORAGE_ROOT", "./data/private/ops"),
 		MaxUploadBytes:       int64(integer("MAX_UPLOAD_BYTES", 5<<20)),
 		JobInterval:          time.Duration(integer("JOB_INTERVAL_SECONDS", 300)) * time.Second,

@@ -13,14 +13,18 @@ import (
 	"skci/ops/internal/common"
 	"skci/ops/internal/config"
 	"skci/ops/internal/facility"
+	"skci/ops/internal/inventory"
+	"skci/ops/internal/procurement"
 	"skci/ops/internal/store"
 )
 
 type App struct {
-	DB       *sql.DB
-	Config   *config.Config
-	Client   *client.Client
-	Facility *facility.Handler
+	DB          *sql.DB
+	Config      *config.Config
+	Client      *client.Client
+	Facility    *facility.Handler
+	Inventory   *inventory.Handler
+	Procurement *procurement.Handler
 }
 
 func (a *App) Healthz(w http.ResponseWriter, r *http.Request) {
@@ -29,7 +33,9 @@ func (a *App) Healthz(w http.ResponseWriter, r *http.Request) {
 
 // featureLabels names each ops module in the "dinonaktifkan" message.
 var featureLabels = map[string]string{
-	"facility": "Fasilitas",
+	"facility":    "Fasilitas",
+	"inventory":   "Inventaris",
+	"procurement": "Pengadaan",
 }
 
 // featureOn reports whether key is on for the school (fails closed).
@@ -89,6 +95,47 @@ func (a *App) ApprovalCallback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		common.WriteJSON(w, http.StatusOK, map[string]string{"id": b.ID, "status": b.Status}, nil)
+
+	case "stock_adjustment":
+		if a.Inventory == nil {
+			common.WriteError(w, http.StatusInternalServerError, "Inventory handler tidak aktif")
+			return
+		}
+		invDec := inventory.ApprovalDecision{
+			ApprovalID:  d.ApprovalID,
+			SourceID:    d.SourceID,
+			RequestType: d.RequestType,
+			Decision:    d.Decision,
+			DecidedBy:   d.DecidedBy,
+			Comment:     d.Comment,
+		}
+		if err := a.Inventory.ApplyApprovalDecision(r.Context(), invDec); err != nil {
+			log.Printf("stock adjustment approval callback %s: %v", d.SourceID, err)
+			common.WriteError(w, http.StatusInternalServerError, "Gagal memproses penyesuaian stok: "+err.Error())
+			return
+		}
+		common.WriteJSON(w, http.StatusOK, map[string]string{"id": d.SourceID, "decision": d.Decision}, nil)
+
+	case "purchase_request", "purchase_order", "vendor_bank_change":
+		if a.Procurement == nil {
+			common.WriteError(w, http.StatusInternalServerError, "Procurement handler tidak aktif")
+			return
+		}
+		prcDec := procurement.ApprovalDecision{
+			ApprovalID:  d.ApprovalID,
+			SourceID:    d.SourceID,
+			RequestType: d.RequestType,
+			Decision:    d.Decision,
+			DecidedBy:   d.DecidedBy,
+			Comment:     d.Comment,
+		}
+		if err := a.Procurement.ApplyApprovalDecision(r.Context(), prcDec); err != nil {
+			log.Printf("procurement approval callback %s: %v", d.SourceID, err)
+			common.WriteError(w, http.StatusInternalServerError, "Gagal memproses approval pengadaan: "+err.Error())
+			return
+		}
+		common.WriteJSON(w, http.StatusOK, map[string]string{"id": d.SourceID, "decision": d.Decision}, nil)
+
 	default:
 		common.WriteError(w, http.StatusBadRequest, "request_type tidak dikenal: "+d.RequestType)
 	}

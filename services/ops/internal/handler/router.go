@@ -8,6 +8,8 @@ import (
 
 	"skci/ops/internal/common"
 	"skci/ops/internal/facility"
+	"skci/ops/internal/inventory"
+	"skci/ops/internal/procurement"
 )
 
 func (a *App) Router() http.Handler {
@@ -22,6 +24,8 @@ func (a *App) Router() http.Handler {
 	r.Get("/healthz", a.Healthz)
 
 	fac := a.Facility
+	inv := a.Inventory
+	proc := a.Procurement
 	facilityOn := func(r *http.Request, schoolID string) bool { return a.featureOn(r, schoolID, "facility") }
 
 	// Internal routes (X-Internal-Key), T9 §4.2.
@@ -95,6 +99,89 @@ func (a *App) Router() http.Handler {
 			of.Delete("/maintenance-schedules/{id}", fac.DeleteSchedule)
 		})
 	})
+
+	// Inventory (JWT + feature 'inventory'), T15.
+	if inv != nil {
+		r.Route("/inventory", func(api chi.Router) {
+			api.Use(common.JWTMiddleware(a.Config.JWTSecret))
+			api.Use(common.RequireAnyRole(common.StaffRoles...))
+			api.Use(a.requireFeature("inventory"))
+
+			// Read
+			api.Get("/categories", inv.ListCategories)
+			api.Get("/items", inv.ListItems)
+			api.Get("/items/{id}", inv.GetItem)
+			api.Get("/warehouses", inv.ListWarehouses)
+			api.Get("/stock", inv.ListStock)
+			api.Get("/stock/card", inv.GetStockCard)
+			api.Get("/movements", inv.ListMovements)
+			api.Get("/counts", inv.ListStockCounts)
+			api.Get("/counts/{id}", inv.GetStockCount)
+			api.Get("/counts/{id}/pdf", inv.GetStockCountReportPDF)
+
+			// Officers write
+			api.Group(func(of chi.Router) {
+				of.Use(common.RequireAnyRole(inventory.Officers...))
+				of.Post("/categories", inv.CreateCategory)
+				of.Put("/categories/{id}", inv.UpdateCategory)
+				of.Delete("/categories/{id}", inv.DeleteCategory)
+				of.Post("/items", inv.CreateItem)
+				of.Put("/items/{id}", inv.UpdateItem)
+				of.Delete("/items/{id}", inv.DeleteItem)
+				of.Post("/warehouses", inv.CreateWarehouse)
+				of.Put("/warehouses/{id}", inv.UpdateWarehouse)
+				of.Delete("/warehouses/{id}", inv.DeleteWarehouse)
+				of.Post("/movements", inv.CreateMovement)
+				of.Post("/transfers", inv.CreateTransfer)
+				of.Post("/counts", inv.CreateStockCount)
+				of.Put("/counts/{id}/lines", inv.UpdateCountLines)
+				of.Post("/counts/{id}/submit", inv.SubmitStockCount)
+				of.Post("/counts/{id}/adjust", inv.RequestAdjustment)
+				of.Post("/counts/{id}/cancel", inv.CancelStockCount)
+			})
+		})
+	}
+
+	// Procurement (JWT + feature 'procurement'), T15.
+	if proc != nil {
+		r.Route("/procurement", func(api chi.Router) {
+			api.Use(common.JWTMiddleware(a.Config.JWTSecret))
+			api.Use(common.RequireAnyRole(common.StaffRoles...))
+			api.Use(a.requireFeature("procurement"))
+
+			// Staff PR
+			api.Get("/purchase-requests", proc.ListPRs)
+			api.Get("/purchase-requests/{id}", proc.GetPR)
+			api.Post("/purchase-requests", proc.CreatePR)
+			api.Post("/purchase-requests/{id}/submit", proc.SubmitPR)
+			api.Post("/purchase-requests/{id}/cancel", proc.CancelPR)
+
+			// Officers
+			api.Group(func(of chi.Router) {
+				of.Use(common.RequireAnyRole(procurement.Officers...))
+				of.Get("/vendors", proc.ListVendors)
+				of.Get("/vendors/{id}", proc.GetVendor)
+				of.Post("/vendors", proc.CreateVendor)
+				of.Post("/vendors/check-duplicate", proc.CheckDuplicate)
+				of.Post("/vendors/{id}/bank-accounts", proc.AddBankAccount)
+				of.Get("/vendors/{id}/evaluations", proc.ListEvaluations)
+				of.Post("/vendors/{id}/evaluations", proc.CreateEvaluation)
+
+				of.Get("/purchase-orders", proc.ListPOs)
+				of.Get("/purchase-orders/{id}", proc.GetPO)
+				of.Get("/purchase-orders/{id}/pdf", proc.GetPOReportPDF)
+				of.Post("/purchase-orders", proc.CreatePO)
+				of.Post("/purchase-orders/{id}/submit", proc.SubmitPO)
+				of.Post("/purchase-orders/{id}/mark-sent", proc.MarkPOSent)
+				of.Post("/purchase-orders/{id}/close", proc.ClosePO)
+				of.Post("/purchase-orders/{id}/cancel", proc.CancelPO)
+
+				of.Get("/receipts", proc.ListReceipts)
+				of.Post("/receipts", proc.CreateReceipt)
+				of.Post("/returns", proc.CreateReturn)
+			})
+		})
+	}
 
 	return r
 }
