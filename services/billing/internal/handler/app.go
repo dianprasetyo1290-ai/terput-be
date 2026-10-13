@@ -65,6 +65,9 @@ type App struct {
 
 	// P3A: accounting journal sender override (tests); nil = Accounting.
 	JournalPoster JournalPoster
+
+	// T26: synchronous bill notification dispatch for tests; nil/false = async goroutine
+	NotifySync bool
 }
 
 // New wires the application graph.

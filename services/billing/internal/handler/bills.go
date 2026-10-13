@@ -3,9 +3,14 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
+	"skci/billing/internal/client"
+	"skci/billing/internal/common"
 	"skci/billing/internal/model"
 )
 
@@ -270,6 +275,8 @@ func (a *App) generateBills(ctx context.Context, schoolID string, in generateReq
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	var newBills []newBillNotificationInfo
+
 	for _, c := range plan {
 		studentID := c.Key.StudentUserID
 		net, steps, err := model.ApplyDiscounts(base, rulesForStudent(rules, in.SchemeID, gradeLevel, studentID))
@@ -311,6 +318,13 @@ func (a *App) generateBills(ctx context.Context, schoolID string, in generateReq
 		}
 		result.Generated++
 		result.BillIDs = append(result.BillIDs, billID)
+		newBills = append(newBills, newBillNotificationInfo{
+			BillID:      billID,
+			StudentID:   studentID,
+			NetIDR:      net,
+			PeriodYear:  in.PeriodYear,
+			PeriodMonth: in.PeriodMonth,
+		})
 	}
 	if err = tx.Commit(); err != nil {
 		return result, err
@@ -321,7 +335,110 @@ func (a *App) generateBills(ctx context.Context, schoolID string, in generateReq
 			"period_year": in.PeriodYear, "period_month": in.PeriodMonth,
 			"generated": result.Generated, "skipped": result.Skipped,
 		})
+
+	if len(newBills) > 0 {
+		a.notifyGuardiansForNewBills(schoolID, newBills)
+	}
+
 	return result, nil
+}
+
+type newBillNotificationInfo struct {
+	BillID      string
+	StudentID   string
+	NetIDR      int64
+	PeriodYear  int
+	PeriodMonth int
+}
+
+func (a *App) notifyGuardiansForNewBills(schoolID string, bills []newBillNotificationInfo) {
+	if a.NotifySync {
+		a.sendBillNotifications(context.Background(), schoolID, bills)
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		a.sendBillNotifications(ctx, schoolID, bills)
+	}()
+}
+
+func (a *App) sendBillNotifications(ctx context.Context, schoolID string, bills []newBillNotificationInfo) {
+	if a.Notification == nil || !a.Notification.Configured() {
+		return
+	}
+	if a.IdentitySvc == nil || !a.IdentitySvc.Configured() {
+		return
+	}
+
+	months := []string{"", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"}
+
+	for _, b := range bills {
+		guardians, err := a.IdentitySvc.StudentGuardianIDs(ctx, schoolID, b.StudentID)
+		if err != nil {
+			common.CaptureError(err)
+			continue
+		}
+
+		monthName := ""
+		if b.PeriodMonth >= 1 && b.PeriodMonth <= 12 {
+			monthName = months[b.PeriodMonth]
+		}
+		periodStr := fmt.Sprintf("%s %d", monthName, b.PeriodYear)
+		if monthName == "" {
+			periodStr = fmt.Sprintf("%d/%d", b.PeriodMonth, b.PeriodYear)
+		}
+		body := fmt.Sprintf("Tagihan %s sebesar %s", periodStr, formatRupiah(b.NetIDR))
+
+		for _, g := range guardians {
+			idemKey := fmt.Sprintf("bill-issued:%s:%s", b.BillID, g)
+			err := a.Notification.Notify(ctx, idemKey, client.Notification{
+				SchoolID: schoolID,
+				UserID:   g,
+				Type:     "bill_issued",
+				Title:    "Tagihan baru terbit",
+				Body:     body,
+				Data: map[string]any{
+					"bill_id": b.BillID,
+					"url":     fmt.Sprintf("/orang-tua/tagihan/%s", b.BillID),
+				},
+				Channels: []string{"in_app"},
+			})
+			if err != nil {
+				common.CaptureError(err)
+			}
+		}
+	}
+}
+
+func formatRupiah(amount int64) string {
+	sign := ""
+	if amount < 0 {
+		sign = "-"
+		amount = -amount
+	}
+	s := strconv.FormatInt(amount, 10)
+	n := len(s)
+	if n <= 3 {
+		return fmt.Sprintf("Rp %s%s", sign, s)
+	}
+	var sb strings.Builder
+	sb.WriteString("Rp ")
+	sb.WriteString(sign)
+	rem := n % 3
+	if rem > 0 {
+		sb.WriteString(s[:rem])
+		if rem < n {
+			sb.WriteString(".")
+		}
+	}
+	for i := rem; i < n; i += 3 {
+		sb.WriteString(s[i : i+3])
+		if i+3 < n {
+			sb.WriteString(".")
+		}
+	}
+	return sb.String()
 }
 
 func (a *App) existingBillKeys(ctx context.Context, schoolID, schemeID string, year, month int, students []string) ([]model.BillKey, error) {

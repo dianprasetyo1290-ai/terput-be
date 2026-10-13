@@ -10,11 +10,12 @@ import (
 
 // Delivery channels. in_app is the portal inbox; email and whatsapp are
 // delivered through the provider adapter and are opt-in via
-// notification_preferences.
+// notification_preferences. push delivers via WebPush RFC 8291.
 const (
 	ChannelInApp    = "in_app"
 	ChannelEmail    = "email"
 	ChannelWhatsApp = "whatsapp"
+	ChannelPush     = "push"
 )
 
 // ValidChannels is the closed set stored in every channel column.
@@ -22,6 +23,37 @@ var ValidChannels = map[string]bool{
 	ChannelInApp:    true,
 	ChannelEmail:    true,
 	ChannelWhatsApp: true,
+	ChannelPush:     true,
+}
+
+// PushSubscription records one WebPush endpoint and crypto keys for a user.
+type PushSubscription struct {
+	ID            string     `json:"id"`
+	SchoolID      string     `json:"school_id"`
+	UserID        string     `json:"user_id"`
+	Endpoint      string     `json:"endpoint"`
+	P256dh        string     `json:"p256dh"`
+	Auth          string     `json:"auth"`
+	UserAgent     *string    `json:"user_agent,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	LastSuccessAt *time.Time `json:"last_success_at,omitempty"`
+	RevokedAt     *time.Time `json:"revoked_at,omitempty"`
+}
+
+// ShouldPush reports whether a push notification should be dispatched (T26, CC-08).
+func ShouldPush(prefRow *NotificationPreference, hasActiveSubscription bool) bool {
+	if !hasActiveSubscription {
+		return false
+	}
+	if prefRow == nil {
+		return true // Default on when active subscription exists
+	}
+	return prefRow.Enabled
+}
+
+// IsGoneStatus reports whether an HTTP status code indicates a dead push endpoint.
+func IsGoneStatus(code int) bool {
+	return code == 404 || code == 410
 }
 
 // Notification is one message addressed to a single recipient.

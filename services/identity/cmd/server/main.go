@@ -16,6 +16,7 @@ import (
 	"skci/identity/internal/common"
 	"skci/identity/internal/handler"
 	"skci/identity/internal/store"
+	"skci/identity/internal/whitelabel"
 )
 
 func getenv(key, fallback string) string {
@@ -67,6 +68,8 @@ func main() {
 
 	app := handler.NewApp(db, jwtSecret, internalKey)
 	app.CoreURL = getenv("CORE_URL", "http://localhost:8091")
+	wlStore := whitelabel.NewStore(db)
+	wlHandler := whitelabel.NewHandler(wlStore, app.CoreURL, app.InternalKey)
 
 	// Redis response cache (client request 2026-08-29): fails open if
 	// REDIS_URL is unset/unreachable, see internal/cache's doc comment.
@@ -102,6 +105,12 @@ func main() {
 	// Public routes (no auth).
 	r.Get("/healthz", handler.Healthz)
 	r.Post("/auth/login", app.Login)
+
+	// White-label public branding & manifest (T26, menu 159)
+	r.Get("/public/branding", wlHandler.PublicBranding)
+	r.Get("/public/manifest.webmanifest", wlHandler.PublicManifest)
+	r.Get("/public/branding/{schoolId}/{kind}.png", wlHandler.PublicIcon)
+	r.Get("/public/assetlinks.json", wlHandler.PublicAssetLinks)
 
 	// Everything else requires a valid JWT.
 	r.Group(func(pr chi.Router) {
@@ -232,6 +241,15 @@ func main() {
 			an.Delete("/{id}", app.DeleteAnnouncement)
 			an.Delete("/all", app.DeleteAllAnnouncements)
 		})
+
+		// White-label management (T26, menu 159)
+		pr.Get("/white-label/brandings", wlHandler.GetDraft)
+		pr.Put("/white-label/brandings/{schoolId}", wlHandler.SaveDraft)
+		pr.Post("/white-label/brandings/{schoolId}/publish", wlHandler.PublishVersion)
+		pr.Get("/white-label/brandings/{schoolId}/versions", wlHandler.ListVersions)
+		pr.Put("/white-label/brandings/{schoolId}/domain", wlHandler.UpdateDomain)
+		pr.Get("/white-label/store-listings/{schoolId}/{store}", wlHandler.GetStoreListing)
+		pr.Put("/white-label/store-listings/{schoolId}/{store}", wlHandler.SaveStoreListing)
 	})
 
 	// Read-only endpoints other services (report, academic, evaluation,

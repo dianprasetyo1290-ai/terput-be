@@ -54,6 +54,12 @@ type Config struct {
 	// Timezone is the zone service hours are evaluated in.
 	Timezone string
 
+	// T26: WebPush configuration
+	WebPushVAPIDPublicKey  string
+	WebPushVAPIDPrivateKey string
+	WebPushSubject         string
+	WebPushTTLSeconds      int
+
 	SentryDSN         string
 	SentryEnvironment string
 }
@@ -80,6 +86,10 @@ func Load() (Config, error) {
 		CampaignJobInterval:   time.Duration(positiveInt("CAMPAIGN_JOB_INTERVAL_SECONDS", 60)) * time.Second,
 		StorageRoot:           env("STORAGE_ROOT", "./data/private"),
 		Timezone:              env("SCHOOL_TIMEZONE", "Asia/Jakarta"),
+		WebPushVAPIDPublicKey:  os.Getenv("WEBPUSH_VAPID_PUBLIC_KEY"),
+		WebPushVAPIDPrivateKey: os.Getenv("WEBPUSH_VAPID_PRIVATE_KEY"),
+		WebPushSubject:         env("WEBPUSH_SUBJECT", "mailto:admin@sekoci.id"),
+		WebPushTTLSeconds:      positiveInt("WEBPUSH_TTL_SECONDS", 86400),
 		SentryDSN:             os.Getenv("SENTRY_DSN"),
 		SentryEnvironment:     env("SENTRY_ENVIRONMENT", "development"),
 	}

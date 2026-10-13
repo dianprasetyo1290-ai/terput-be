@@ -79,6 +79,12 @@ func main() {
 	h.Attachments = storage.NewLocal(cfg.StorageRoot, maxAttachmentCeiling)
 	h.Audit = audit
 	h.Location = loc
+	h.PushProvider = provider.NewWebPushProvider(provider.WebPushConfig{
+		VAPIDPublicKey:  cfg.WebPushVAPIDPublicKey,
+		VAPIDPrivateKey: cfg.WebPushVAPIDPrivateKey,
+		Subject:         cfg.WebPushSubject,
+		TTLSeconds:      cfg.WebPushTTLSeconds,
+	})
 
 	campaignSvc := &campaign.Service{
 		Store:  campaign.NewStore(db),

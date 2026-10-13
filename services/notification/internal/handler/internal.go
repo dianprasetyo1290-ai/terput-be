@@ -102,8 +102,16 @@ func (h *Handler) InternalSendNotification(w http.ResponseWriter, r *http.Reques
 	}
 
 	if created {
+		hasPushInChannels := false
 		for _, channel := range channels {
+			if channel == model.ChannelPush {
+				hasPushInChannels = true
+			}
 			h.dispatchChannel(r.Context(), n, channel)
+		}
+
+		if !hasPushInChannels && n.Type != "campaign" {
+			h.maybeAutoDispatchPush(r.Context(), n)
 		}
 	}
 
@@ -197,6 +205,11 @@ func (h *Handler) dispatchChannel(ctx context.Context, n *model.Notification, ch
 		return
 	}
 
+	if channel == model.ChannelPush {
+		h.dispatchPushWithDelivery(ctx, n, d)
+		return
+	}
+
 	recipient := h.recipientFor(ctx, n.UserID, channel)
 	if recipient == "" {
 		_, _ = h.Store.UpdateDelivery(ctx, d.ID, store.UpdateDeliveryInput{
@@ -267,7 +280,7 @@ func normalizeChannels(in []string) ([]string, error) {
 			continue
 		}
 		if !model.ValidChannels[c] {
-			return nil, errors.New("unknown channel " + c + " (want in_app|email|whatsapp)")
+			return nil, errors.New("unknown channel " + c + " (want in_app|email|whatsapp|push)")
 		}
 		if seen[c] {
 			continue
@@ -279,4 +292,117 @@ func normalizeChannels(in []string) ([]string, error) {
 		return []string{model.ChannelInApp}, nil
 	}
 	return out, nil
+}
+
+func (h *Handler) maybeAutoDispatchPush(ctx context.Context, n *model.Notification) {
+	subs, err := h.Store.ListActivePushSubscriptions(ctx, n.SchoolID, n.UserID)
+	if err != nil {
+		common.CaptureError(err)
+		return
+	}
+	pref, err := h.Store.GetUserPushPreference(ctx, n.SchoolID, n.UserID)
+	if err != nil {
+		common.CaptureError(err)
+		return
+	}
+	if !model.ShouldPush(pref, len(subs) > 0) {
+		return
+	}
+
+	d, err := h.Store.CreateDelivery(ctx, n.ID, model.ChannelPush)
+	if err != nil {
+		common.CaptureError(err)
+		return
+	}
+
+	h.executePushDelivery(ctx, n, d, subs)
+}
+
+func (h *Handler) dispatchPushWithDelivery(ctx context.Context, n *model.Notification, d *model.NotificationDelivery) {
+	subs, err := h.Store.ListActivePushSubscriptions(ctx, n.SchoolID, n.UserID)
+	if err != nil {
+		common.CaptureError(err)
+		_, _ = h.Store.UpdateDelivery(ctx, d.ID, store.UpdateDeliveryInput{
+			Status:            model.DeliveryFailed,
+			LastError:         "failed to list push subscriptions: " + err.Error(),
+			IncrementAttempts: true,
+		})
+		return
+	}
+	h.executePushDelivery(ctx, n, d, subs)
+}
+
+func (h *Handler) executePushDelivery(ctx context.Context, n *model.Notification, d *model.NotificationDelivery, subs []model.PushSubscription) {
+	if h.PushProvider == nil || !h.PushProvider.IsConfigured() {
+		_, _ = h.Store.UpdateDelivery(ctx, d.ID, store.UpdateDeliveryInput{
+			Status:            model.DeliveryFailed,
+			LastError:         "push belum dikonfigurasi: VAPID keys belum diatur",
+			IncrementAttempts: true,
+		})
+		return
+	}
+
+	if len(subs) == 0 {
+		_, _ = h.Store.UpdateDelivery(ctx, d.ID, store.UpdateDeliveryInput{
+			Status:            model.DeliveryFailed,
+			LastError:         "no active push subscriptions",
+			IncrementAttempts: true,
+		})
+		return
+	}
+
+	var dataMap map[string]any
+	if len(n.Data) > 0 {
+		_ = json.Unmarshal(n.Data, &dataMap)
+	}
+	urlStr := ""
+	if u, ok := dataMap["url"].(string); ok {
+		urlStr = u
+	}
+
+	payload := provider.PushPayload{
+		Title:          n.Title,
+		Body:           n.Body,
+		URL:            urlStr,
+		NotificationID: n.ID,
+	}
+
+	var errMsgs []string
+	var firstReceipt string
+	successCount := 0
+
+	for _, sub := range subs {
+		receiptID, isGone, err := h.PushProvider.SendPush(ctx, sub, payload)
+		if isGone {
+			_ = h.Store.RevokePushSubscription(ctx, sub.Endpoint)
+		}
+		if err != nil {
+			errMsgs = append(errMsgs, err.Error())
+		} else {
+			_ = h.Store.TouchPushSubscription(ctx, sub.Endpoint)
+			if firstReceipt == "" {
+				firstReceipt = receiptID
+			}
+			successCount++
+		}
+	}
+
+	if successCount > 0 {
+		lastErr := ""
+		if len(errMsgs) > 0 {
+			lastErr = strings.Join(errMsgs, "; ")
+		}
+		_, _ = h.Store.UpdateDelivery(ctx, d.ID, store.UpdateDeliveryInput{
+			Status:            model.DeliverySent,
+			ProviderMessageID: firstReceipt,
+			LastError:         lastErr,
+			IncrementAttempts: true,
+		})
+	} else {
+		_, _ = h.Store.UpdateDelivery(ctx, d.ID, store.UpdateDeliveryInput{
+			Status:            model.DeliveryFailed,
+			LastError:         strings.Join(errMsgs, "; "),
+			IncrementAttempts: true,
+		})
+	}
 }

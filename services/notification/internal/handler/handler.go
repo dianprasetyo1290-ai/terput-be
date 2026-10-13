@@ -70,6 +70,14 @@ type DataStore interface {
 	GetChatReport(ctx context.Context, id, schoolID string) (*model.ChatMessageReport, error)
 	ListChatReports(ctx context.Context, schoolID, status string, page, perPage int) ([]model.ChatMessageReport, int, error)
 	ReviewChatReport(ctx context.Context, id, schoolID, status, note, reviewerID string) (*model.ChatMessageReport, error)
+
+	// push subscriptions (T26)
+	UpsertPushSubscription(ctx context.Context, sub model.PushSubscription) (*model.PushSubscription, error)
+	DeletePushSubscription(ctx context.Context, schoolID, userID, endpoint string) error
+	ListActivePushSubscriptions(ctx context.Context, schoolID, userID string) ([]model.PushSubscription, error)
+	RevokePushSubscription(ctx context.Context, endpoint string) error
+	TouchPushSubscription(ctx context.Context, endpoint string) error
+	GetUserPushPreference(ctx context.Context, schoolID, userID string) (*model.NotificationPreference, error)
 }
 
 // Relations answers BR-COM-02 relation questions (identity + academic).
@@ -88,10 +96,11 @@ type Relations interface {
 
 // Handler carries every dependency the HTTP handlers need.
 type Handler struct {
-	Store      DataStore
-	Client     *client.Client
-	Provider   provider.Provider
-	Production bool
+	Store        DataStore
+	Client       *client.Client
+	Provider     provider.Provider
+	PushProvider provider.PushSender
+	Production   bool
 
 	// T13 chat dependencies, set by main (and tests) after New.
 	Relations   Relations

@@ -55,6 +55,11 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 		pr.Get("/notification-preferences", h.GetPreferences)
 		pr.Put("/notification-preferences", h.PutPreferences)
 
+		// T26 push notifications (FR-159-004)
+		pr.Get("/push/config", h.GetPushConfig)
+		pr.Post("/push/subscriptions", h.SubscribePush)
+		pr.Delete("/push/subscriptions", h.UnsubscribePush)
+
 		pr.Get("/chat/threads", h.ListThreads)
 		pr.Post("/chat/threads", h.CreateThread)
 		pr.Get("/chat/threads/{id}/messages", h.ListMessages)

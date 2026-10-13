@@ -36,6 +36,9 @@ type fakeStore struct {
 	// T13 (lazily initialised in fakechat_test.go)
 	chatSettings map[string]*model.ChatSettings
 	reports      map[string]*model.ChatMessageReport
+
+	// T26
+	pushSubs map[string]*model.PushSubscription
 }
 
 func newFakeStore() *fakeStore {
@@ -49,6 +52,7 @@ func newFakeStore() *fakeStore {
 		participants:  map[string]map[string]string{},
 		messages:      map[string][]*model.ChatMessage{},
 		reads:         map[string]map[string]bool{},
+		pushSubs:      map[string]*model.PushSubscription{},
 	}
 }
 
@@ -225,7 +229,11 @@ func (f *fakeStore) UpsertNotificationPreferences(_ context.Context, schoolID, u
 	for _, p := range prefs {
 		f.prefs[key][p.Channel] = p.Enabled
 	}
-	return f.ListNotificationPreferences(context.Background(), schoolID, userID)
+	out := []model.NotificationPreference{}
+	for channel, enabled := range f.prefs[key] {
+		out = append(out, model.NotificationPreference{SchoolID: schoolID, UserID: userID, Channel: channel, Enabled: enabled})
+	}
+	return out, nil
 }
 
 func (f *fakeStore) IsChannelEnabled(_ context.Context, schoolID, userID, channel string) (bool, error) {
@@ -542,3 +550,115 @@ func (f *fakeStore) MarkChatThreadRead(_ context.Context, threadID, userID strin
 	}
 	return marked, nil
 }
+
+// ---- push subscriptions (T26) ---------------------------------------------
+
+func (f *fakeStore) UpsertPushSubscription(_ context.Context, sub model.PushSubscription) (*model.PushSubscription, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.pushSubs == nil {
+		f.pushSubs = map[string]*model.PushSubscription{}
+	}
+	existing, ok := f.pushSubs[sub.Endpoint]
+	now := time.Now()
+	if ok {
+		existing.SchoolID = sub.SchoolID
+		existing.UserID = sub.UserID
+		existing.P256dh = sub.P256dh
+		existing.Auth = sub.Auth
+		if sub.UserAgent != nil {
+			existing.UserAgent = sub.UserAgent
+		}
+		existing.RevokedAt = nil
+		c := *existing
+		key := userKey(sub.SchoolID, sub.UserID)
+		if f.prefs[key] == nil {
+			f.prefs[key] = map[string]bool{}
+		}
+		f.prefs[key][model.ChannelPush] = true
+		return &c, nil
+	}
+
+	id := sub.ID
+	if id == "" {
+		id = newID()
+	}
+	newSub := &model.PushSubscription{
+		ID:        id,
+		SchoolID:  sub.SchoolID,
+		UserID:    sub.UserID,
+		Endpoint:  sub.Endpoint,
+		P256dh:    sub.P256dh,
+		Auth:      sub.Auth,
+		UserAgent: sub.UserAgent,
+		CreatedAt: now,
+	}
+	f.pushSubs[sub.Endpoint] = newSub
+	key := userKey(sub.SchoolID, sub.UserID)
+	if f.prefs[key] == nil {
+		f.prefs[key] = map[string]bool{}
+	}
+	f.prefs[key][model.ChannelPush] = true
+	c := *newSub
+	return &c, nil
+}
+
+func (f *fakeStore) DeletePushSubscription(_ context.Context, schoolID, userID, endpoint string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if sub, ok := f.pushSubs[endpoint]; ok && sub.SchoolID == schoolID && sub.UserID == userID {
+		delete(f.pushSubs, endpoint)
+	}
+	return nil
+}
+
+func (f *fakeStore) ListActivePushSubscriptions(_ context.Context, schoolID, userID string) ([]model.PushSubscription, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []model.PushSubscription
+	for _, sub := range f.pushSubs {
+		if sub.SchoolID == schoolID && sub.UserID == userID && sub.RevokedAt == nil {
+			out = append(out, *sub)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) RevokePushSubscription(_ context.Context, endpoint string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if sub, ok := f.pushSubs[endpoint]; ok && sub.RevokedAt == nil {
+		now := time.Now()
+		sub.RevokedAt = &now
+	}
+	return nil
+}
+
+func (f *fakeStore) TouchPushSubscription(_ context.Context, endpoint string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if sub, ok := f.pushSubs[endpoint]; ok {
+		now := time.Now()
+		sub.LastSuccessAt = &now
+	}
+	return nil
+}
+
+func (f *fakeStore) GetUserPushPreference(_ context.Context, schoolID, userID string) (*model.NotificationPreference, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := userKey(schoolID, userID)
+	if p, ok := f.prefs[key]; ok {
+		if enabled, has := p[model.ChannelPush]; has {
+			return &model.NotificationPreference{
+				SchoolID:  schoolID,
+				UserID:    userID,
+				Channel:   model.ChannelPush,
+				Enabled:   enabled,
+				UpdatedAt: time.Now(),
+			}, nil
+		}
+	}
+	return nil, nil
+}
+
