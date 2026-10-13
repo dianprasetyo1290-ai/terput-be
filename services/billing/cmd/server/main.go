@@ -81,6 +81,9 @@ func main() {
 	gwRunner.Register("retail_expiry", app.JobRetailExpiry)
 	gwRunner.Register("provider_health", app.JobProviderHealth)
 	gwRunner.Register("gateway_journal", app.JobGatewayJournal)
+	// P3A: billing/wallet/canteen auto-journals, then the accounting sender.
+	gwRunner.Register("billing_journals", app.JobBillingJournals)
+	gwRunner.Register("journal_outbox", app.JobJournalOutbox)
 	gwRunner.Start()
 	defer gwRunner.Stop()
 
@@ -216,6 +219,16 @@ func main() {
 		ad.Get("/admin/autodebit/settings", app.AdminGetAutodebitSettings)
 		ad.Put("/admin/autodebit/settings", app.AdminPutAutodebitSettings)
 
+		// P3A: account mapping (BR-ACC-05) and journal posting monitor (IF-ACC-02).
+		ad.Get("/admin/journal-accounts", app.GetJournalAccounts)
+		ad.Put("/admin/journal-accounts/settings", app.PutJournalSettings)
+		ad.Put("/admin/journal-accounts/gateway", app.PutGatewayAccounts)
+		ad.Put("/admin/journal-accounts/components/{code}", app.PutComponentAccount)
+		ad.Delete("/admin/journal-accounts/components/{code}", app.DeleteComponentAccount)
+		ad.Get("/admin/journal-postings", app.ListJournalPostings)
+		ad.Get("/admin/journal-postings/{id}", app.GetJournalPosting)
+		ad.Post("/admin/journal-postings/{id}/retry", app.AdminRetryJournalPosting)
+
 		ad.Get("/admin/student-bill-visibility", app.GetStudentBillVisibility)
 		ad.Put("/admin/student-bill-visibility", app.UpdateStudentBillVisibility)
 	})
@@ -232,6 +245,9 @@ func main() {
 		in.Get("/internal/students/{studentUserId}/financial-summary", app.InternalStudentFinancialSummary)
 		in.Post("/internal/students/{studentUserId}/exit", app.InternalStudentExit)
 		in.Post("/internal/students/{studentUserId}/refund", app.InternalStudentRefund)
+		// P3A: exception-queue retry_url targets (IF-ACC-03).
+		in.Post("/internal/journal-postings/{id}/retry", app.InternalRetryJournalPosting)
+		in.Post("/internal/journal-queue/retry", app.InternalRetryJournalQueue)
 	})
 
 	log.Printf("billing-service listening on :%s (%s)", cfg.Port, cfg.AppEnv)

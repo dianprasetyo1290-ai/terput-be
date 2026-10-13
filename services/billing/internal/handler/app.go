@@ -62,6 +62,9 @@ type App struct {
 	PurposeHandlers map[string]PurposeHandler
 	PaymentFeatures FeatureChecker
 	providerCache   sync.Map
+
+	// P3A: accounting journal sender override (tests); nil = Accounting.
+	JournalPoster JournalPoster
 }
 
 // New wires the application graph.
