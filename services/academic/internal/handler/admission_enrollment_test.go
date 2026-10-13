@@ -41,7 +41,7 @@ const (
 
 var classroomCols = []string{
 	"id", "school_id", "academic_year_id", "name", "grade_level",
-	"homeroom_teacher_user_id", "created_at", "updated_at",
+	"homeroom_teacher_user_id", "capacity", "student_count", "created_at", "updated_at",
 }
 
 var enrollmentCols = []string{
@@ -138,7 +138,7 @@ func (db *fakeAcademicDB) query(query string, args []driver.NamedValue) (driver.
 				return &fakeRows{
 					cols: classroomCols,
 					rows: [][]driver.Value{{
-						c.id, c.schoolID, c.academicYearID, "Kelas " + c.id, nil, nil, now, now,
+						c.id, c.schoolID, c.academicYearID, "Kelas " + c.id, nil, nil, nil, int64(0), now, now,
 					}},
 				}, nil
 			}

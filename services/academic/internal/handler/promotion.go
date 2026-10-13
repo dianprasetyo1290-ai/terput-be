@@ -49,7 +49,10 @@ func (h *Handler) GradePromotion(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	results, err := h.Store.PromoteStudents(r.Context(), schoolID, req.SourceAcademicYearID, req.TargetAcademicYearID, req.Promotions)
+	results, err := h.Store.PromoteStudents(r.Context(), schoolID, req.SourceAcademicYearID, req.TargetAcademicYearID, req.Promotions, actorUserID(r))
+	if writeCapacityError(w, err) {
+		return
+	}
 	if err != nil {
 		common.WriteError(w, http.StatusBadRequest, err.Error())
 		return

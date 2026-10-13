@@ -21,6 +21,8 @@ type Classroom struct {
 	Name                  string    `json:"name"`
 	GradeLevel            *string   `json:"grade_level"`
 	HomeroomTeacherUserID *string   `json:"homeroom_teacher_user_id"`
+	Capacity              *int      `json:"capacity"`      // NULL = tanpa batas (FR-39-001)
+	StudentCount          int       `json:"student_count"` // derived: active class_enrollments
 	CreatedAt             time.Time `json:"created_at"`
 	UpdatedAt             time.Time `json:"updated_at"`
 }
@@ -56,6 +58,7 @@ type ClassroomSubject struct {
 	SubjectID      string    `json:"subject_id"`
 	TeacherUserID  *string   `json:"teacher_user_id"`
 	IsActive       bool      `json:"is_active"`
+	HoursPerWeek   int       `json:"hours_per_week"` // jam pelajaran per minggu (FR-40-002)
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 

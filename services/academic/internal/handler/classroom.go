@@ -2,18 +2,43 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
 	"skci/academic/internal/common"
 	"skci/academic/internal/model"
+	"skci/academic/internal/store"
 )
+
+// actorUserID returns the JWT subject, or "" for internal (X-Internal-Key)
+// callers — recorded as actor_user_id on class_enrollment_history.
+func actorUserID(r *http.Request) string {
+	if c := common.FromCtx(r); c != nil {
+		return c.UserID
+	}
+	return ""
+}
+
+// writeCapacityError maps *store.CapacityError to 422 with its Indonesian
+// message; returns false if err is not a capacity error.
+func writeCapacityError(w http.ResponseWriter, err error) bool {
+	var ce *store.CapacityError
+	if errors.As(err, &ce) {
+		common.WriteError(w, http.StatusUnprocessableEntity, ce.Error())
+		return true
+	}
+	return false
+}
+
+func validCapacity(c *int) bool { return c == nil || *c >= 0 }
 
 type createClassroomRequest struct {
 	Name                  string  `json:"name"`
 	GradeLevel            *string `json:"grade_level"`
 	HomeroomTeacherUserID *string `json:"homeroom_teacher_user_id"`
+	Capacity              *int    `json:"capacity"` // optional; null/0 = tanpa batas
 }
 
 // CreateClassroom: POST /classrooms?academic_year_id=
@@ -31,12 +56,20 @@ func (h *Handler) CreateClassroom(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
+	if !validCapacity(req.Capacity) {
+		common.WriteError(w, http.StatusBadRequest, "kapasitas kelas tidak boleh negatif")
+		return
+	}
+	if req.Capacity != nil && *req.Capacity == 0 {
+		req.Capacity = nil
+	}
 	c, err := h.Store.CreateClassroom(r.Context(), model.Classroom{
 		SchoolID:              schoolID,
 		AcademicYearID:        academicYearID,
 		Name:                  req.Name,
 		GradeLevel:            req.GradeLevel,
 		HomeroomTeacherUserID: req.HomeroomTeacherUserID,
+		Capacity:              req.Capacity,
 	})
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -86,6 +119,7 @@ type updateClassroomRequest struct {
 	Name                  *string `json:"name"`
 	GradeLevel            *string `json:"grade_level"`
 	HomeroomTeacherUserID *string `json:"homeroom_teacher_user_id"`
+	Capacity              *int    `json:"capacity"` // omitted = unchanged, 0 = tanpa batas
 }
 
 // UpdateClassroom: PUT /classrooms/{id} — rename, change wali kelas, etc.
@@ -99,7 +133,19 @@ func (h *Handler) UpdateClassroom(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	c, err := h.Store.UpdateClassroom(r.Context(), schoolID, chi.URLParam(r, "id"), req.Name, req.GradeLevel, req.HomeroomTeacherUserID)
+	if !validCapacity(req.Capacity) {
+		common.WriteError(w, http.StatusBadRequest, "kapasitas kelas tidak boleh negatif")
+		return
+	}
+	c, err := h.Store.UpdateClassroom(r.Context(), schoolID, chi.URLParam(r, "id"), store.ClassroomPatch{
+		Name:                  req.Name,
+		GradeLevel:            req.GradeLevel,
+		HomeroomTeacherUserID: req.HomeroomTeacherUserID,
+		Capacity:              req.Capacity,
+	})
+	if writeCapacityError(w, err) {
+		return
+	}
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -199,7 +245,10 @@ func (h *Handler) AddStudentToClassroom(w http.ResponseWriter, r *http.Request) 
 		ClassroomID:    classroomID,
 		StudentUserID:  req.StudentUserID,
 		Status:         "active",
-	})
+	}, store.EnrollmentChange{ActorUserID: actorUserID(r)})
+	if writeCapacityError(w, err) {
+		return
+	}
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -249,9 +298,39 @@ func (h *Handler) RemoveStudentFromClassroom(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	if err := h.Store.RemoveClassEnrollment(r.Context(), schoolID, chi.URLParam(r, "id"), chi.URLParam(r, "student_user_id")); err != nil {
+	if err := h.Store.RemoveClassEnrollment(r.Context(), schoolID, chi.URLParam(r, "id"), chi.URLParam(r, "student_user_id"), store.EnrollmentChange{ActorUserID: actorUserID(r)}); err != nil {
 		common.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"status": "removed"}, nil)
+}
+
+// ListClassroomEnrollmentHistory: GET /classrooms/{id}/enrollment-history —
+// every student who entered/left this classroom (FR-39-003), newest first.
+func (h *Handler) ListClassroomEnrollmentHistory(w http.ResponseWriter, r *http.Request) {
+	schoolID, ok := scopeSchoolID(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.Store.ListClassroomEnrollmentHistory(r.Context(), schoolID, chi.URLParam(r, "id"))
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, items, nil)
+}
+
+// ListStudentEnrollmentHistory: GET /students/{id}/enrollment-history —
+// one student's class moves across all academic years (FR-39-003).
+func (h *Handler) ListStudentEnrollmentHistory(w http.ResponseWriter, r *http.Request) {
+	schoolID, ok := scopeSchoolID(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.Store.ListStudentEnrollmentHistory(r.Context(), schoolID, chi.URLParam(r, "id"))
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, items, nil)
 }

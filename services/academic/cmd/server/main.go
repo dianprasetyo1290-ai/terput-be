@@ -131,6 +131,13 @@ func main() {
 		// Year-wide roster (all classrooms) — siswa-picker dedup + roster view
 		r.Get("/classrooms/enrollments", h.ListEnrollmentsByYear)
 
+		// Riwayat perpindahan kelas (FR-39-003)
+		r.Get("/classrooms/{id}/enrollment-history", h.ListClassroomEnrollmentHistory)
+		r.Get("/students/{id}/enrollment-history", h.ListStudentEnrollmentHistory)
+
+		// Beban mengajar guru + kelas/mapel tanpa guru (FR-40-002, AC-40-01)
+		r.Get("/teaching-workload", h.TeachingWorkload)
+
 		// Data Mata Pelajaran: subjects catalog
 		r.Post("/subjects", h.CreateSubject)
 		r.Get("/subjects", h.ListSubjects)
