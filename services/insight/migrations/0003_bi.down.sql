@@ -1,0 +1,7 @@
+DROP TABLE IF EXISTS bi_export_tokens CASCADE;
+DROP TABLE IF EXISTS analytics_scope_grants CASCADE;
+DROP TABLE IF EXISTS scheduled_report_runs CASCADE;
+DROP TABLE IF EXISTS scheduled_reports CASCADE;
+DROP TABLE IF EXISTS saved_reports CASCADE;
+DROP TABLE IF EXISTS dashboard_widgets CASCADE;
+DROP TABLE IF EXISTS dashboards CASCADE;

@@ -32,6 +32,7 @@ services:
   ops: { <<: *lim, ports: !reset [] }
   studentlife: { <<: *lim, ports: !reset [] }
   quality: { <<: *lim, ports: !reset [] }
+  insight: { <<: *lim, ports: !reset [] }
   accounting:
     ports: !reset []
     deploy: { resources: { limits: { memory: 384m, cpus: "0.5" } } }

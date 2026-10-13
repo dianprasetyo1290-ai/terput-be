@@ -171,6 +171,12 @@ func main() {
 		ad.Get("/admin/audit-events", app.ListAuditEvents)
 	})
 
+	// Internal service-to-service
+	r.Group(func(in chi.Router) {
+		in.Use(common.InternalAuth(cfg.InternalKey))
+		in.Get("/internal/metric-facts", app.InternalMetricFacts)
+	})
+
 	log.Printf("admission-service listening on :%s (%s)", cfg.Port, cfg.AppEnv)
 	if err := http.ListenAndServe(":"+cfg.Port, r); err != nil {
 		log.Fatal(err)

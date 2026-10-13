@@ -137,6 +137,10 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 		in.Use(common.InternalOnlyMiddleware(cfg.InternalKey))
 		in.Post("/internal/student-absences/health", h.InternalHealthAbsence)
 		in.Post("/internal/approval-callbacks", h.InternalApprovalCallback) // core Approval Center (P4A)
+
+		// T24: Insight Read Model & Metric Facts
+		in.Get("/internal/metric-facts", h.InternalMetricFacts)
+		in.Get("/internal/risk-facts/absence", h.InternalRiskFactsAbsence)
 	})
 
 	return r

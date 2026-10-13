@@ -257,6 +257,10 @@ func main() {
 		in.Post("/internal/role-accounts/create-or-link", app.InternalCreateOrLinkRoleAccount)
 		in.Post("/internal/users/{id}/deactivate", app.InternalDeactivateUser)
 		in.Get("/internal/dapodik/students", app.InternalDapodikStudents)
+
+		// T24: Insight Read Model & Metric Facts
+		in.Get("/internal/metric-facts", app.InternalMetricFacts)
+		in.Get("/internal/schools/{id}/foundation-schools", app.InternalFoundationSchools)
 	})
 
 	r.Group(func(ir chi.Router) {

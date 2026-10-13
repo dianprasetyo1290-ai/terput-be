@@ -42,6 +42,9 @@ func (a *App) Router() http.Handler {
 		internal.Get("/internal/employees/by-user/{userId}/supervisor", a.InternalGetSupervisorByUserID)
 		internal.Get("/internal/dapodik/ptk", a.InternalDapodikPTK)
 		internal.Post("/internal/dapodik/ptk/match", a.InternalDapodikPTKMatch)
+
+		// T24: Insight Read Model & Metric Facts
+		internal.Get("/internal/metric-facts", a.InternalMetricFacts)
 	})
 
 	// Protected routes (JWT Auth + HRIS Feature Toggle)

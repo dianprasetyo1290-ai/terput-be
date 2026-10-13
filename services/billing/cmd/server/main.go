@@ -158,6 +158,7 @@ func main() {
 		ad.Delete("/admin/schemes/{id}", app.ArchiveScheme)
 
 		ad.Post("/admin/bills/generate", app.GenerateBills)
+		ad.Post("/admin/bills/reminders", app.AdminBillReminders)
 		ad.Get("/admin/bills", app.ListBills)
 		ad.Get("/admin/arrears", app.ListArrears)
 
@@ -248,6 +249,10 @@ func main() {
 		// P3A: exception-queue retry_url targets (IF-ACC-03).
 		in.Post("/internal/journal-postings/{id}/retry", app.InternalRetryJournalPosting)
 		in.Post("/internal/journal-queue/retry", app.InternalRetryJournalQueue)
+
+		// T24: Insight Read Model & Metric Facts
+		in.Get("/internal/metric-facts", app.InternalMetricFacts)
+		in.Get("/internal/risk-facts/arrears", app.InternalRiskFactsArrears)
 	})
 
 	log.Printf("billing-service listening on :%s (%s)", cfg.Port, cfg.AppEnv)

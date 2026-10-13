@@ -1,0 +1,6 @@
+DROP TABLE IF EXISTS prediction_accuracy CASCADE;
+DROP TABLE IF EXISTS prediction_reviews CASCADE;
+DROP TABLE IF EXISTS predictions CASCADE;
+DROP TABLE IF EXISTS prediction_runs CASCADE;
+DROP TABLE IF EXISTS risk_rules CASCADE;
+DROP TABLE IF EXISTS insight_settings CASCADE;

@@ -549,6 +549,42 @@ services:
     volumes: ["quality_files:/data/quality"]
     ports: ["${QUALITY_PORT:-8095}:${QUALITY_PORT:-8095}"]
 
+  # ---------- insight (T24: BI, AI Assistant & Analitik Prediktif) ----------
+  insight-migrate:
+    image: migrate/migrate:v4.18.1
+    volumes: ["./services/insight/migrations:/migrations"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${INSIGHT_DB_NAME:-skci_insight}?sslmode=disable", "up"]
+    restart: "no"
+
+  insight:
+    build: ./services/insight
+    restart: unless-stopped
+    depends_on:
+      insight-migrate:
+        condition: service_completed_successfully
+      identity:
+        condition: service_started
+      billing:
+        condition: service_started
+    environment:
+      PORT: ${INSIGHT_PORT:-8096}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${INSIGHT_DB_NAME:-skci_insight}?sslmode=disable
+      APP_ENV: ${APP_ENV:-production}
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      IDENTITY_URL: http://identity:${IDENTITY_PORT:-8081}
+      BILLING_URL: http://billing:${BILLING_PORT:-8090}
+      ATTENDANCE_URL: http://attendance:${ATTENDANCE_PORT:-8083}
+      ADMISSION_URL: http://admission:${ADMISSION_PORT:-8088}
+      HR_URL: http://hr:${HR_PORT:-8092}
+      STUDENTLIFE_URL: http://studentlife:${STUDENTLIFE_PORT:-8094}
+      NOTIFICATION_URL: http://notification:${NOTIFICATION_PORT:-8089}
+      CORE_URL: http://core:${CORE_PORT:-8091}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost}
+      AI_PROVIDER: ${AI_PROVIDER:-unconfigured}
+      SENTRY_DSN: ${SENTRY_DSN}
+    ports: ["${INSIGHT_PORT:-8096}:${INSIGHT_PORT:-8096}"]
+
   # ---------- web (frontend, nginx reverse-proxying /api/<service>/) ----------
   web:
     build:
@@ -572,6 +608,7 @@ services:
       - ops
       - studentlife
       - quality
+      - insight
     networks:
       - default
       - edge
