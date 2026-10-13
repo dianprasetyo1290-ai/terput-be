@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"skci/ops/internal/asset"
 	"skci/ops/internal/client"
 	"skci/ops/internal/common"
 	"skci/ops/internal/config"
@@ -103,6 +104,15 @@ func main() {
 	trRunner := transport.NewJobRunner(db, apiClient, cfg.AccountingURL, cfg.InternalKey, loc)
 	trHandler := transport.NewHandler(trStore, apiClient, trRunner, cfg.HRURL, cfg.AccountingURL)
 
+	assetAcClient := asset.NewAccountingClient(cfg.AccountingURL, cfg.InternalKey)
+	assetStore := asset.NewStore(db, loc)
+	assetStorage := storage.NewLocal(cfg.StorageRoot, cfg.MaxUploadBytes, facility.PhotoMIMEs...)
+	assetHandler := asset.NewHandler(assetStore, apiClient, assetAcClient, assetStorage, cfg.OpsPublicInternalURL)
+	assetRunner := asset.NewJobRunner(assetStore, assetAcClient, apiClient, loc)
+
+	// T16 §4.1: Register procurement goods receipt hook
+	procurement.OnGoodsReceived = assetStore.OnGoodsReceived
+
 	fac := &facility.Handler{
 		Store:        facility.NewStore(db, loc),
 		Client:       apiClient,
@@ -120,6 +130,7 @@ func main() {
 		Procurement: procHandler,
 		Library:     libHandler,
 		Transport:   trHandler,
+		Asset:       assetHandler,
 	}
 
 	syncJob := procurement.NewSyncJob(db, apiClient, cfg.AccountingURL, cfg.InternalKey)
@@ -130,9 +141,16 @@ func main() {
 	runner.Register("library_daily", func(ctx context.Context, _ *sql.DB) error { return libRunner.RunDailyTasksForAll(ctx) })
 	runner.Register("library_sync_members", func(ctx context.Context, _ *sql.DB) error { return libRunner.RunMemberSyncForAll(ctx) })
 	runner.Register("transport_daily", func(ctx context.Context, _ *sql.DB) error { return trRunner.RunDailyTasksForAll(ctx) })
+	runner.Register("asset_outbox_dispatch", func(ctx context.Context, _ *sql.DB) error { return assetRunner.DispatchOutbox(ctx) })
+	runner.Register("asset_backfill_receipts", func(ctx context.Context, _ *sql.DB) error { return assetRunner.BackfillReceipts(ctx) })
 	runner.Register("forward_audit", app.ForwardAudit)
 	runner.Start()
 	defer runner.Stop()
+
+	// Initial startup backfill
+	go func() {
+		_ = assetRunner.BackfillReceipts(context.Background())
+	}()
 
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,

@@ -41,6 +41,8 @@ const (
 	ReqTypeVendorBankChange       = "vendor_bank_change"
 	ReqTypeDisciplineAppeal       = "discipline_appeal"
 	ReqTypeEvent                  = "event"
+	ReqTypeAssetDisposal          = "asset_disposal"
+	ReqTypeAssetTransfer          = "asset_transfer"
 )
 
 // RequestTypeLabels maps request_type to its human-readable Indonesian title.
@@ -76,6 +78,8 @@ var RequestTypeLabels = map[string]string{
 	ReqTypeVendorBankChange:       "Perubahan Rekening Vendor",
 	ReqTypeDisciplineAppeal:       "Banding Disiplin Siswa",
 	ReqTypeEvent:                  "Kegiatan/Event Sekolah",
+	ReqTypeAssetDisposal:          "Pelepasan Aset",
+	ReqTypeAssetTransfer:          "Mutasi Aset Antar-Unit",
 }
 
 // KnownRequestTypes lists all supported request types.
@@ -111,6 +115,8 @@ var KnownRequestTypes = []string{
 	ReqTypeVendorBankChange,
 	ReqTypeDisciplineAppeal,
 	ReqTypeEvent,
+	ReqTypeAssetDisposal,
+	ReqTypeAssetTransfer,
 }
 
 // Request statuses

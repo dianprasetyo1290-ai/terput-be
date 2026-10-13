@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 
+	"skci/ops/internal/asset"
 	"skci/ops/internal/client"
 	"skci/ops/internal/common"
 	"skci/ops/internal/config"
@@ -29,6 +30,7 @@ type App struct {
 	Procurement *procurement.Handler
 	Library     *library.Handler
 	Transport   *transport.Handler
+	Asset       *asset.Handler
 }
 
 func (a *App) Healthz(w http.ResponseWriter, r *http.Request) {
@@ -42,6 +44,7 @@ var featureLabels = map[string]string{
 	"procurement": "Pengadaan",
 	"library":     "Perpustakaan",
 	"transport":   "Transportasi",
+	"asset":       "Aset",
 }
 
 // featureOn reports whether key is on for the school (fails closed).
@@ -138,6 +141,18 @@ func (a *App) ApprovalCallback(w http.ResponseWriter, r *http.Request) {
 		if err := a.Procurement.ApplyApprovalDecision(r.Context(), prcDec); err != nil {
 			log.Printf("procurement approval callback %s: %v", d.SourceID, err)
 			common.WriteError(w, http.StatusInternalServerError, "Gagal memproses approval pengadaan: "+err.Error())
+			return
+		}
+		common.WriteJSON(w, http.StatusOK, map[string]string{"id": d.SourceID, "decision": d.Decision}, nil)
+
+	case "asset_disposal", "asset_transfer":
+		if a.Asset == nil {
+			common.WriteError(w, http.StatusInternalServerError, "Asset handler tidak aktif")
+			return
+		}
+		if err := a.Asset.ApplyApprovalDecision(r.Context(), d.RequestType, d.SourceID, d.Decision); err != nil {
+			log.Printf("asset approval callback %s: %v", d.SourceID, err)
+			common.WriteError(w, http.StatusInternalServerError, "Gagal memproses approval aset: "+err.Error())
 			return
 		}
 		common.WriteJSON(w, http.StatusOK, map[string]string{"id": d.SourceID, "decision": d.Decision}, nil)

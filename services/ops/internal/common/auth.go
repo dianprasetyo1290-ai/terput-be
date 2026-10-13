@@ -26,6 +26,7 @@ const (
 	RoleTrainingAdmin    = "training_admin"
 	RoleAuditor          = "auditor"
 	RoleFinanceManager   = "finance_manager"
+	RoleFinanceAdmin     = "finance_admin"
 	RolePegawai          = "pegawai"
 	RoleInventoryOfficer = "inventory_officer"
 	RoleProcurement      = "procurement_officer"

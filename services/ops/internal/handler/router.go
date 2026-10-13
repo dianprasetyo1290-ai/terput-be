@@ -6,6 +6,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"skci/ops/internal/asset"
 	"skci/ops/internal/common"
 	"skci/ops/internal/facility"
 	"skci/ops/internal/inventory"
@@ -30,6 +31,7 @@ func (a *App) Router() http.Handler {
 	proc := a.Procurement
 	lib := a.Library
 	tr := a.Transport
+	ast := a.Asset
 	facilityOn := func(r *http.Request, schoolID string) bool { return a.featureOn(r, schoolID, "facility") }
 
 	// Internal routes (X-Internal-Key), T9 §4.2.
@@ -49,6 +51,9 @@ func (a *App) Router() http.Handler {
 		}
 		if tr != nil {
 			in.Post("/internal/transport/charges/{id}/retry", tr.InternalRetryCharge)
+		}
+		if ast != nil {
+			in.Post("/internal/assets/events/{id}/retry", ast.InternalRetryEvent)
 		}
 	})
 
@@ -357,6 +362,55 @@ func (a *App) Router() http.Handler {
 				fn.Get("/billing/preview", tr.PreviewBilling)
 				fn.Post("/billing/issue", tr.IssueBilling)
 				fn.Get("/billing", tr.ListCharges)
+			})
+		})
+	}
+
+	// Assets (JWT + feature 'asset'), T16 §5.
+	if ast != nil {
+		r.Route("/assets", func(api chi.Router) {
+			api.Use(common.JWTMiddleware(a.Config.JWTSecret))
+			api.Use(common.RequireAnyRole(common.StaffRoles...))
+			api.Use(a.requireFeature("asset"))
+
+			// QR Scan: all logged-in staff can scan (role-aware view)
+			api.Get("/scan/{qr_token}", ast.ScanAsset)
+
+			// Photo download
+			api.Get("/{id}/photo", ast.GetPhoto)
+
+			// Summary by room for 3D Campus (T25)
+			api.Get("/summary-by-room", ast.SummaryByRoom)
+
+			// Readers: AssetReaders
+			api.Group(func(rd chi.Router) {
+				rd.Use(common.RequireAnyRole(asset.AssetReaders...))
+				rd.Get("/", ast.ListAssets)
+				rd.Get("/{id}", ast.GetAsset)
+				rd.Get("/categories", ast.ListCategories)
+				rd.Get("/categories/{id}", ast.GetCategory)
+				rd.Get("/settings", ast.GetSettings)
+				rd.Get("/{id}/movements", ast.ListMovements)
+				rd.Get("/disposals", ast.ListDisposals)
+				rd.Get("/{id}/depreciation", ast.GetDepreciation)
+			})
+
+			// Officers & Writers: AssetWriters
+			api.Group(func(wr chi.Router) {
+				wr.Use(common.RequireAnyRole(asset.AssetWriters...))
+				wr.Post("/", ast.CreateAsset)
+				wr.Put("/{id}", ast.UpdateAsset)
+				wr.Post("/{id}/activate", ast.ActivateAsset)
+				wr.Post("/{id}/photo", ast.UploadPhoto)
+				wr.Get("/{id}/label", ast.GetLabel)
+				wr.Get("/labels", ast.GetLabels)
+				wr.Post("/categories", ast.CreateCategory)
+				wr.Put("/categories/{id}", ast.UpdateCategory)
+				wr.Delete("/categories/{id}", ast.DeleteCategory)
+				wr.Put("/settings", ast.UpdateSettings)
+				wr.Post("/{id}/movements", ast.CreateMovement)
+				wr.Post("/{id}/disposals", ast.CreateDisposal)
+				wr.Post("/disposals/{id}/cancel", ast.CancelDisposal)
 			})
 		})
 	}
