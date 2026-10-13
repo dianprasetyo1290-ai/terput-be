@@ -11,6 +11,7 @@ type AttendanceStatus string
 const (
 	StatusBelumPresensi   AttendanceStatus = "belum_presensi"
 	StatusHadir           AttendanceStatus = "hadir"
+	StatusTerlambat       AttendanceStatus = "terlambat" // FR-41-001: hadir, tapi terlambat
 	StatusSakit           AttendanceStatus = "sakit"
 	StatusIzin            AttendanceStatus = "izin"
 	StatusTanpaKeterangan AttendanceStatus = "tanpa_keterangan"
@@ -18,7 +19,7 @@ const (
 
 func (s AttendanceStatus) Valid() bool {
 	switch s {
-	case StatusBelumPresensi, StatusHadir, StatusSakit, StatusIzin, StatusTanpaKeterangan:
+	case StatusBelumPresensi, StatusHadir, StatusTerlambat, StatusSakit, StatusIzin, StatusTanpaKeterangan:
 		return true
 	}
 	return false
@@ -116,6 +117,7 @@ type StudentAttendance struct {
 // integration endpoint and the admin dashboard summary/graph endpoints.
 type AttendanceSummary struct {
 	Hadir           int `json:"hadir"`
+	Terlambat       int `json:"terlambat"`
 	Sakit           int `json:"sakit"`
 	Izin            int `json:"izin"`
 	TanpaKeterangan int `json:"tanpa_keterangan"`
@@ -142,6 +144,7 @@ type StudentMonthlyAttendance struct {
 	StudentID       string `json:"student_id"`
 	ClassroomID     string `json:"classroom_id"`
 	Hadir           int    `json:"hadir"`
+	Terlambat       int    `json:"terlambat"`
 	Sakit           int    `json:"sakit"`
 	Izin            int    `json:"izin"`
 	TanpaKeterangan int    `json:"tanpa_keterangan"`
@@ -161,6 +164,7 @@ type StudentAttendanceGridRow struct {
 type MonthlyStatusCount struct {
 	Month           string `json:"month"` // YYYY-MM
 	Hadir           int    `json:"hadir"`
+	Terlambat       int    `json:"terlambat"`
 	Sakit           int    `json:"sakit"`
 	Izin            int    `json:"izin"`
 	TanpaKeterangan int    `json:"tanpa_keterangan"`

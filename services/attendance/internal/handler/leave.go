@@ -187,7 +187,7 @@ func (h *Handler) reviewLeave(w http.ResponseWriter, r *http.Request, status str
 		common.WriteError(w, http.StatusBadRequest, "alasan penolakan wajib diisi")
 		return
 	}
-	updated, err := h.Store.ReviewLeaveRequest(r.Context(), l.ID, status, claims.UserID, body.Note)
+	updated, err := h.Store.ReviewLeaveRequest(r.Context(), l.ID, status, claims.UserID, claims.ActiveRole, body.Note)
 	if errors.Is(err, store.ErrLeaveNotPending) {
 		common.WriteError(w, http.StatusConflict, "pengajuan ini sudah diproses")
 		return

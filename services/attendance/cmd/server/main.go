@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"net/http"
@@ -73,6 +74,10 @@ func main() {
 	s := store.New(db)
 	c := client.New()
 	h := handler.New(s, c)
+
+	// P4A: forward the audit outbox (attendance corrections, leave
+	// decisions, lock settings) to core's central audit trail.
+	go h.RunAuditForwarder(context.Background(), 30*time.Second)
 
 	// Redis response cache (client request 2026-08-29): fails open if
 	// REDIS_URL is unset/unreachable, see internal/cache's doc comment.

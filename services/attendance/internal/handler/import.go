@@ -23,9 +23,10 @@ import (
 
 // attendanceStatusCodes: the single-letter codes schools fill into the
 // template, matching the Indonesian school convention (Hadir/Sakit/Izin/
-// Alpa) rather than asking them to type the full enum value.
+// Alpa, plus T = Terlambat per FR-41-001) rather than asking them to type
+// the full enum value.
 var attendanceStatusCodes = map[string]string{
-	"H": "hadir", "S": "sakit", "I": "izin", "A": "tanpa_keterangan",
+	"H": "hadir", "T": "terlambat", "S": "sakit", "I": "izin", "A": "tanpa_keterangan",
 }
 
 func daysInMonth(month string) (int, error) {
@@ -156,6 +157,22 @@ func (h *Handler) AdminAttendanceImport(w http.ResponseWriter, r *http.Request) 
 	}
 
 	schoolID := scopeFromRequest(claims, r)
+	// FR-41-003: a locked day can't be (re)imported -- refuse the whole file
+	// up front (fail fast, nothing partially written) when any day that has
+	// at least one filled cell is locked.
+	for day, col := range dayCol {
+		filled := false
+		for _, row := range records[1:] {
+			if col < len(row) && strings.TrimSpace(row[col]) != "" {
+				filled = true
+				break
+			}
+		}
+		if filled && !h.ensureUnlocked(w, r, schoolID, fmt.Sprintf("%s-%02d", month, day)) {
+			return
+		}
+	}
+	var alpa alpaCollector
 	imported, skipped := 0, 0
 	sessionIDCache := map[int]string{} // day -> class_session id, one find-or-create per day not per row
 
@@ -184,7 +201,7 @@ func (h *Handler) AdminAttendanceImport(w http.ResponseWriter, r *http.Request) 
 			}
 			status, ok := attendanceStatusCodes[code]
 			if !ok {
-				common.WriteError(w, http.StatusBadRequest, fmt.Sprintf("row %d, tanggal %d: kode %q tidak dikenal (pakai H/S/I/A)", rowNum+2, day, code))
+				common.WriteError(w, http.StatusBadRequest, fmt.Sprintf("row %d, tanggal %d: kode %q tidak dikenal (pakai H/T/S/I/A)", rowNum+2, day, code))
 				return
 			}
 			sessionDate := fmt.Sprintf("%s-%02d", month, day)
@@ -202,8 +219,10 @@ func (h *Handler) AdminAttendanceImport(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 			imported++
+			alpa.add(schoolID, studentID, sessionDate, status)
 		}
 	}
+	h.notifyAlpaAsync(alpa) // FR-41-004
 
 	common.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"imported_count": imported,
