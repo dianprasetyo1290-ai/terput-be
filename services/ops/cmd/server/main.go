@@ -22,6 +22,7 @@ import (
 	"skci/ops/internal/procurement"
 	"skci/ops/internal/storage"
 	"skci/ops/internal/store"
+	"skci/ops/internal/transport"
 )
 
 type woPurchaseRequester struct {
@@ -98,6 +99,10 @@ func main() {
 	libRunner := library.NewJobRunner(db, apiClient, cfg.AccountingURL, cfg.InternalKey, loc)
 	libHandler := library.NewHandler(libStore, apiClient, libRunner)
 
+	trStore := transport.NewStore(db, loc)
+	trRunner := transport.NewJobRunner(db, apiClient, cfg.AccountingURL, cfg.InternalKey, loc)
+	trHandler := transport.NewHandler(trStore, apiClient, trRunner, cfg.HRURL, cfg.AccountingURL)
+
 	fac := &facility.Handler{
 		Store:        facility.NewStore(db, loc),
 		Client:       apiClient,
@@ -114,6 +119,7 @@ func main() {
 		Inventory:   invHandler,
 		Procurement: procHandler,
 		Library:     libHandler,
+		Transport:   trHandler,
 	}
 
 	syncJob := procurement.NewSyncJob(db, apiClient, cfg.AccountingURL, cfg.InternalKey)
@@ -123,6 +129,7 @@ func main() {
 	runner.Register("vendor_accounting_sync", func(ctx context.Context, _ *sql.DB) error { return syncJob.RunSyncVendors(ctx) })
 	runner.Register("library_daily", func(ctx context.Context, _ *sql.DB) error { return libRunner.RunDailyTasksForAll(ctx) })
 	runner.Register("library_sync_members", func(ctx context.Context, _ *sql.DB) error { return libRunner.RunMemberSyncForAll(ctx) })
+	runner.Register("transport_daily", func(ctx context.Context, _ *sql.DB) error { return trRunner.RunDailyTasksForAll(ctx) })
 	runner.Register("forward_audit", app.ForwardAudit)
 	runner.Start()
 	defer runner.Stop()

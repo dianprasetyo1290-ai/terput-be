@@ -11,6 +11,7 @@ import (
 	"skci/ops/internal/inventory"
 	"skci/ops/internal/library"
 	"skci/ops/internal/procurement"
+	"skci/ops/internal/transport"
 )
 
 func (a *App) Router() http.Handler {
@@ -28,6 +29,7 @@ func (a *App) Router() http.Handler {
 	inv := a.Inventory
 	proc := a.Procurement
 	lib := a.Library
+	tr := a.Transport
 	facilityOn := func(r *http.Request, schoolID string) bool { return a.featureOn(r, schoolID, "facility") }
 
 	// Internal routes (X-Internal-Key), T9 §4.2.
@@ -44,6 +46,9 @@ func (a *App) Router() http.Handler {
 		in.Get("/internal/facility/work-orders", fac.InternalWorkOrders)
 		if lib != nil {
 			in.Post("/internal/library/fines/{id}/bill", lib.InternalBillFine)
+		}
+		if tr != nil {
+			in.Post("/internal/transport/charges/{id}/retry", tr.InternalRetryCharge)
 		}
 	})
 
@@ -266,6 +271,92 @@ func (a *App) Router() http.Handler {
 				of.Get("/fines", lib.ListFines)
 				of.Post("/fines/{id}/pay", lib.PayFine)
 				of.Post("/fines/{id}/waive", lib.WaiveFine)
+			})
+		})
+	}
+
+	// Transport (JWT + feature 'transport'), T19.
+	if tr != nil {
+		// Parent Portal: /me/transport (orang_tua)
+		r.Route("/me/transport", func(api chi.Router) {
+			api.Use(common.JWTMiddleware(a.Config.JWTSecret))
+			api.Use(common.RequireAnyRole(transport.Parents...))
+			api.Use(a.requireFeature("transport"))
+
+			api.Get("/children", tr.MyChildren)
+			api.Get("/children/{studentId}/events", tr.MyChildEvents)
+			api.Post("/absences", tr.CreateMyAbsence)
+			api.Delete("/absences/{id}", tr.CancelMyAbsence)
+		})
+
+		r.Route("/transport", func(api chi.Router) {
+			api.Use(common.JWTMiddleware(a.Config.JWTSecret))
+			api.Use(a.requireFeature("transport"))
+
+			// Crew (mobile-first trip execution)
+			api.Group(func(cr chi.Router) {
+				cr.Use(common.RequireAnyRole(transport.CrewRoles...))
+				cr.Get("/my-trips", tr.GetMyTrips)
+				cr.Get("/trips/{id}/manifest", tr.GetTripManifest)
+				cr.Post("/trips/{id}/events", tr.RecordTripEvent)
+				cr.Post("/trips/{id}/start", tr.StartTrip)
+				cr.Post("/trips/{id}/finish", tr.FinishTrip)
+			})
+
+			// Officers: transport_officer, admin, superadmin
+			api.Group(func(of chi.Router) {
+				of.Use(common.RequireAnyRole(transport.Officers...))
+
+				// Settings & Master Data
+				of.Get("/settings", tr.GetSettings)
+				of.Put("/settings", tr.UpdateSettings)
+
+				of.Get("/zones", tr.ListZones)
+				of.Post("/zones", tr.CreateZone)
+				of.Put("/zones/{id}", tr.UpdateZone)
+				of.Delete("/zones/{id}", tr.DeleteZone)
+
+				of.Get("/routes", tr.ListRoutes)
+				of.Get("/routes/{id}", tr.GetRoute)
+				of.Post("/routes", tr.CreateRoute)
+				of.Put("/routes/{id}", tr.UpdateRoute)
+				of.Delete("/routes/{id}", tr.DeleteRoute)
+				of.Put("/routes/{id}/stops", tr.SetStops)
+				of.Get("/routes/{id}/roster", tr.GetRouteRoster)
+
+				of.Get("/vehicles", tr.ListVehicles)
+				of.Post("/vehicles", tr.CreateVehicle)
+				of.Put("/vehicles/{id}", tr.UpdateVehicle)
+				of.Delete("/vehicles/{id}", tr.DeleteVehicle)
+				of.Get("/vehicles/{id}/documents", tr.ListDocuments)
+				of.Post("/vehicles/{id}/documents", tr.AddDocument)
+				of.Delete("/vehicles/{id}/documents/{docId}", tr.DeleteDocument)
+				of.Get("/expiring", tr.ListExpiring)
+
+				of.Get("/crew", tr.ListCrew)
+				of.Post("/crew", tr.CreateCrew)
+				of.Put("/crew/{id}", tr.UpdateCrew)
+				of.Delete("/crew/{id}", tr.DeleteCrew)
+				of.Post("/routes/{id}/assignments", tr.AssignRoute)
+				of.Get("/employees", tr.ListEmployees)
+
+				of.Get("/allocations", tr.ListAllocations)
+				of.Post("/allocations", tr.CreateAllocations)
+				of.Post("/allocations/{id}/end", tr.EndAllocation)
+				of.Post("/allocations/{id}/move", tr.MoveAllocation)
+
+				of.Get("/trips", tr.ListTrips)
+				of.Get("/fares", tr.ListFares)
+				of.Post("/fares", tr.CreateFare)
+				of.Delete("/fares/{id}", tr.DeleteFare)
+			})
+
+			// Finance: admin, finance_manager
+			api.Group(func(fn chi.Router) {
+				fn.Use(common.RequireAnyRole(transport.FinanceOfficers...))
+				fn.Get("/billing/preview", tr.PreviewBilling)
+				fn.Post("/billing/issue", tr.IssueBilling)
+				fn.Get("/billing", tr.ListCharges)
 			})
 		})
 	}

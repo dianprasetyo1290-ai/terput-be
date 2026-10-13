@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -241,4 +242,65 @@ func (c *Client) Notify(ctx context.Context, n Notification, idempotencyKey stri
 // conversion) with X-Internal-Key and the given Idempotency-Key.
 func (c *Client) PostCallback(ctx context.Context, callbackURL string, body any, idempotencyKey string) error {
 	return c.do(ctx, http.MethodPost, callbackURL, body, idempotencyKey, nil)
+}
+
+// GuardianLink is identity's GET /internal/students/{id}/guardians entry.
+type GuardianLink struct {
+	GuardianUserID string `json:"guardian_user_id"`
+	Relationship   string `json:"relationship"`
+	IsPrimary      bool   `json:"is_primary"`
+}
+
+func (c *Client) GuardiansForStudent(ctx context.Context, schoolID, studentUserID string) ([]GuardianLink, error) {
+	var list []GuardianLink
+	q := url.Values{"school_id": {schoolID}}
+	err := c.do(ctx, http.MethodGet, c.IdentityURL+"/internal/students/"+url.PathEscape(studentUserID)+"/guardians?"+q.Encode(), nil, "", &list)
+	return list, err
+}
+
+func (c *Client) CheckGuardianStudentAccess(ctx context.Context, guardianUserID, studentUserID string) (bool, error) {
+	var res struct {
+		HasAccess bool `json:"has_access"`
+	}
+	err := c.do(ctx, http.MethodGet, c.IdentityURL+"/internal/guardians/"+url.PathEscape(guardianUserID)+"/students/"+url.PathEscape(studentUserID)+"/access", nil, "", &res)
+	if err != nil {
+		return false, err
+	}
+	return res.HasAccess, nil
+}
+
+type EmployeeOption struct {
+	ID           string `json:"id"`
+	UserID       string `json:"user_id"`
+	FullName     string `json:"full_name"`
+	PositionName string `json:"position_name"`
+}
+
+func (c *Client) Employees(ctx context.Context, hrURL, schoolID, query string) ([]EmployeeOption, error) {
+	if hrURL == "" {
+		return nil, nil
+	}
+	var list []EmployeeOption
+	q := url.Values{"school_id": {schoolID}, "q": {query}, "status": {"active"}}
+	err := c.do(ctx, http.MethodGet, hrURL+"/internal/employees?"+q.Encode(), nil, "", &list)
+	return list, err
+}
+
+func (c *Client) ResolveStudentCard(ctx context.Context, billingURL, schoolID, code string) (string, error) {
+	if billingURL == "" {
+		return "", errors.New("billing URL not configured")
+	}
+	var res struct {
+		StudentUserID string `json:"student_user_id"`
+		Status        string `json:"status"` // 'active' | 'revoked'
+	}
+	body := map[string]string{"school_id": schoolID, "code": code}
+	err := c.do(ctx, http.MethodPost, billingURL+"/internal/student-cards/resolve", body, "", &res)
+	if err != nil {
+		return "", err
+	}
+	if res.Status == "revoked" {
+		return "", errors.New("Kartu tidak aktif")
+	}
+	return res.StudentUserID, nil
 }

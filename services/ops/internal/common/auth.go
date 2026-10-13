@@ -51,6 +51,8 @@ const (
 	RoleOperatorDapodik  = "operator_dapodik"
 	RoleHumas            = "humas"
 	RoleBIAnalyst        = "bi_analyst"
+	RoleSiswa            = "siswa"
+	RoleOrangTua         = "orang_tua"
 )
 
 // StaffRoles are every internal school staff role (all roles except siswa,

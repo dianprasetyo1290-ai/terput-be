@@ -17,6 +17,7 @@ import (
 	"skci/ops/internal/library"
 	"skci/ops/internal/procurement"
 	"skci/ops/internal/store"
+	"skci/ops/internal/transport"
 )
 
 type App struct {
@@ -27,6 +28,7 @@ type App struct {
 	Inventory   *inventory.Handler
 	Procurement *procurement.Handler
 	Library     *library.Handler
+	Transport   *transport.Handler
 }
 
 func (a *App) Healthz(w http.ResponseWriter, r *http.Request) {
@@ -39,6 +41,7 @@ var featureLabels = map[string]string{
 	"inventory":   "Inventaris",
 	"procurement": "Pengadaan",
 	"library":     "Perpustakaan",
+	"transport":   "Transportasi",
 }
 
 // featureOn reports whether key is on for the school (fails closed).
