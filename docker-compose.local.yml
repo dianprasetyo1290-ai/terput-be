@@ -76,6 +76,12 @@ services:
     depends_on: { postgres: { condition: service_healthy } }
   hr-migrate:
     depends_on: { postgres: { condition: service_healthy } }
+  ops-migrate:
+    depends_on: { postgres: { condition: service_healthy } }
+  studentlife-migrate:
+    depends_on: { postgres: { condition: service_healthy } }
+  quality-migrate:
+    depends_on: { postgres: { condition: service_healthy } }
 
   postgres:
     image: postgres:14-alpine
@@ -85,7 +91,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: postgres
       # Consumed by db-init/init-multiple-dbs.sh on first boot.
-      POSTGRES_MULTIPLE_DATABASES: ${IDENTITY_DB_NAME},${ACADEMIC_DB_NAME},${ATTENDANCE_DB_NAME},${EXAM_DB_NAME},${EVALUATION_DB_NAME},${REPORT_DB_NAME},${ADMISSION_DB_NAME},${NOTIFICATION_DB_NAME:-teratai_notification},${BILLING_DB_NAME:-teratai_billing},${CORE_DB_NAME:-teratai_core},${HR_DB_NAME:-teratai_hr}
+      POSTGRES_MULTIPLE_DATABASES: ${IDENTITY_DB_NAME},${ACADEMIC_DB_NAME},${ATTENDANCE_DB_NAME},${EXAM_DB_NAME},${EVALUATION_DB_NAME},${REPORT_DB_NAME},${ADMISSION_DB_NAME},${NOTIFICATION_DB_NAME:-teratai_notification},${BILLING_DB_NAME:-teratai_billing},${CORE_DB_NAME:-teratai_core},${HR_DB_NAME:-teratai_hr},${OPS_DB_NAME:-teratai_ops},${STUDENTLIFE_DB_NAME:-teratai_studentlife},${QUALITY_DB_NAME:-skci_quality}
     volumes:
       - local_pg_data:/var/lib/postgresql/data
       - ./db-init:/docker-entrypoint-initdb.d:ro

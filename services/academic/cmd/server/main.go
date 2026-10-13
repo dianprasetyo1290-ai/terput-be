@@ -254,6 +254,7 @@ func main() {
 		r.Post("/internal/student-status-requests/approval-callback", h.ApprovalCallback)
 		r.Post("/internal/student-status-requests/apply-pending", h.ApplyPendingRequestsJob)
 		r.Get("/internal/enrollments", h.InternalListEnrollments) // T13: read-only, internal key only
+		r.Get("/internal/dapodik/rombel", h.InternalDapodikRombel)
 	})
 
 	log.Printf("academic-service listening on :%s", port)

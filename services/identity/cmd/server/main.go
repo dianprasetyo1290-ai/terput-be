@@ -256,6 +256,7 @@ func main() {
 		in.Post("/internal/employees/create-or-link", app.InternalCreateOrLinkEmployee)
 		in.Post("/internal/role-accounts/create-or-link", app.InternalCreateOrLinkRoleAccount)
 		in.Post("/internal/users/{id}/deactivate", app.InternalDeactivateUser)
+		in.Get("/internal/dapodik/students", app.InternalDapodikStudents)
 	})
 
 	r.Group(func(ir chi.Router) {

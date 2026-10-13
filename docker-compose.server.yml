@@ -29,6 +29,9 @@ services:
   billing: { <<: *lim, ports: !reset [] }
   core: { <<: *lim, ports: !reset [] }
   hr: { <<: *lim, ports: !reset [] }
+  ops: { <<: *lim, ports: !reset [] }
+  studentlife: { <<: *lim, ports: !reset [] }
+  quality: { <<: *lim, ports: !reset [] }
   accounting:
     ports: !reset []
     deploy: { resources: { limits: { memory: 384m, cpus: "0.5" } } }

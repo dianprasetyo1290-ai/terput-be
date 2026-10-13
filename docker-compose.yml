@@ -478,6 +478,77 @@ services:
       IDENTITY_SERVICE_URL: http://identity:${IDENTITY_PORT}
     ports: ["${ACCOUNTING_PORT:-8087}:80"]
 
+  # ---------- ops (Teratai: Fasilitas, Inventaris, Pengadaan, Aset, Anggaran, Pajak, Hutang, Perpustakaan, Transportasi, Kampus 3D) ----------
+  ops-migrate:
+    image: migrate/migrate:v4.18.1
+    volumes: ["./services/ops/migrations:/migrations"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${OPS_DB_NAME:-teratai_ops}?sslmode=disable", "up"]
+    restart: "no"
+
+  ops:
+    build: ./services/ops
+    restart: unless-stopped
+    depends_on:
+      ops-migrate:
+        condition: service_completed_successfully
+      identity:
+        condition: service_started
+    environment:
+      PORT: ${OPS_PORT:-8093}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${OPS_DB_NAME:-teratai_ops}?sslmode=disable
+      APP_ENV: ${APP_ENV:-production}
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      OPS_ENC_KEY: ${OPS_ENC_KEY:-change-me}
+      OPS_BLIND_KEY: ${OPS_BLIND_KEY:-change-me}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      CORE_URL: http://core:${CORE_PORT:-8091}
+      IDENTITY_URL: http://identity:${IDENTITY_PORT:-8081}
+      NOTIFICATION_URL: http://notification:${NOTIFICATION_PORT:-8089}
+      HR_URL: http://hr:${HR_PORT:-8092}
+      BILLING_URL: http://billing:${BILLING_PORT:-8090}
+      ACCOUNTING_URL: http://accounting:80
+      STORAGE_ROOT: /data/private
+      OPS_PUBLIC_INTERNAL_URL: http://ops:${OPS_PORT:-8093}
+    volumes: ["ops_files:/data/private"]
+    ports: ["${OPS_PORT:-8093}:${OPS_PORT:-8093}"]
+
+  # ---------- quality (Teratai: QA, Akreditasi, EDS, RTL, Dapodik, Pelaporan Regulasi) ----------
+  quality-migrate:
+    image: migrate/migrate:v4.18.1
+    volumes: ["./services/quality/migrations:/migrations"]
+    entrypoint: ["migrate", "-path", "/migrations", "-database", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${QUALITY_DB_NAME:-skci_quality}?sslmode=disable", "up"]
+    restart: "no"
+
+  quality:
+    build: ./services/quality
+    restart: unless-stopped
+    depends_on:
+      quality-migrate:
+        condition: service_completed_successfully
+      identity:
+        condition: service_started
+    environment:
+      PORT: ${QUALITY_PORT:-8095}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${QUALITY_DB_NAME:-skci_quality}?sslmode=disable
+      APP_ENV: ${APP_ENV:-production}
+      SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
+      SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
+      QUALITY_INTERNAL_URL: http://quality:${QUALITY_PORT:-8095}
+      CORE_URL: http://core:${CORE_PORT:-8091}
+      IDENTITY_URL: http://identity:${IDENTITY_PORT:-8081}
+      ACADEMIC_URL: http://academic:${ACADEMIC_PORT:-8082}
+      HR_URL: http://hr:${HR_PORT:-8092}
+      INSIGHT_URL: http://insight:${INSIGHT_PORT:-8096}
+      NOTIFICATION_URL: http://notification:${NOTIFICATION_PORT:-8089}
+      STORAGE_ROOT: /data/quality
+      QUALITY_HASH_KEY: ${QUALITY_HASH_KEY:-change-me}
+      SENTRY_DSN: ${SENTRY_DSN}
+    volumes: ["quality_files:/data/quality"]
+    ports: ["${QUALITY_PORT:-8095}:${QUALITY_PORT:-8095}"]
+
   # ---------- web (frontend, nginx reverse-proxying /api/<service>/) ----------
   web:
     build:
@@ -498,7 +569,9 @@ services:
       - billing
       - core
       - hr
+      - ops
       - studentlife
+      - quality
     networks:
       - default
       - edge
@@ -508,8 +581,11 @@ volumes:
   billing_files:
   hr_files:
   core_files:
+  ops_files:
+  quality_files:
 
 networks:
   default:
   edge:
     external: true
+

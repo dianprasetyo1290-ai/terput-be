@@ -46,6 +46,9 @@ const (
 	ReqTypeBudget                 = "budget"
 	ReqTypeVendorInvoiceOverride  = "vendor_invoice_override"
 	ReqTypeVendorPayment          = "vendor_payment"
+	ReqTypeQASelfEvalFinalize     = "qa_self_eval_finalize"
+	ReqTypeQASelfEvalReopen       = "qa_self_eval_reopen"
+	ReqTypeRegulatoryReport       = "regulatory_report"
 )
 
 // RequestTypeLabels maps request_type to its human-readable Indonesian title.
@@ -86,6 +89,9 @@ var RequestTypeLabels = map[string]string{
 	ReqTypeBudget:                 "Anggaran / RAPBS",
 	ReqTypeVendorInvoiceOverride:  "Dispensasi Faktur Vendor (Override Match)",
 	ReqTypeVendorPayment:          "Jadwal Pembayaran Vendor",
+	ReqTypeQASelfEvalFinalize:     "Finalisasi Evaluasi Diri",
+	ReqTypeQASelfEvalReopen:       "Pembukaan Kembali Evaluasi Diri",
+	ReqTypeRegulatoryReport:       "Persetujuan Laporan Regulasi",
 }
 
 // KnownRequestTypes lists all supported request types.
@@ -126,6 +132,9 @@ var KnownRequestTypes = []string{
 	ReqTypeBudget,
 	ReqTypeVendorInvoiceOverride,
 	ReqTypeVendorPayment,
+	ReqTypeQASelfEvalFinalize,
+	ReqTypeQASelfEvalReopen,
+	ReqTypeRegulatoryReport,
 }
 
 // Request statuses

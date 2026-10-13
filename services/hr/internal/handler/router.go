@@ -40,6 +40,8 @@ func (a *App) Router() http.Handler {
 		internal.Post("/internal/approval-callbacks", a.InternalApprovalCallback)
 		internal.Get("/internal/headcount/{positionId}", a.InternalGetHeadcountByPosition)
 		internal.Get("/internal/employees/by-user/{userId}/supervisor", a.InternalGetSupervisorByUserID)
+		internal.Get("/internal/dapodik/ptk", a.InternalDapodikPTK)
+		internal.Post("/internal/dapodik/ptk/match", a.InternalDapodikPTKMatch)
 	})
 
 	// Protected routes (JWT Auth + HRIS Feature Toggle)
