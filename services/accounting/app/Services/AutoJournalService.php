@@ -101,6 +101,21 @@ class AutoJournalService
             ];
         }
 
+        // 3b. Validation: vendor_id must exist in acc_vendors if supplied
+        foreach ($lines as $line) {
+            $vendorId = ! empty($line['vendor_id']) ? (string) $line['vendor_id'] : null;
+            if ($vendorId !== null) {
+                $vExists = DB::table('acc_vendors')->where('vendor_id', $vendorId)->exists();
+                if (! $vExists) {
+                    return [
+                        'status' => 422,
+                        'trans_no' => '',
+                        'message' => "Vendor $vendorId tidak ditemukan di acc_vendors",
+                    ];
+                }
+            }
+        }
+
         // 4. Idempotency (BR-INT-01, AC-98-02): check existing reference
         if ($reference !== '') {
             $existing = DB::table('trans_head')
@@ -139,12 +154,16 @@ class AutoJournalService
             $prefix = match ($source) {
                 'payroll' => 'PRL',
                 'payment_gateway' => 'PGW',
+                'payable' => 'APV',
+                'asset' => 'AST',
                 default => strtoupper(substr($source, 0, 3)),
             };
 
             $this->ensureTransactionType($prefix, match ($source) {
                 'payroll' => 'Payroll',
                 'payment_gateway' => 'Payment Gateway',
+                'payable' => 'Hutang Usaha (AP)',
+                'asset' => 'Aset Tetap (FA)',
                 default => 'Auto Journal ' . ucfirst($source),
             });
 
@@ -169,12 +188,14 @@ class AutoJournalService
 
             foreach ($lines as $index => $line) {
                 $divCode = ! empty($line['div_code']) ? (string) $line['div_code'] : null;
+                $vendorId = ! empty($line['vendor_id']) ? (string) $line['vendor_id'] : null;
                 DB::table('trans_detail')->insert([
                     'trans_code' => $prefix,
                     'trans_no' => $transNo,
                     'trans_count' => $index + 1,
                     'acc_code' => (string) $line['acc_code'],
                     'div_code' => $divCode,
+                    'vendor_id' => $vendorId,
                     'description' => (string) ($line['description'] ?? $description),
                     'debet' => (float) ($line['debit_idr'] ?? 0),
                     'credit' => (float) ($line['credit_idr'] ?? 0),

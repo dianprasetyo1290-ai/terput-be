@@ -43,6 +43,9 @@ const (
 	ReqTypeEvent                  = "event"
 	ReqTypeAssetDisposal          = "asset_disposal"
 	ReqTypeAssetTransfer          = "asset_transfer"
+	ReqTypeBudget                 = "budget"
+	ReqTypeVendorInvoiceOverride  = "vendor_invoice_override"
+	ReqTypeVendorPayment          = "vendor_payment"
 )
 
 // RequestTypeLabels maps request_type to its human-readable Indonesian title.
@@ -80,6 +83,9 @@ var RequestTypeLabels = map[string]string{
 	ReqTypeEvent:                  "Kegiatan/Event Sekolah",
 	ReqTypeAssetDisposal:          "Pelepasan Aset",
 	ReqTypeAssetTransfer:          "Mutasi Aset Antar-Unit",
+	ReqTypeBudget:                 "Anggaran / RAPBS",
+	ReqTypeVendorInvoiceOverride:  "Dispensasi Faktur Vendor (Override Match)",
+	ReqTypeVendorPayment:          "Jadwal Pembayaran Vendor",
 }
 
 // KnownRequestTypes lists all supported request types.
@@ -117,6 +123,9 @@ var KnownRequestTypes = []string{
 	ReqTypeEvent,
 	ReqTypeAssetDisposal,
 	ReqTypeAssetTransfer,
+	ReqTypeBudget,
+	ReqTypeVendorInvoiceOverride,
+	ReqTypeVendorPayment,
 }
 
 // Request statuses

@@ -10,14 +10,17 @@ import (
 	"net/http"
 
 	"skci/ops/internal/asset"
+	"skci/ops/internal/budget"
 	"skci/ops/internal/client"
 	"skci/ops/internal/common"
 	"skci/ops/internal/config"
 	"skci/ops/internal/facility"
 	"skci/ops/internal/inventory"
 	"skci/ops/internal/library"
+	"skci/ops/internal/payable"
 	"skci/ops/internal/procurement"
 	"skci/ops/internal/store"
+	"skci/ops/internal/tax"
 	"skci/ops/internal/transport"
 )
 
@@ -31,6 +34,9 @@ type App struct {
 	Library     *library.Handler
 	Transport   *transport.Handler
 	Asset       *asset.Handler
+	Budget      *budget.Handler
+	Tax         *tax.Handler
+	Payable     *payable.Handler
 }
 
 func (a *App) Healthz(w http.ResponseWriter, r *http.Request) {
@@ -39,12 +45,15 @@ func (a *App) Healthz(w http.ResponseWriter, r *http.Request) {
 
 // featureLabels names each ops module in the "dinonaktifkan" message.
 var featureLabels = map[string]string{
-	"facility":    "Fasilitas",
-	"inventory":   "Inventaris",
-	"procurement": "Pengadaan",
-	"library":     "Perpustakaan",
-	"transport":   "Transportasi",
-	"asset":       "Aset",
+	"facility":       "Fasilitas",
+	"inventory":      "Inventaris",
+	"procurement":    "Pengadaan",
+	"library":        "Perpustakaan",
+	"transport":      "Transportasi",
+	"asset":          "Aset",
+	"budget":         "Anggaran & Realisasi (RAPBS)",
+	"tax_nonpayroll": "Pajak Non-Gaji & e-Faktur",
+	"payable":        "Utang Usaha & Pembayaran",
 }
 
 // featureOn reports whether key is on for the school (fails closed).
@@ -80,6 +89,33 @@ func (a *App) requireFeature(key string) func(http.Handler) http.Handler {
 	}
 }
 
+// requireAccountingAndFeature enforces that feature 'accounting' is active (returns 409 if off)
+// and that the specific domain feature key is active (returns 403 if off).
+func (a *App) requireAccountingAndFeature(key string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			schoolID := common.EffectiveSchoolID(r)
+			if schoolID == "" {
+				common.WriteError(w, http.StatusBadRequest, "Pilih sekolah terlebih dahulu")
+				return
+			}
+			if !a.featureOn(r, schoolID, "accounting") {
+				common.WriteError(w, http.StatusConflict, "Modul akuntansi tidak aktif")
+				return
+			}
+			if !a.featureOn(r, schoolID, key) {
+				label := featureLabels[key]
+				if label == "" {
+					label = key
+				}
+				common.WriteError(w, http.StatusForbidden, "Modul "+label+" dinonaktifkan untuk sekolah ini")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // ApprovalCallback receives core's decision (T1 §3) and dispatches it by
 // request_type. Idempotent: replays answer 200 without re-applying.
 func (a *App) ApprovalCallback(w http.ResponseWriter, r *http.Request) {
@@ -91,6 +127,8 @@ func (a *App) ApprovalCallback(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "source_id dan decision wajib valid")
 		return
 	}
+	schoolID := common.EffectiveSchoolID(r)
+
 	switch d.RequestType {
 	case "room_booking":
 		b, err := a.Facility.ApplyApprovalDecision(r.Context(), d)
@@ -154,6 +192,38 @@ func (a *App) ApprovalCallback(w http.ResponseWriter, r *http.Request) {
 			log.Printf("asset approval callback %s: %v", d.SourceID, err)
 			common.WriteError(w, http.StatusInternalServerError, "Gagal memproses approval aset: "+err.Error())
 			return
+		}
+		common.WriteJSON(w, http.StatusOK, map[string]string{"id": d.SourceID, "decision": d.Decision}, nil)
+
+	case "budget":
+		if a.Budget == nil {
+			common.WriteError(w, http.StatusInternalServerError, "Budget handler tidak aktif")
+			return
+		}
+		if d.Decision == "approved" {
+			_ = a.Budget.Store.ApproveBudget(r.Context(), schoolID, d.SourceID)
+		}
+		common.WriteJSON(w, http.StatusOK, map[string]string{"id": d.SourceID, "decision": d.Decision}, nil)
+
+	case "vendor_invoice_override":
+		if a.Payable == nil {
+			common.WriteError(w, http.StatusInternalServerError, "Payable handler tidak aktif")
+			return
+		}
+		if err := a.Payable.Store.ApplyOverrideDecision(r.Context(), schoolID, d.SourceID, d.Decision); err != nil {
+			log.Printf("vendor invoice override callback %s: %v", d.SourceID, err)
+			common.WriteError(w, http.StatusInternalServerError, "Gagal memproses dispensasi faktur: "+err.Error())
+			return
+		}
+		common.WriteJSON(w, http.StatusOK, map[string]string{"id": d.SourceID, "decision": d.Decision}, nil)
+
+	case "vendor_payment":
+		if a.Payable == nil {
+			common.WriteError(w, http.StatusInternalServerError, "Payable handler tidak aktif")
+			return
+		}
+		if d.Decision == "approved" {
+			_ = a.Payable.Store.ApprovePaymentSchedule(r.Context(), schoolID, d.SourceID)
 		}
 		common.WriteJSON(w, http.StatusOK, map[string]string{"id": d.SourceID, "decision": d.Decision}, nil)
 

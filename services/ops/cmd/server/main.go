@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"skci/ops/internal/asset"
+	"skci/ops/internal/budget"
 	"skci/ops/internal/client"
 	"skci/ops/internal/common"
 	"skci/ops/internal/config"
@@ -20,9 +21,11 @@ import (
 	"skci/ops/internal/inventory"
 	"skci/ops/internal/jobs"
 	"skci/ops/internal/library"
+	"skci/ops/internal/payable"
 	"skci/ops/internal/procurement"
 	"skci/ops/internal/storage"
 	"skci/ops/internal/store"
+	"skci/ops/internal/tax"
 	"skci/ops/internal/transport"
 )
 
@@ -113,6 +116,19 @@ func main() {
 	// T16 §4.1: Register procurement goods receipt hook
 	procurement.OnGoodsReceived = assetStore.OnGoodsReceived
 
+	// T17: Ekstensi Akuntansi (Anggaran/RAPBS, Pajak Non-Gaji, Utang Usaha 3-Way Match)
+	bgtAcClient := budget.NewAccountingClient(cfg.AccountingURL, cfg.InternalKey)
+	bgtStore := budget.NewStore(db, bgtAcClient)
+	bgtHandler := budget.NewHandler(bgtStore, apiClient, cfg.OpsPublicInternalURL)
+	procurement.BudgetCheck = bgtStore.Check
+
+	taxStore := tax.NewStore(db)
+	taxHandler := tax.NewHandler(taxStore, apiClient)
+
+	payAcClient := payable.NewAccountingClient(cfg.AccountingURL, cfg.InternalKey)
+	payStore := payable.NewStore(db, payAcClient)
+	payHandler := payable.NewHandler(payStore, apiClient, cfg.OpsPublicInternalURL)
+
 	fac := &facility.Handler{
 		Store:        facility.NewStore(db, loc),
 		Client:       apiClient,
@@ -131,6 +147,9 @@ func main() {
 		Library:     libHandler,
 		Transport:   trHandler,
 		Asset:       assetHandler,
+		Budget:      bgtHandler,
+		Tax:         taxHandler,
+		Payable:     payHandler,
 	}
 
 	syncJob := procurement.NewSyncJob(db, apiClient, cfg.AccountingURL, cfg.InternalKey)

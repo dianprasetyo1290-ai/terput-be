@@ -7,11 +7,14 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"skci/ops/internal/asset"
+	"skci/ops/internal/budget"
 	"skci/ops/internal/common"
 	"skci/ops/internal/facility"
 	"skci/ops/internal/inventory"
 	"skci/ops/internal/library"
+	"skci/ops/internal/payable"
 	"skci/ops/internal/procurement"
+	"skci/ops/internal/tax"
 	"skci/ops/internal/transport"
 )
 
@@ -32,6 +35,9 @@ func (a *App) Router() http.Handler {
 	lib := a.Library
 	tr := a.Transport
 	ast := a.Asset
+	bgt := a.Budget
+	tx := a.Tax
+	pay := a.Payable
 	facilityOn := func(r *http.Request, schoolID string) bool { return a.featureOn(r, schoolID, "facility") }
 
 	// Internal routes (X-Internal-Key), T9 §4.2.
@@ -411,6 +417,104 @@ func (a *App) Router() http.Handler {
 				wr.Post("/{id}/movements", ast.CreateMovement)
 				wr.Post("/{id}/disposals", ast.CreateDisposal)
 				wr.Post("/disposals/{id}/cancel", ast.CancelDisposal)
+			})
+		})
+	}
+
+	// Budget / RAPBS & Realisasi (Menu 109, feature 'budget' + requires 'accounting')
+	if bgt != nil {
+		r.Route("/budget", func(api chi.Router) {
+			api.Use(common.JWTMiddleware(a.Config.JWTSecret))
+			api.Use(a.requireAccountingAndFeature("budget"))
+
+			// Readers: FinanceRoles
+			api.Group(func(rd chi.Router) {
+				rd.Use(common.RequireAnyRole(budget.FinanceRoles...))
+				rd.Get("/settings", bgt.GetSettings)
+				rd.Get("/", bgt.ListBudgets)
+				rd.Get("/{id}", bgt.GetBudget)
+				rd.Get("/{id}/lines", bgt.ListBudgetLines)
+				rd.Get("/{id}/report", bgt.GetBudgetReport)
+				rd.Get("/alerts", bgt.ListAlerts)
+			})
+
+			// Writers: BudgetWriters
+			api.Group(func(wr chi.Router) {
+				wr.Use(common.RequireAnyRole(budget.BudgetWriters...))
+				wr.Put("/settings", bgt.UpdateSettings)
+				wr.Post("/", bgt.CreateBudget)
+				wr.Put("/{id}", bgt.UpdateBudget)
+				wr.Post("/{id}/submit", bgt.SubmitBudget)
+				wr.Post("/{id}/lines", bgt.CreateBudgetLine)
+				wr.Put("/{id}/lines/{lineId}", bgt.UpdateBudgetLine)
+				wr.Delete("/{id}/lines/{lineId}", bgt.DeleteBudgetLine)
+				wr.Post("/{id}/sync-actuals", bgt.SyncActuals)
+				wr.Post("/alerts/{id}/ack", bgt.AcknowledgeAlert)
+			})
+		})
+	}
+
+	// Tax Non-Payroll & e-Faktur (Menu 110, feature 'tax_nonpayroll' + requires 'accounting')
+	if tx != nil {
+		r.Route("/tax", func(api chi.Router) {
+			api.Use(common.JWTMiddleware(a.Config.JWTSecret))
+			api.Use(a.requireAccountingAndFeature("tax_nonpayroll"))
+
+			// Readers: TaxReaders
+			api.Group(func(rd chi.Router) {
+				rd.Use(common.RequireAnyRole(tax.TaxReaders...))
+				rd.Get("/settings", tx.GetSettings)
+				rd.Get("/types", tx.ListTaxTypes)
+				rd.Get("/types/{id}", tx.GetTaxType)
+				rd.Get("/slips", tx.ListWithholdingSlips)
+				rd.Get("/slips/{id}", tx.GetWithholdingSlip)
+				rd.Get("/input-vat", tx.ListInputVAT)
+				rd.Get("/output-invoices", tx.ListOutputTaxInvoices)
+			})
+
+			// Writers: TaxWriters
+			api.Group(func(wr chi.Router) {
+				wr.Use(common.RequireAnyRole(tax.TaxWriters...))
+				wr.Put("/settings", tx.UpdateSettings)
+				wr.Post("/types", tx.CreateTaxType)
+				wr.Put("/types/{id}", tx.UpdateTaxType)
+				wr.Post("/slips", tx.CreateWithholdingSlip)
+				wr.Post("/slips/{id}/issue", tx.IssueWithholdingSlip)
+				wr.Post("/input-vat", tx.CreateInputVAT)
+				wr.Put("/input-vat/{id}/status", tx.UpdateInputVATStatus)
+				wr.Post("/output-invoices", tx.CreateOutputTaxInvoice)
+				wr.Post("/export", tx.ExportTax)
+			})
+		})
+	}
+
+	// Accounts Payable & 3-Way Match (Menu 111, feature 'payable' + requires 'accounting')
+	if pay != nil {
+		r.Route("/payable", func(api chi.Router) {
+			api.Use(common.JWTMiddleware(a.Config.JWTSecret))
+			api.Use(a.requireAccountingAndFeature("payable"))
+
+			// Readers: PayableReaders
+			api.Group(func(rd chi.Router) {
+				rd.Use(common.RequireAnyRole(payable.PayableReaders...))
+				rd.Get("/settings", pay.GetSettings)
+				rd.Get("/invoices", pay.ListInvoices)
+				rd.Get("/invoices/{id}", pay.GetInvoice)
+				rd.Get("/schedules", pay.ListSchedules)
+				rd.Get("/aging", pay.GetAgingReport)
+				rd.Get("/journals", pay.ListJournals)
+			})
+
+			// Writers: PayableWriters
+			api.Group(func(wr chi.Router) {
+				wr.Use(common.RequireAnyRole(payable.PayableWriters...))
+				wr.Put("/settings", pay.UpdateSettings)
+				wr.Post("/invoices", pay.CreateInvoice)
+				wr.Post("/invoices/{id}/match", pay.RunMatch)
+				wr.Post("/invoices/{id}/request-override", pay.RequestOverride)
+				wr.Post("/schedules", pay.CreateSchedule)
+				wr.Post("/schedules/{id}/submit", pay.SubmitSchedule)
+				wr.Post("/schedules/{id}/execute", pay.ExecuteSchedule)
 			})
 		})
 	}

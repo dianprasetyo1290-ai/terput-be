@@ -1,0 +1,7 @@
+-- 0030_budget.down.sql
+
+DROP TABLE IF EXISTS budget_alerts CASCADE;
+DROP TABLE IF EXISTS budget_actuals_cache CASCADE;
+DROP TABLE IF EXISTS budget_lines CASCADE;
+DROP TABLE IF EXISTS budgets CASCADE;
+DROP TABLE IF EXISTS budget_settings CASCADE;
