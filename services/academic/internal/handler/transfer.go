@@ -13,6 +13,7 @@ import (
 	"skci/academic/internal/client"
 	"skci/academic/internal/common"
 	"skci/academic/internal/model"
+	"skci/academic/internal/store"
 )
 
 // ---------------------------------------------------------------------------
@@ -90,6 +91,17 @@ func (h *Handler) CreateStudentStatusRequest(w http.ResponseWriter, r *http.Requ
 	if err := model.ValidateCreateStatusRequest(in.Kind, in.Reason, fromClassroomID, toClassID, toSchoolID, schoolID, in.EffectiveDate); err != nil {
 		common.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 		return
+	}
+
+	// 3b. Capacity of the destination classroom (FR-39-001). Checked again,
+	// under lock, when the transfer is applied.
+	if in.Kind == model.KindClassTransfer && toClassID != "" {
+		if err := h.Store.CheckClassroomCapacity(r.Context(), schoolID, toClassID, in.StudentUserID); err != nil {
+			if !writeCapacityError(w, err) {
+				common.WriteError(w, http.StatusInternalServerError, err.Error())
+			}
+			return
+		}
 	}
 
 	// 4. Fetch financial summary from billing (FR-78-002, AC-78-01)
@@ -370,6 +382,9 @@ func (h *Handler) ApplyStudentStatusRequest(w http.ResponseWriter, r *http.Reque
 	}
 
 	if err := h.applyRequest(r, req); err != nil {
+		if writeCapacityError(w, err) {
+			return
+		}
 		common.WriteError(w, http.StatusInternalServerError, "failed to apply request: "+err.Error())
 		return
 	}
@@ -405,6 +420,13 @@ func (h *Handler) ApplyPendingRequestsJob(w http.ResponseWriter, r *http.Request
 	}, nil)
 }
 
+// enrollmentChangeFor tags the class_enrollment_history rows written while
+// applying a Menu 78 request with the request id, its reason, and the user
+// applying it (empty for the internal apply-pending job / approval callback).
+func enrollmentChangeFor(r *http.Request, req *model.StudentStatusRequest) store.EnrollmentChange {
+	return store.EnrollmentChange{RequestID: req.ID, Reason: req.Reason, ActorUserID: actorUserID(r)}
+}
+
 // applyRequest executes the actual status change across academic, billing, and identity.
 func (h *Handler) applyRequest(r *http.Request, req *model.StudentStatusRequest) error {
 	ctx := r.Context()
@@ -429,13 +451,13 @@ func (h *Handler) applyRequest(r *http.Request, req *model.StudentStatusRequest)
 		if req.ToClassroomID != nil {
 			toClass = *req.ToClassroomID
 		}
-		if err := h.Store.ApplyClassTransfer(ctx, req.SchoolID, req.StudentUserID, fromClass, toClass); err != nil {
+		if err := h.Store.ApplyClassTransfer(ctx, req.SchoolID, req.StudentUserID, fromClass, toClass, enrollmentChangeFor(r, req)); err != nil {
 			return err
 		}
 
 	case model.KindUnitTransfer:
 		// AC-78-02: mark old enrollment transferred_out, link student to to_school_id in identity, notify billing
-		if err := h.Store.ApplyUnitTransfer(ctx, req.SchoolID, req.StudentUserID); err != nil {
+		if err := h.Store.ApplyUnitTransfer(ctx, req.SchoolID, req.StudentUserID, enrollmentChangeFor(r, req)); err != nil {
 			return err
 		}
 		if req.ToSchoolID != nil && *req.ToSchoolID != "" && h.Identity != nil {
@@ -447,7 +469,7 @@ func (h *Handler) applyRequest(r *http.Request, req *model.StudentStatusRequest)
 
 	case model.KindWithdrawal:
 		// Mark enrollment withdrawn (BR-STU-01, FR-78-005)
-		if err := h.Store.ApplyWithdrawal(ctx, req.SchoolID, req.StudentUserID); err != nil {
+		if err := h.Store.ApplyWithdrawal(ctx, req.SchoolID, req.StudentUserID, enrollmentChangeFor(r, req)); err != nil {
 			return err
 		}
 		if h.Billing != nil {

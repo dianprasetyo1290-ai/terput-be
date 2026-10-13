@@ -222,78 +222,104 @@ func (s *Store) MarkStatusRequestApplied(ctx context.Context, schoolID, id strin
 	return err
 }
 
-// ApplyClassTransfer executes the class transfer mutation inside a transaction.
-func (s *Store) ApplyClassTransfer(ctx context.Context, schoolID, studentUserID, fromClassroomID, toClassroomID string) error {
+// ApplyClassTransfer moves the student's active enrollment to
+// toClassroomID inside a transaction. The (academic_year_id, student_user_id)
+// row is re-pointed in a single UPDATE, which the history trigger records as
+// one 'transfer' entry (from -> to); the previous implementation flipped the
+// row to transferred_out and then upserted it back, losing the old classroom.
+// Refuses with *CapacityError when the target classroom is full.
+func (s *Store) ApplyClassTransfer(ctx context.Context, schoolID, studentUserID, fromClassroomID, toClassroomID string, ch EnrollmentChange) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	// 1. Get the current active enrollment's academic_year_id
-	var academicYearID string
+	// 1. Find the active enrollment: prefer the one in fromClassroomID,
+	// otherwise any active enrollment of the student.
+	var enrollmentID, currentClassroomID string
 	err = tx.QueryRowContext(ctx, `
-		SELECT academic_year_id FROM class_enrollments
-		WHERE school_id = $1 AND student_user_id = $2 AND classroom_id = $3 AND status = 'active'
-		LIMIT 1
-	`, schoolID, studentUserID, fromClassroomID).Scan(&academicYearID)
-	if err != nil && err != sql.ErrNoRows {
-		return err
-	}
-
-	if academicYearID == "" {
-		// Try finding any active enrollment for student
-		_ = tx.QueryRowContext(ctx, `
-			SELECT academic_year_id FROM class_enrollments
-			WHERE school_id = $1 AND student_user_id = $2 AND status = 'active'
-			LIMIT 1
-		`, schoolID, studentUserID).Scan(&academicYearID)
-	}
-
-	// 2. Close old enrollment: set status = 'transferred_out'
-	_, err = tx.ExecContext(ctx, `
-		UPDATE class_enrollments
-		SET status = 'transferred_out', updated_at = now()
+		SELECT id, classroom_id FROM class_enrollments
 		WHERE school_id = $1 AND student_user_id = $2 AND status = 'active'
-	`, schoolID, studentUserID)
+		ORDER BY (classroom_id::text = $3) DESC, enrolled_at DESC
+		LIMIT 1
+	`, schoolID, studentUserID, fromClassroomID).Scan(&enrollmentID, &currentClassroomID)
+	if err == sql.ErrNoRows {
+		return nil // no active enrollment: nothing to move (same as before)
+	}
 	if err != nil {
 		return err
 	}
+	if currentClassroomID == toClassroomID {
+		return tx.Commit() // already there (idempotent replay)
+	}
 
-	// 3. Open new enrollment in toClassroomID
-	if academicYearID != "" {
-		_, err = tx.ExecContext(ctx, `
-			INSERT INTO class_enrollments (school_id, academic_year_id, classroom_id, student_user_id, status)
-			VALUES ($1, $2, $3, $4, 'active')
-			ON CONFLICT (academic_year_id, student_user_id)
-			DO UPDATE SET classroom_id = EXCLUDED.classroom_id, status = 'active', updated_at = now()
-		`, schoolID, academicYearID, toClassroomID, studentUserID)
-		if err != nil {
-			return err
-		}
+	if err := checkCapacity(ctx, tx, toClassroomID, studentUserID); err != nil {
+		return err
+	}
+	if ch.Action == "" {
+		ch.Action = ActionTransfer
+	}
+	if err := setEnrollmentContext(ctx, tx, ch); err != nil {
+		return err
+	}
+
+	// 2. Close any OTHER active enrollment (other academic years) as before.
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE class_enrollments
+		SET status = 'transferred_out', updated_at = now()
+		WHERE school_id = $1 AND student_user_id = $2 AND status = 'active' AND id <> $3
+	`, schoolID, studentUserID, enrollmentID); err != nil {
+		return err
+	}
+
+	// 3. Re-point the enrollment at the new classroom.
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE class_enrollments
+		SET classroom_id = $2, status = 'active', updated_at = now()
+		WHERE id = $1
+	`, enrollmentID, toClassroomID); err != nil {
+		return err
 	}
 
 	return tx.Commit()
 }
 
-// ApplyWithdrawal sets active enrollment status to 'withdrawn'.
-func (s *Store) ApplyWithdrawal(ctx context.Context, schoolID, studentUserID string) error {
-	_, err := s.DB.ExecContext(ctx, `
+// setActiveEnrollmentStatus closes every active enrollment of the student
+// with newStatus, tagging the history rows with ch.
+func (s *Store) setActiveEnrollmentStatus(ctx context.Context, schoolID, studentUserID, newStatus string, ch EnrollmentChange) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := setEnrollmentContext(ctx, tx, ch); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE class_enrollments
-		SET status = 'withdrawn', updated_at = now()
+		SET status = $3, updated_at = now()
 		WHERE school_id = $1 AND student_user_id = $2 AND status = 'active'
-	`, schoolID, studentUserID)
-	return err
+	`, schoolID, studentUserID, newStatus); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ApplyWithdrawal sets active enrollment status to 'withdrawn'.
+func (s *Store) ApplyWithdrawal(ctx context.Context, schoolID, studentUserID string, ch EnrollmentChange) error {
+	if ch.Action == "" {
+		ch.Action = ActionWithdrawal
+	}
+	return s.setActiveEnrollmentStatus(ctx, schoolID, studentUserID, "withdrawn", ch)
 }
 
 // ApplyUnitTransfer sets active enrollment status to 'transferred_out'.
-func (s *Store) ApplyUnitTransfer(ctx context.Context, schoolID, studentUserID string) error {
-	_, err := s.DB.ExecContext(ctx, `
-		UPDATE class_enrollments
-		SET status = 'transferred_out', updated_at = now()
-		WHERE school_id = $1 AND student_user_id = $2 AND status = 'active'
-	`, schoolID, studentUserID)
-	return err
+func (s *Store) ApplyUnitTransfer(ctx context.Context, schoolID, studentUserID string, ch EnrollmentChange) error {
+	if ch.Action == "" {
+		ch.Action = ActionUnitTransfer
+	}
+	return s.setActiveEnrollmentStatus(ctx, schoolID, studentUserID, "transferred_out", ch)
 }
 
 // ListApprovedPendingRequests finds approved requests whose effective_date <= today and not yet applied.

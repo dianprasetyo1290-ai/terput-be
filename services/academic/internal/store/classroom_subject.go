@@ -7,13 +7,16 @@ import (
 	"skci/academic/internal/model"
 )
 
-func (s *Store) AddClassroomSubject(ctx context.Context, cs model.ClassroomSubject) (*model.ClassroomSubject, error) {
+// AddClassroomSubject upserts a (classroom, subject, guru) pairing.
+// hoursPerWeek nil keeps the existing value on re-assign (0 on insert).
+func (s *Store) AddClassroomSubject(ctx context.Context, cs model.ClassroomSubject, hoursPerWeek *int) (*model.ClassroomSubject, error) {
 	row := s.DB.QueryRowContext(ctx, `
-		INSERT INTO classroom_subjects (school_id, academic_year_id, classroom_id, subject_id, teacher_user_id, is_active)
-		VALUES ($1, $2, $3, $4, $5, COALESCE($6, true))
-		ON CONFLICT (classroom_id, subject_id) DO UPDATE SET teacher_user_id = EXCLUDED.teacher_user_id, is_active = EXCLUDED.is_active, deleted_at = NULL, updated_at = now()
-		RETURNING id, school_id, academic_year_id, classroom_id, subject_id, teacher_user_id, is_active, created_at, updated_at
-	`, cs.SchoolID, cs.AcademicYearID, cs.ClassroomID, cs.SubjectID, cs.TeacherUserID, cs.IsActive)
+		INSERT INTO classroom_subjects (school_id, academic_year_id, classroom_id, subject_id, teacher_user_id, is_active, hours_per_week)
+		VALUES ($1, $2, $3, $4, $5, COALESCE($6, true), COALESCE($7::int, 0))
+		ON CONFLICT (classroom_id, subject_id) DO UPDATE SET teacher_user_id = EXCLUDED.teacher_user_id, is_active = EXCLUDED.is_active,
+			hours_per_week = COALESCE($7::int, classroom_subjects.hours_per_week), deleted_at = NULL, updated_at = now()
+		RETURNING id, school_id, academic_year_id, classroom_id, subject_id, teacher_user_id, is_active, hours_per_week, created_at, updated_at
+	`, cs.SchoolID, cs.AcademicYearID, cs.ClassroomID, cs.SubjectID, cs.TeacherUserID, cs.IsActive, hoursPerWeek)
 	return scanClassroomSubject(row)
 }
 
@@ -22,7 +25,7 @@ func (s *Store) AddClassroomSubject(ctx context.Context, cs model.ClassroomSubje
 // (GET /classrooms/{id}/subject-matrix) since is_active lives on this row.
 func (s *Store) ListClassroomSubjects(ctx context.Context, schoolID, classroomID string, activeOnly bool) ([]model.ClassroomSubject, error) {
 	q := `
-		SELECT cs.id, cs.school_id, cs.academic_year_id, cs.classroom_id, cs.subject_id, cs.teacher_user_id, cs.is_active, cs.created_at, cs.updated_at, sub.name, sub.subject_group, sub.kelompok
+		SELECT cs.id, cs.school_id, cs.academic_year_id, cs.classroom_id, cs.subject_id, cs.teacher_user_id, cs.is_active, cs.hours_per_week, cs.created_at, cs.updated_at, sub.name, sub.subject_group, sub.kelompok
 		FROM classroom_subjects cs
 		JOIN subjects sub ON sub.id = cs.subject_id
 		WHERE ($1 = '' OR cs.school_id::text = $1) AND cs.classroom_id = $2 AND cs.deleted_at IS NULL
@@ -41,7 +44,7 @@ func (s *Store) ListClassroomSubjects(ctx context.Context, schoolID, classroomID
 		var cs model.ClassroomSubject
 		var subjectName string
 		var subjectGroup *string
-		if err := rows.Scan(&cs.ID, &cs.SchoolID, &cs.AcademicYearID, &cs.ClassroomID, &cs.SubjectID, &cs.TeacherUserID, &cs.IsActive, &cs.CreatedAt, &cs.UpdatedAt, &subjectName, &subjectGroup, &cs.Kelompok); err != nil {
+		if err := rows.Scan(&cs.ID, &cs.SchoolID, &cs.AcademicYearID, &cs.ClassroomID, &cs.SubjectID, &cs.TeacherUserID, &cs.IsActive, &cs.HoursPerWeek, &cs.CreatedAt, &cs.UpdatedAt, &subjectName, &subjectGroup, &cs.Kelompok); err != nil {
 			return nil, err
 		}
 		cs.SubjectName = &subjectName
@@ -56,13 +59,13 @@ func (s *Store) ListClassroomSubjects(ctx context.Context, schoolID, classroomID
 // know whether a classroom_subject is an Agama variant.
 func (s *Store) GetClassroomSubject(ctx context.Context, schoolID, id string) (*model.ClassroomSubject, error) {
 	row := s.DB.QueryRowContext(ctx, `
-		SELECT cs.id, cs.school_id, cs.academic_year_id, cs.classroom_id, cs.subject_id, cs.teacher_user_id, cs.is_active, cs.created_at, cs.updated_at, sub.subject_group
+		SELECT cs.id, cs.school_id, cs.academic_year_id, cs.classroom_id, cs.subject_id, cs.teacher_user_id, cs.is_active, cs.hours_per_week, cs.created_at, cs.updated_at, sub.subject_group
 		FROM classroom_subjects cs
 		JOIN subjects sub ON sub.id = cs.subject_id
 		WHERE cs.id = $1 AND cs.school_id = $2 AND cs.deleted_at IS NULL
 	`, id, schoolID)
 	var cs model.ClassroomSubject
-	err := row.Scan(&cs.ID, &cs.SchoolID, &cs.AcademicYearID, &cs.ClassroomID, &cs.SubjectID, &cs.TeacherUserID, &cs.IsActive, &cs.CreatedAt, &cs.UpdatedAt, &cs.SubjectGroup)
+	err := row.Scan(&cs.ID, &cs.SchoolID, &cs.AcademicYearID, &cs.ClassroomID, &cs.SubjectID, &cs.TeacherUserID, &cs.IsActive, &cs.HoursPerWeek, &cs.CreatedAt, &cs.UpdatedAt, &cs.SubjectGroup)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -72,15 +75,18 @@ func (s *Store) GetClassroomSubject(ctx context.Context, schoolID, id string) (*
 	return &cs, nil
 }
 
-func (s *Store) UpdateClassroomSubject(ctx context.Context, schoolID, id string, teacherUserID *string, isActive *bool) (*model.ClassroomSubject, error) {
+// UpdateClassroomSubject patches a pairing; nil fields are unchanged.
+// clearTeacher un-assigns the guru (teacherUserID is ignored then).
+func (s *Store) UpdateClassroomSubject(ctx context.Context, schoolID, id string, teacherUserID *string, isActive *bool, hoursPerWeek *int, clearTeacher bool) (*model.ClassroomSubject, error) {
 	row := s.DB.QueryRowContext(ctx, `
 		UPDATE classroom_subjects SET
-			teacher_user_id = COALESCE($3, teacher_user_id),
+			teacher_user_id = CASE WHEN $6::bool THEN NULL ELSE COALESCE($3, teacher_user_id) END,
 			is_active = COALESCE($4, is_active),
+			hours_per_week = COALESCE($5::int, hours_per_week),
 			updated_at = now()
 		WHERE id = $1 AND school_id = $2 AND deleted_at IS NULL
-		RETURNING id, school_id, academic_year_id, classroom_id, subject_id, teacher_user_id, is_active, created_at, updated_at
-	`, id, schoolID, teacherUserID, isActive)
+		RETURNING id, school_id, academic_year_id, classroom_id, subject_id, teacher_user_id, is_active, hours_per_week, created_at, updated_at
+	`, id, schoolID, teacherUserID, isActive, hoursPerWeek, clearTeacher)
 	cs, err := scanClassroomSubject(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -337,7 +343,7 @@ func (s *Store) StudentClassroomID(ctx context.Context, schoolID, studentUserID,
 
 func scanClassroomSubject(row rowScanner) (*model.ClassroomSubject, error) {
 	var cs model.ClassroomSubject
-	if err := row.Scan(&cs.ID, &cs.SchoolID, &cs.AcademicYearID, &cs.ClassroomID, &cs.SubjectID, &cs.TeacherUserID, &cs.IsActive, &cs.CreatedAt, &cs.UpdatedAt); err != nil {
+	if err := row.Scan(&cs.ID, &cs.SchoolID, &cs.AcademicYearID, &cs.ClassroomID, &cs.SubjectID, &cs.TeacherUserID, &cs.IsActive, &cs.HoursPerWeek, &cs.CreatedAt, &cs.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return &cs, nil

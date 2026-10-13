@@ -105,16 +105,19 @@ List/detail endpoints are scoped to the caller's `school_id`
 | GET | `/terms?academic_year_id=` | |
 | GET | `/terms/{id}` | |
 | PUT | `/terms/{id}` | edit name/start_date/end_date |
-| POST | `/classrooms?academic_year_id=` | |
-| GET | `/classrooms?academic_year_id=&page=&per_page=` | |
-| GET / PUT / DELETE | `/classrooms/{id}` | PUT edits name/grade_level/wali kelas |
-| POST | `/classrooms/{id}/students` | `{student_user_id}` |
+| POST | `/classrooms?academic_year_id=` | optional `capacity` (null/0 = tanpa batas) |
+| GET | `/classrooms?academic_year_id=&page=&per_page=` | each row has `capacity` + derived `student_count` |
+| GET / PUT / DELETE | `/classrooms/{id}` | PUT edits name/grade_level/wali kelas (replaces; exactly one per class)/`capacity` (0 clears; 422 if below roster) |
+| POST | `/classrooms/{id}/students` | `{student_user_id}`; 422 `Kelas X sudah penuh (n/n siswa)...` when over capacity |
+| GET | `/classrooms/{id}/enrollment-history` | riwayat masuk/keluar kelas (FR-39-003) |
+| GET | `/students/{id}/enrollment-history` | riwayat kelas satu siswa, semua tahun |
+| GET | `/teaching-workload?academic_year_id=` | jam/minggu per guru + pasangan kelas×mapel tanpa guru (FR-40-002, AC-40-01) |
 | GET | `/classrooms/{id}/students` | roster |
 | DELETE | `/classrooms/{id}/students/{student_user_id}` | |
-| POST | `/classrooms/{id}/subjects` | `{subject_id, teacher_user_id, is_active}` |
+| POST | `/classrooms/{id}/subjects` | `{subject_id, teacher_user_id, is_active, hours_per_week}` |
 | GET | `/classrooms/{id}/subjects` | |
 | GET | `/classrooms/{id}/subject-matrix` | same data, "Matriks Pelajaran" naming; exam-service consumes this |
-| PUT / DELETE | `/classroom-subjects/{id}` | edit teacher / toggle `is_active` |
+| PUT / DELETE | `/classroom-subjects/{id}` | edit teacher (explicit `null` un-assigns) / toggle `is_active` / `hours_per_week` |
 | GET | `/wali-kelas?academic_year_id=` | derived from `classrooms.homeroom_teacher_user_id`, not separately stored |
 | POST | `/subjects` | |
 | GET | `/subjects?page=&per_page=` | |
@@ -130,6 +133,18 @@ List/detail endpoints are scoped to the caller's `school_id`
 | GET | `/students/{id}/active-subjects?academic_year_id=` | for exam-service |
 | POST | `/grade-promotion` | kenaikan kelas, see below |
 | GET | `/dashboard/counts?academic_year_id=` | `{siswa, guru, kelas}` |
+
+### Riwayat kelas (class_enrollment_history)
+
+Every INSERT/UPDATE/DELETE on `class_enrollments` is logged by the
+`trg_class_enrollment_history` trigger (migration 0006), so manual add/remove,
+Menu 78 transfer/withdrawal apply, kenaikan kelas, the admission saga and the
+delete cascades are all covered. Writers that know the context tag it with
+transaction-local settings (`store.setEnrollmentContext`: action, reason,
+request id, actor); untagged changes get a derived action
+(`enroll`/`move`/`status_change`/`remove`). Capacity is enforced (row-locked)
+on manual add, transfer apply and promotion; NOT on the admission saga
+upsert, which must stay idempotent and has its own quota.
 
 ### Grade promotion (Kenaikan Kelas)
 

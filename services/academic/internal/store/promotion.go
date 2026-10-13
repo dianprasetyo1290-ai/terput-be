@@ -32,12 +32,15 @@ type PromotionResult struct {
 // deletes the source year's rows — and validates every promotion against
 // the source year's actual active roster first, so a stale/tampered client
 // payload can't move a student out of a classroom they aren't really in.
-func (s *Store) PromoteStudents(ctx context.Context, schoolID, sourceAcademicYearID, targetAcademicYearID string, promotions []StudentPromotion) ([]PromotionResult, error) {
+func (s *Store) PromoteStudents(ctx context.Context, schoolID, sourceAcademicYearID, targetAcademicYearID string, promotions []StudentPromotion, actorUserID string) ([]PromotionResult, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+	if err := setEnrollmentContext(ctx, tx, EnrollmentChange{Action: ActionPromotion, ActorUserID: actorUserID}); err != nil {
+		return nil, err
+	}
 
 	rows, err := tx.QueryContext(ctx, `
 		SELECT student_user_id, classroom_id FROM class_enrollments
@@ -78,6 +81,11 @@ func (s *Store) PromoteStudents(ctx context.Context, schoolID, sourceAcademicYea
 		key := resultKey{from: p.FromClassroomID}
 		if p.ToClassroomID != nil {
 			key.to = *p.ToClassroomID
+			// Capacity of the target-year classroom (FR-39-001); checked
+			// per student so earlier inserts in this tx count.
+			if err := checkCapacity(ctx, tx, *p.ToClassroomID, p.StudentUserID); err != nil {
+				return nil, err
+			}
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO class_enrollments (school_id, academic_year_id, classroom_id, student_user_id, status)
 				VALUES ($1, $2, $3, $4, 'active')

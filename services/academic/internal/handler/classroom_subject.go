@@ -15,7 +15,10 @@ type assignSubjectRequest struct {
 	SubjectID     string  `json:"subject_id"`
 	TeacherUserID *string `json:"teacher_user_id"`
 	IsActive      *bool   `json:"is_active"`
+	HoursPerWeek  *int    `json:"hours_per_week"` // jam pelajaran per minggu; omitted = keep/0
 }
+
+func validHours(h *int) bool { return h == nil || (*h >= 0 && *h <= 60) }
 
 // AssignSubjectToClassroom: POST /classrooms/{id}/subjects — assigns a mata
 // pelajaran to a classroom AND which guru teaches it there. Editable
@@ -40,6 +43,10 @@ func (h *Handler) AssignSubjectToClassroom(w http.ResponseWriter, r *http.Reques
 		common.WriteError(w, http.StatusBadRequest, "subject_id is required")
 		return
 	}
+	if !validHours(req.HoursPerWeek) {
+		common.WriteError(w, http.StatusBadRequest, "jam per minggu harus antara 0 dan 60")
+		return
+	}
 	isActive := true
 	if req.IsActive != nil {
 		isActive = *req.IsActive
@@ -51,7 +58,7 @@ func (h *Handler) AssignSubjectToClassroom(w http.ResponseWriter, r *http.Reques
 		SubjectID:      req.SubjectID,
 		TeacherUserID:  req.TeacherUserID,
 		IsActive:       isActive,
-	})
+	}, req.HoursPerWeek)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -250,6 +257,7 @@ func (h *Handler) BulkSetStudentSubjectMatrix(w http.ResponseWriter, r *http.Req
 type updateClassroomSubjectRequest struct {
 	TeacherUserID *string `json:"teacher_user_id"`
 	IsActive      *bool   `json:"is_active"`
+	HoursPerWeek  *int    `json:"hours_per_week"`
 }
 
 // UpdateClassroomSubject: PUT /classroom-subjects/{id} — edit which guru
@@ -259,12 +267,30 @@ func (h *Handler) UpdateClassroomSubject(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	var req updateClassroomSubjectRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		common.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	cs, err := h.Store.UpdateClassroomSubject(r.Context(), schoolID, chi.URLParam(r, "id"), req.TeacherUserID, req.IsActive)
+	var req updateClassroomSubjectRequest
+	buf, _ := json.Marshal(raw)
+	if err := json.Unmarshal(buf, &req); err != nil {
+		common.WriteError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !validHours(req.HoursPerWeek) {
+		common.WriteError(w, http.StatusBadRequest, "jam per minggu harus antara 0 dan 60")
+		return
+	}
+	// An explicit `"teacher_user_id": null` (or "") un-assigns the guru, so
+	// the pairing shows up again as "belum ada guru" (AC-40-01). Omitting
+	// the key leaves the teacher unchanged.
+	clearTeacher := false
+	if v, present := raw["teacher_user_id"]; present && (string(v) == "null" || req.TeacherUserID != nil && *req.TeacherUserID == "") {
+		clearTeacher = true
+		req.TeacherUserID = nil
+	}
+	cs, err := h.Store.UpdateClassroomSubject(r.Context(), schoolID, chi.URLParam(r, "id"), req.TeacherUserID, req.IsActive, req.HoursPerWeek, clearTeacher)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -406,4 +432,24 @@ func (h *Handler) GetTeachingAssignments(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, items, nil)
+}
+
+// TeachingWorkload: GET /teaching-workload?academic_year_id= — jam mengajar
+// per guru plus the kelas x mapel pairings that still have no guru
+// (FR-40-002, AC-40-01). Backs the Matriks Pelajaran summary panel.
+func (h *Handler) TeachingWorkload(w http.ResponseWriter, r *http.Request) {
+	schoolID, ok := scopeSchoolID(w, r)
+	if !ok {
+		return
+	}
+	academicYearID, ok := h.scopeAcademicYearID(w, r, schoolID)
+	if !ok {
+		return
+	}
+	rep, err := h.Store.TeachingWorkload(r.Context(), schoolID, academicYearID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, rep, nil)
 }
