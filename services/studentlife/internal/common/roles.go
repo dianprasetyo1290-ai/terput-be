@@ -15,7 +15,13 @@ const (
 	RoleKesiswaan     = "kesiswaan"
 	RoleSiswa         = "siswa"
 
-	FeatureHealth      = "health"
-	FeatureCounseling  = "counseling"
-	FeatureDiscipline  = "discipline"
+	RoleEventCoordinator = "event_coordinator"
+	RolePembinaEkskul     = "pembina_ekskul"
+
+	FeatureHealth          = "health"
+	FeatureCounseling      = "counseling"
+	FeatureDiscipline      = "discipline"
+	FeatureEvent           = "event"
+	FeatureExtracurricular = "extracurricular"
+	FeatureAchievement     = "achievement"
 )

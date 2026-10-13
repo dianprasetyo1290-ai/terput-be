@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"skci/studentlife/internal/activity"
 	"skci/studentlife/internal/client"
 	"skci/studentlife/internal/common"
 	"skci/studentlife/internal/config"
@@ -39,7 +40,7 @@ func main() {
 		log.Fatalf("failed to initialize crypto: %v", err)
 	}
 	cl := client.New(client.URLs{Identity: cfg.IdentityURL, Academic: cfg.AcademicURL, Attendance: cfg.AttendanceURL,
-		Notification: cfg.NotificationURL, Core: cfg.CoreURL, Ops: cfg.OpsURL}, cfg.InternalKey)
+		Notification: cfg.NotificationURL, Core: cfg.CoreURL, Ops: cfg.OpsURL, Billing: cfg.BillingURL}, cfg.InternalKey)
 	app := handler.New(db, cfg, cr, cl)
 
 	runner := jobs.NewRunner(db, cfg.JobInterval)
@@ -48,6 +49,7 @@ func main() {
 	runner.Register("studentlife_consent_reminders", app.Health.JobConsentReminders)
 	runner.Register("studentlife_session_reminders", app.Counseling.JobSessionReminders)
 	runner.Register("studentlife_task_reminders", app.Counseling.JobTaskReminders)
+	runner.Register("studentlife_activity_daily", activity.DailyJob)
 	runner.Register("studentlife_forward_audit", app.JobForwardAudit)
 	runner.Start()
 	defer runner.Stop()

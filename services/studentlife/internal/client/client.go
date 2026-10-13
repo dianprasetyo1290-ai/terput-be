@@ -56,7 +56,7 @@ func StatusOf(err error) int {
 }
 
 type URLs struct {
-	Identity, Academic, Attendance, Notification, Core, Ops string
+	Identity, Academic, Attendance, Notification, Core, Ops, Billing string
 }
 
 type Client struct {
@@ -434,3 +434,117 @@ func (c *Client) RequireFeature(featureKey string) func(http.Handler) http.Handl
 		})
 	}
 }
+
+// Facility Booking structs (T21 / T9 integration)
+type BookingRequest struct {
+	SchoolID        string `json:"school_id"`
+	RoomID          string `json:"room_id"`
+	StartsAt        string `json:"starts_at"`
+	EndsAt          string `json:"ends_at"`
+	Purpose         string `json:"purpose"`
+	Participants    int    `json:"participants"`
+	RequesterUserID string `json:"requester_user_id"`
+	SourceService   string `json:"source_service"`
+	SourceRef       string `json:"source_ref"`
+	IdempotencyKey  string `json:"idempotency_key"`
+}
+
+type BookingResponse struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
+type BookingConflictRejection struct {
+	Error        string `json:"error"`
+	NearestSlots []struct {
+		Start string `json:"start"`
+		End   string `json:"end"`
+	} `json:"nearest_slots"`
+}
+
+func (c *Client) CreateFacilityBooking(ctx context.Context, b BookingRequest) (*BookingResponse, *BookingConflictRejection, error) {
+	if c.URLs.Ops == "" {
+		return nil, nil, ErrNotConfigured
+	}
+	var res BookingResponse
+	err := c.do(ctx, http.MethodPost, c.URLs.Ops, "/internal/facility/bookings", b, b.IdempotencyKey, &res)
+	if err != nil {
+		var he *HTTPError
+		if errors.As(err, &he) && he.Status == http.StatusConflict {
+			var rej struct {
+				Data BookingConflictRejection `json:"data"`
+			}
+			_ = json.Unmarshal([]byte(he.Body), &rej)
+			return nil, &rej.Data, err
+		}
+		return nil, nil, err
+	}
+	return &res, nil, nil
+}
+
+func (c *Client) CancelFacilityBooking(ctx context.Context, id, schoolID, reason, actorID string) error {
+	if c.URLs.Ops == "" {
+		return ErrNotConfigured
+	}
+	body := map[string]string{
+		"school_id":     schoolID,
+		"reason":        reason,
+		"actor_user_id": actorID,
+	}
+	return c.do(ctx, http.MethodPost, c.URLs.Ops, "/internal/facility/bookings/"+url.PathEscape(id)+"/cancel", body, "", nil)
+}
+
+// BILL-ADHOC structs (T21 / T18 / T12 integration)
+type AdhocBillItem struct {
+	Name      string `json:"name"`
+	AmountIDR int64  `json:"amount_idr"`
+}
+
+type AdhocBillRequest struct {
+	SchoolID      string          `json:"school_id"`
+	StudentUserID string          `json:"student_user_id"`
+	SourceModule  string          `json:"source_module"`
+	SourceRef     string          `json:"source_ref"`
+	Items         []AdhocBillItem `json:"items"`
+	DueDate       string          `json:"due_date"`
+}
+
+func (c *Client) CreateAdhocBill(ctx context.Context, req AdhocBillRequest, idempotencyKey string) (string, error) {
+	if c.URLs.Billing == "" {
+		return "", ErrNotConfigured
+	}
+	var res struct {
+		ID string `json:"id"`
+	}
+	err := c.do(ctx, http.MethodPost, c.URLs.Billing, "/internal/bills/adhoc", req, idempotencyKey, &res)
+	return res.ID, err
+}
+
+// Budget check structs (T21 / T17 integration)
+type BudgetCheckRequest struct {
+	SchoolID      string `json:"school_id"`
+	BudgetLineID  string `json:"budget_line_id"`
+	AmountIDR     int64  `json:"amount_idr"`
+	SourceService string `json:"source_service"`
+	SourceType    string `json:"source_type"`
+	SourceID      string `json:"source_id"`
+}
+
+type BudgetCheckResponse struct {
+	AvailableIDR int64  `json:"available_idr"`
+	OverBudget   bool   `json:"over_budget"`
+	Policy       string `json:"policy"`
+}
+
+func (c *Client) CheckBudget(ctx context.Context, budgetURL string, req BudgetCheckRequest) (*BudgetCheckResponse, error) {
+	if budgetURL == "" {
+		return nil, nil
+	}
+	var res BudgetCheckResponse
+	err := c.do(ctx, http.MethodPost, budgetURL, "/internal/budget/check", req, "", &res)
+	if err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+

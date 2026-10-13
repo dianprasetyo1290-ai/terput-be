@@ -23,6 +23,8 @@ type Config struct {
 	NotificationURL   string
 	CoreURL           string
 	OpsURL            string // opsional: kosong = pengeluaran stok obat tetap pending (T15)
+	BillingURL        string
+	BudgetCheckURL    string
 	PublicInternalURL string // dipakai sebagai callback_url approval core
 	PortalURL         string // tautan portal di notifikasi wali
 	StoragePath       string
@@ -65,6 +67,8 @@ func Load() (Config, error) {
 		NotificationURL:   trim(env("NOTIFICATION_URL", "http://localhost:8089")),
 		CoreURL:           trim(env("CORE_URL", "http://localhost:8091")),
 		OpsURL:            trim(os.Getenv("OPS_URL")),
+		BillingURL:        trim(env("BILLING_URL", "http://localhost:8090")),
+		BudgetCheckURL:    trim(os.Getenv("BUDGET_CHECK_URL")),
 		PublicInternalURL: trim(env("STUDENTLIFE_PUBLIC_INTERNAL_URL", "http://localhost:8094")),
 		PortalURL:         trim(env("PORTAL_URL", "http://localhost:5173")),
 		StoragePath:       env("STORAGE_PATH", "./data/storage"),

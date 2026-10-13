@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
+	"skci/studentlife/internal/activity"
 	"skci/studentlife/internal/client"
 	"skci/studentlife/internal/common"
 	"skci/studentlife/internal/config"
@@ -34,19 +35,24 @@ type App struct {
 	Sensitive  *sensitive.Handler
 	Counseling *counseling.Handler
 	Discipline *discipline.Handler
+	Activity   *activity.Handler
 }
 
 // New builds the App and registers each module's consent subjects and
-// sensitive modules (T20 adds referral → counseling here).
+// sensitive modules (T20 adds referral → counseling, T21 adds event_registration → activity).
 func New(db *sql.DB, cfg config.Config, cr *sensitive.Service, cl *client.Client) *App {
 	h := &health.Handler{DB: db, Crypto: cr, Client: cl, Cfg: cfg}
 	coun := counseling.NewHandler(db, cr, cl, cfg)
 	disc := discipline.NewHandler(db, cl, cfg)
+	actStore := activity.NewStore(db)
+	act := activity.NewHandler(db, actStore, cl, cfg, nil)
+
 	return &App{
-		DB: db, Cfg: cfg, Client: cl, Health: h, Counseling: coun, Discipline: disc,
+		DB: db, Cfg: cfg, Client: cl, Health: h, Counseling: coun, Discipline: disc, Activity: act,
 		Consent: &consent.Handler{DB: db, Client: cl, Subjects: map[string]consent.Subject{
-			health.ConsentSubjectProgram:      h.ConsentSubject(),
-			counseling.ConsentSubjectReferral: coun.ConsentSubject(),
+			health.ConsentSubjectProgram:            h.ConsentSubject(),
+			counseling.ConsentSubjectReferral:       coun.ConsentSubject(),
+			activity.ConsentSubjectEventRegistration: act.ConsentSubject(),
 		}},
 		Sensitive: &sensitive.Handler{DB: db, Client: cl, ModuleFeatures: map[string]string{
 			sensitive.ModuleHealth:     common.FeatureHealth,
@@ -74,6 +80,7 @@ func (a *App) Router() http.Handler {
 	r.Group(func(in chi.Router) {
 		in.Use(common.InternalAuth(a.Cfg.InternalKey))
 		in.Post("/internal/approval-callbacks", a.ApprovalCallback)
+		in.Get("/internal/achievements/summary", a.Activity.InternalAchievementSummary)
 	})
 
 	r.Group(func(pr chi.Router) {
@@ -184,6 +191,111 @@ func (a *App) Router() http.Handler {
 			dr.Put("/actions/{id}", d.UpdateAction)
 			dr.Get("/my/appeals", d.ListMyAppeals)
 		})
+
+		// T21: Event, Ekstrakurikuler & Prestasi
+		pr.Route("/activities", func(ar chi.Router) {
+			ar.Get("/calendar", a.Activity.Calendar)
+
+			ar.Group(func(er chi.Router) {
+				er.Use(a.Client.RequireFeature(common.FeatureEvent))
+				er.Get("/event-kinds", a.Activity.ListEventKinds)
+				er.Post("/event-kinds", a.Activity.CreateEventKind)
+				er.Put("/event-kinds/{id}", a.Activity.UpdateEventKind)
+				er.Delete("/event-kinds/{id}", a.Activity.DeleteEventKind)
+
+				er.Get("/events", a.Activity.ListEvents)
+				er.Post("/events", a.Activity.CreateEvent)
+				er.Get("/events/{id}", a.Activity.GetEvent)
+				er.Put("/events/{id}", a.Activity.UpdateEvent)
+				er.Delete("/events/{id}", a.Activity.DeleteEvent)
+				er.Post("/events/{id}/submit", a.Activity.SubmitEvent)
+				er.Post("/events/{id}/publish", a.Activity.PublishEvent)
+				er.Post("/events/{id}/cancel", a.Activity.CancelEvent)
+				er.Get("/events/{id}/registrations", a.Activity.ListEventRegistrations)
+				er.Post("/events/{id}/registrations", a.Activity.RegisterStudent)
+				er.Post("/registrations/{id}/attendance", a.Activity.MarkAttendance)
+			})
+
+			ar.Group(func(xr chi.Router) {
+				xr.Use(a.Client.RequireFeature(common.FeatureExtracurricular))
+				xr.Get("/ecc-periods", a.Activity.ListPeriods)
+				xr.Post("/ecc-periods", a.Activity.CreatePeriod)
+				xr.Get("/extracurriculars", a.Activity.ListExtracurriculars)
+				xr.Post("/extracurriculars", a.Activity.CreateExtracurricular)
+				xr.Get("/extracurriculars/{id}", a.Activity.GetExtracurricular)
+				xr.Put("/extracurriculars/{id}", a.Activity.UpdateExtracurricular)
+				xr.Delete("/extracurriculars/{id}", a.Activity.DeleteExtracurricular)
+				xr.Get("/extracurriculars/{id}/members", a.Activity.ListMembers)
+				xr.Post("/extracurriculars/{id}/members/{mid}/status", a.Activity.UpdateMemberStatus)
+				xr.Get("/extracurriculars/{id}/sessions", a.Activity.ListSessions)
+				xr.Post("/extracurriculars/{id}/sessions", a.Activity.CreateSession)
+				xr.Get("/extracurriculars/{id}/assessments", a.Activity.ListAssessments)
+				xr.Put("/extracurriculars/{id}/assessments", a.Activity.UpsertAssessment)
+			})
+
+			ar.Group(func(hr chi.Router) {
+				hr.Use(a.Client.RequireFeature(common.FeatureAchievement))
+				hr.Get("/achievements", a.Activity.ListAchievements)
+				hr.Post("/achievements", a.Activity.CreateAchievement)
+				hr.Post("/achievements/{id}/verify", a.Activity.VerifyAchievement)
+				hr.Post("/achievements/{id}/reject", a.Activity.RejectAchievement)
+				hr.Get("/achievements/summary", a.Activity.AchievementSummary)
+			})
+		})
+
+		pr.Route("/me/activities", func(mr chi.Router) {
+			mr.Get("/events", func(w http.ResponseWriter, r *http.Request) {
+				claims := common.GetClaims(r.Context())
+				list, err := a.Activity.Store.ListMyRegistrations(r.Context(), claims.SchoolID, claims.UserID)
+				if err != nil {
+					common.WriteError(w, http.StatusInternalServerError, "Gagal memuat kegiatan saya")
+					return
+				}
+				common.WriteSuccess(w, list, nil)
+			})
+			mr.Post("/events/{id}/register", a.Activity.RegisterSelf)
+			mr.Delete("/registrations/{id}", a.Activity.CancelRegistration)
+			mr.Get("/extracurriculars", func(w http.ResponseWriter, r *http.Request) {
+				claims := common.GetClaims(r.Context())
+				list, err := a.Activity.Store.ListMyMemberships(r.Context(), claims.SchoolID, claims.UserID)
+				if err != nil {
+					common.WriteError(w, http.StatusInternalServerError, "Gagal memuat ekskul saya")
+					return
+				}
+				common.WriteSuccess(w, list, nil)
+			})
+			mr.Post("/extracurriculars/{id}/join", a.Activity.JoinEccSelf)
+			mr.Post("/extracurriculars/{id}/leave", a.Activity.LeaveEccSelf)
+			mr.Get("/achievements", a.Activity.ListAchievements)
+			mr.Post("/achievements", a.Activity.CreateAchievement)
+		})
+
+		pr.Route("/parent/activities", func(par chi.Router) {
+			par.Get("/events", func(w http.ResponseWriter, r *http.Request) {
+				claims := common.GetClaims(r.Context())
+				studentID := r.URL.Query().Get("student_id")
+				list, err := a.Activity.Store.ListMyRegistrations(r.Context(), claims.SchoolID, studentID)
+				if err != nil {
+					common.WriteError(w, http.StatusInternalServerError, "Gagal memuat kegiatan anak")
+					return
+				}
+				common.WriteSuccess(w, list, nil)
+			})
+			par.Post("/events/{id}/register", a.Activity.RegisterByParent)
+			par.Get("/extracurriculars", func(w http.ResponseWriter, r *http.Request) {
+				claims := common.GetClaims(r.Context())
+				studentID := r.URL.Query().Get("student_id")
+				list, err := a.Activity.Store.ListMyMemberships(r.Context(), claims.SchoolID, studentID)
+				if err != nil {
+					common.WriteError(w, http.StatusInternalServerError, "Gagal memuat ekskul anak")
+					return
+				}
+				common.WriteSuccess(w, list, nil)
+			})
+			par.Post("/extracurriculars/{id}/join", a.Activity.JoinEccByParent)
+			par.Get("/achievements", a.Activity.ListAchievements)
+			par.Post("/achievements", a.Activity.CreateAchievement)
+		})
 	})
 	return r
 }
@@ -198,7 +310,7 @@ type approvalCallback struct {
 }
 
 // ApprovalCallback: POST /internal/approval-callbacks (core, idempotent),
-// dispatched per request_type (T20 adds discipline_appeal).
+// dispatched per request_type (T20 adds discipline_appeal, T21 adds event).
 func (a *App) ApprovalCallback(w http.ResponseWriter, r *http.Request) {
 	var body approvalCallback
 	if !common.Decode(w, r, &body) {
@@ -213,9 +325,32 @@ func (a *App) ApprovalCallback(w http.ResponseWriter, r *http.Request) {
 		a.healthProfileCallback(w, r, body)
 	case "discipline_appeal":
 		a.disciplineAppealCallback(w, r, body)
+	case "event":
+		a.eventApprovalCallback(w, r, body)
 	default:
 		common.WriteError(w, http.StatusBadRequest, "request_type tidak dikenal")
 	}
+}
+
+func (a *App) eventApprovalCallback(w http.ResponseWriter, r *http.Request, body approvalCallback) {
+	tx, err := a.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memproses callback")
+		return
+	}
+	defer tx.Rollback()
+
+	if err := a.Activity.ApplyApprovalDecision(r.Context(), tx, body.SourceID, body.Decision, body.DecidedBy); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memproses keputusan approval event")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menyimpan keputusan callback")
+		return
+	}
+
+	common.WriteSuccess(w, map[string]string{"id": body.SourceID, "status": body.Decision}, nil)
 }
 
 func (a *App) disciplineAppealCallback(w http.ResponseWriter, r *http.Request, body approvalCallback) {
