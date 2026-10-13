@@ -12,6 +12,7 @@ import (
 
 	"skci/ops/internal/asset"
 	"skci/ops/internal/budget"
+	"skci/ops/internal/campus3d"
 	"skci/ops/internal/client"
 	"skci/ops/internal/common"
 	"skci/ops/internal/config"
@@ -137,6 +138,16 @@ func main() {
 		CallbackBase: cfg.OpsPublicInternalURL,
 		Purchase:     &woPurchaseRequester{store: procStore},
 	}
+
+	apiClient.BillingURL = cfg.BillingURL
+
+	c3dStore := campus3d.NewStore(db)
+	c3dStorage := storage.NewLocal(cfg.StorageRoot, cfg.Campus3DMaxModelBytes, "model/gltf-binary")
+	c3dFacSrc := campus3d.NewFacilitySource(fac.Store)
+	c3dAstSrc := campus3d.NewAssetSource(assetStore)
+	c3dCanSrc := campus3d.NewCanteenSource(apiClient)
+	c3dHandler := campus3d.NewHandler(c3dStore, c3dStorage, c3dFacSrc, c3dAstSrc, c3dCanSrc, apiClient, cfg.Campus3DMaxModelBytes, loc)
+
 	app := &handler.App{
 		DB:          db,
 		Config:      &cfg,
@@ -150,6 +161,7 @@ func main() {
 		Budget:      bgtHandler,
 		Tax:         taxHandler,
 		Payable:     payHandler,
+		Campus3D:    c3dHandler,
 	}
 
 	syncJob := procurement.NewSyncJob(db, apiClient, cfg.AccountingURL, cfg.InternalKey)

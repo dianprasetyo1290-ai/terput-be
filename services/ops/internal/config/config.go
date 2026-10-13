@@ -28,6 +28,7 @@ type Config struct {
 	OpsBlindKey          string
 	StorageRoot          string
 	MaxUploadBytes       int64
+	Campus3DMaxModelBytes int64
 	JobInterval          time.Duration
 	FeatureCacheTTL      time.Duration
 	SchoolTimezone       string
@@ -68,6 +69,7 @@ func Load() (Config, error) {
 		OpsBlindKey:          blindKey,
 		StorageRoot:          env("STORAGE_ROOT", "./data/private/ops"),
 		MaxUploadBytes:       int64(integer("MAX_UPLOAD_BYTES", 5<<20)),
+		Campus3DMaxModelBytes: int64(integer("CAMPUS3D_MAX_MODEL_BYTES", 50<<20)),
 		JobInterval:          time.Duration(integer("JOB_INTERVAL_SECONDS", 300)) * time.Second,
 		FeatureCacheTTL:      time.Duration(integer("FEATURE_CACHE_SECONDS", 60)) * time.Second,
 		SchoolTimezone:       env("SCHOOL_TIMEZONE", "Asia/Jakarta"),

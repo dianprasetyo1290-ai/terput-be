@@ -519,6 +519,36 @@ func (a *App) Router() http.Handler {
 		})
 	}
 
+	// 3D Campus (JWT + feature 'campus3d'), T25.
+	if a.Campus3D != nil {
+		c3d := a.Campus3D
+		r.Route("/campus3d", func(api chi.Router) {
+			api.Use(common.JWTMiddleware(a.Config.JWTSecret))
+
+			// Model management
+			api.Post("/models", c3d.UploadModel)
+			api.Get("/models", c3d.ListModels)
+			api.Delete("/models/{id}", c3d.DeleteModel)
+			api.Get("/models/{id}/file", c3d.GetModelFile)
+			api.Get("/models/{id}/mapping", c3d.GetModelMapping)
+			api.Put("/models/{id}/mapping", c3d.UpdateModelMapping)
+			api.Post("/models/{id}/publish", c3d.PublishModel)
+
+			// Tenant spots
+			api.Get("/tenant-spots", c3d.ListTenantSpots)
+			api.Put("/tenant-spots", c3d.UpdateTenantSpots)
+
+			// Operational 3D views
+			api.Get("/scene", c3d.GetScene)
+			api.Get("/rooms/search", c3d.SearchRooms)
+			api.Get("/rooms/{roomId}", c3d.GetRoomDetail)
+			api.Get("/canteen", c3d.GetCanteenView)
+			api.Get("/canteen/{tenantId}/menu", c3d.GetCanteenMenu)
+			api.Get("/availability", c3d.GetAvailability)
+			api.Get("/twin", c3d.GetDigitalTwin)
+		})
+	}
+
 	return r
 }
 

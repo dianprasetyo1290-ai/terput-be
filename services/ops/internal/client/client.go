@@ -44,6 +44,7 @@ type Client struct {
 	IdentityURL string
 	CoreURL     string
 	NotifURL    string
+	BillingURL  string
 	InternalKey string
 	FeatureTTL  time.Duration
 	HTTP        *http.Client
@@ -303,4 +304,42 @@ func (c *Client) ResolveStudentCard(ctx context.Context, billingURL, schoolID, c
 		return "", errors.New("Kartu tidak aktif")
 	}
 	return res.StudentUserID, nil
+}
+
+type CanteenTenantItem struct {
+	TenantID      string  `json:"tenant_id"`
+	Code          string  `json:"code"`
+	Name          string  `json:"name"`
+	LocationLabel string  `json:"location_label"`
+	RoomID        *string `json:"room_id"`
+	IsOpen        bool    `json:"is_open"`
+	OpenChangedAt *string `json:"open_changed_at"`
+}
+
+type CanteenMenuItem struct {
+	ItemID    string `json:"item_id"`
+	Name      string `json:"name"`
+	Category  string `json:"category"`
+	PriceIDR  int64  `json:"price_idr"`
+	Available bool   `json:"available"`
+}
+
+func (c *Client) ListCanteenTenants(ctx context.Context, schoolID string) ([]CanteenTenantItem, error) {
+	if c.BillingURL == "" {
+		return nil, errors.New("Billing URL belum dikonfigurasi")
+	}
+	var res []CanteenTenantItem
+	q := url.Values{"school_id": {schoolID}}
+	err := c.do(ctx, http.MethodGet, c.BillingURL+"/internal/canteen/tenants?"+q.Encode(), nil, "", &res)
+	return res, err
+}
+
+func (c *Client) ListCanteenMenu(ctx context.Context, schoolID, tenantID string) ([]CanteenMenuItem, error) {
+	if c.BillingURL == "" {
+		return nil, errors.New("Billing URL belum dikonfigurasi")
+	}
+	var res []CanteenMenuItem
+	q := url.Values{"school_id": {schoolID}}
+	err := c.do(ctx, http.MethodGet, c.BillingURL+"/internal/canteen/tenants/"+url.PathEscape(tenantID)+"/menu?"+q.Encode(), nil, "", &res)
+	return res, err
 }

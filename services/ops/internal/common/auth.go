@@ -112,6 +112,11 @@ func JWTMiddleware(secret string) func(http.Handler) http.Handler {
 	}
 }
 
+// WithClaims returns a context carrying claims.
+func WithClaims(ctx context.Context, c *Claims) context.Context {
+	return context.WithValue(ctx, claimsCtxKey, c)
+}
+
 // FromCtx returns the verified JWT claims, if any.
 func FromCtx(r *http.Request) *Claims {
 	c, _ := r.Context().Value(claimsCtxKey).(*Claims)

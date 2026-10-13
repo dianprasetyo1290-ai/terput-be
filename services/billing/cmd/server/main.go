@@ -253,6 +253,11 @@ func main() {
 		// T24: Insight Read Model & Metric Facts
 		in.Get("/internal/metric-facts", app.InternalMetricFacts)
 		in.Get("/internal/risk-facts/arrears", app.InternalRiskFactsArrears)
+
+		// T25: 3D Campus live canteen reads
+		in.Get("/internal/canteen/directory", app.InternalCanteenDirectory)
+		in.Get("/internal/canteen/tenants", app.InternalCanteenTenants)
+		in.Get("/internal/canteen/tenants/{id}/menu", app.InternalCanteenTenantMenu)
 	})
 
 	log.Printf("billing-service listening on :%s (%s)", cfg.Port, cfg.AppEnv)

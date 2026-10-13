@@ -17,6 +17,7 @@ import (
 	"skci/ops/internal/facility"
 	"skci/ops/internal/inventory"
 	"skci/ops/internal/library"
+	"skci/ops/internal/campus3d"
 	"skci/ops/internal/payable"
 	"skci/ops/internal/procurement"
 	"skci/ops/internal/store"
@@ -37,6 +38,7 @@ type App struct {
 	Budget      *budget.Handler
 	Tax         *tax.Handler
 	Payable     *payable.Handler
+	Campus3D    *campus3d.Handler
 }
 
 func (a *App) Healthz(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +56,7 @@ var featureLabels = map[string]string{
 	"budget":         "Anggaran & Realisasi (RAPBS)",
 	"tax_nonpayroll": "Pajak Non-Gaji & e-Faktur",
 	"payable":        "Utang Usaha & Pembayaran",
+	"campus3d":       "Kampus 3D",
 }
 
 // featureOn reports whether key is on for the school (fails closed).
