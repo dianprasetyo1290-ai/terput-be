@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"skci/billing/internal/client"
 	"skci/billing/internal/model"
 )
 
@@ -40,8 +39,8 @@ func (a *App) JobProviderHealth(ctx context.Context, _ *sql.DB) error {
 // (AC-IF-03). It replaces T6's per-transaction posting from the webhook,
 // which reused the daily reference so accounting dropped every transaction
 // after the first one of the day. One outbox row per (school, day) with
-// reference pgw:<school>:<date>, bills purpose only (wallet top-ups are
-// journaled by T12). The outbox worker (T12 journal_outbox) sends it.
+// reference pgw:<school>:<date>, bills purpose only (wallet top-ups are in
+// the wallet journal). JobJournalOutbox sends it.
 // Without a gateway_accounts mapping no journal is guessed: an exception
 // journal_posting is raised and the day is retried on later runs.
 func (a *App) JobGatewayJournal(ctx context.Context, _ *sql.DB) error {
@@ -136,10 +135,18 @@ func (a *App) queueGatewayJournal(ctx context.Context, schoolID, day string, loc
 		return err
 	}
 	defer dbTx.Rollback()
+	ids, err := collectIDs(ctx, a.DB,
+		`SELECT id::text FROM gateway_transactions
+		  WHERE school_id = $1 AND purpose = 'bills' AND status IN ('success','corrected') AND paid_at >= $2 AND paid_at < $3 ORDER BY 1`,
+		schoolID, start, start.AddDate(0, 0, 1))
+	if err != nil {
+		return err
+	}
 	if _, err := dbTx.ExecContext(ctx,
-		`INSERT INTO gateway_journal_postings (school_id, reference, trans_date, description, lines)
-		 VALUES ($1, $2, $3, $4, $5) ON CONFLICT (reference) DO NOTHING`,
-		schoolID, reference, day, "Penerimaan payment gateway "+day, jsonRaw(lines)); err != nil {
+		`INSERT INTO gateway_journal_postings (school_id, reference, trans_date, description, lines, kind, source, source_refs)
+		 VALUES ($1, $2, $3, $4, $5, 'gateway_receipt', $6, $7) ON CONFLICT (reference) DO NOTHING`,
+		schoolID, reference, day, "Penerimaan payment gateway "+day, jsonRaw(lines), sourceGateway,
+		jsonRaw(map[string][]string{"gateway_transactions": ids})); err != nil {
 		return err
 	}
 	if _, err := dbTx.ExecContext(ctx,
@@ -150,12 +157,5 @@ func (a *App) queueGatewayJournal(ctx context.Context, schoolID, day string, loc
 }
 
 func (a *App) journalException(ctx context.Context, schoolID, reference, msg string) {
-	if a.Core == nil {
-		return
-	}
-	_ = a.Core.CreateException(ctx, client.ExceptionEvent{
-		SchoolID: schoolID, SourceService: "billing", Kind: "journal_posting", Severity: "normal",
-		CorrelationID: reference, ErrorMessage: msg, PayloadSummary: map[string]any{"reference": reference},
-		MaxAttempts: 1, IdempotencyKey: "journal-queue:" + reference,
-	})
+	a.raiseQueueIssue(ctx, schoolID, reference, msg, time.Now())
 }

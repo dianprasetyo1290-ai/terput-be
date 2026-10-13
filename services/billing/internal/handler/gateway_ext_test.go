@@ -482,8 +482,8 @@ func TestAdhocBillCheckout(t *testing.T) {
 	f.app.PaymentFeatures = nil
 	m := f.method("va_adhoc", gateway.CapVA, "BNIN")
 	id := genUUID()
-	f.exec(`INSERT INTO student_bills (id, school_id, student_user_id, scheme_id, period_year, period_month, base_idr, discount_idr, net_idr, status, due_at)
-	        VALUES ($1, $2, $3, NULL, 2026, 7, 50000, 0, 50000, 'unpaid', now())`, id, f.schoolID, f.studentID)
+	f.exec(`INSERT INTO student_bills (id, school_id, student_user_id, scheme_id, period_year, period_month, base_idr, discount_idr, net_idr, status, due_at, source_module, source_ref)
+	        VALUES ($1, $2, $3, NULL, 2026, 7, 50000, 0, 50000, 'unpaid', now(), 'library', $1)`, id, f.schoolID, f.studentID)
 	if code, _, raw := f.checkout(m, id); code != http.StatusOK {
 		t.Fatalf("ad-hoc checkout %d %s", code, raw)
 	}
@@ -735,7 +735,7 @@ func TestGatewayJournalQueuedDailyWithoutHardcodedAccounts(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	lines := f.scalar(`SELECT lines::text FROM gateway_journal_postings WHERE reference = $1`, ref)
+	lines := strings.ReplaceAll(f.scalar(`SELECT lines::text FROM gateway_journal_postings WHERE reference = $1`, ref), " ", "")
 	if !strings.Contains(lines, `"debit_idr":200000`) || !strings.Contains(lines, `"credit_idr":200000`) {
 		t.Fatalf("one journal for both bills transactions (top-up excluded), got %s", lines)
 	}
