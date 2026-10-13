@@ -28,6 +28,8 @@ type Client struct {
 	notificationURL string
 	identityBaseURL string
 	academicBaseURL string
+	coreURL         string // core-service (Approval Center + audit), see core.go
+	callbackURL     string // where core POSTs approval decisions
 	internalKey     string
 	httpClient      *http.Client
 }
@@ -39,6 +41,8 @@ func New() *Client {
 		getEnv("SEKOCI_INTERNAL_KEY", "change-me"),
 	)
 	c.notificationURL = getEnv("NOTIFICATION_SERVICE_URL", "http://notification:8089")
+	c.coreURL = getEnv("CORE_URL", "http://core:8091")
+	c.callbackURL = getEnv("ATTENDANCE_PUBLIC_INTERNAL_URL", "http://attendance:8083") + "/internal/approval-callbacks"
 	return c
 }
 

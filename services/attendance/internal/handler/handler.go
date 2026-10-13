@@ -42,12 +42,22 @@ type Handler struct {
 	guardianAccess   guardianAccessChecker
 	parentAttendance parentAttendanceReader
 	healthAbsence    healthAbsenceStore
+
+	// P4A seams (lock.go / alpa.go); tests inject fakes.
+	lockSettings lockSettingsReader
+	alpaClaims   alpaClaimStore
+	alpaNotify   guardianNotifier
+	now          func() time.Time
 }
 
 func New(s *store.Store, c *client.Client) *Handler {
-	h := &Handler{Store: s, Client: c, parentAttendance: s, healthAbsence: s}
+	h := &Handler{Store: s, Client: c, parentAttendance: s, healthAbsence: s, now: time.Now}
+	if s != nil {
+		h.lockSettings, h.alpaClaims = s, s
+	}
 	if c != nil {
 		h.guardianAccess = c
+		h.alpaNotify = c
 	}
 	return h
 }

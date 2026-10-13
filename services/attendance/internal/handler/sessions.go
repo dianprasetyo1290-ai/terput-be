@@ -629,6 +629,9 @@ func (h *Handler) BulkMarkStudents(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "student_ids is required")
 		return
 	}
+	if !h.ensureUnlocked(w, r, cs.SchoolID, cs.SessionDate) { // FR-41-003
+		return
+	}
 	// BR-ATT-02: "pilih semua" must not overwrite an approved izin/sakit.
 	leaves, err := h.Store.ApprovedLeaveTypes(r.Context(), cs.SchoolID, cs.SessionDate, req.StudentIDs)
 	if err != nil {
@@ -636,6 +639,7 @@ func (h *Handler) BulkMarkStudents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	results := make([]model.StudentAttendance, 0, len(req.StudentIDs))
+	var alpa alpaCollector
 	for _, sid := range req.StudentIDs {
 		status, catatan := req.Status, (*string)(nil)
 		if l, ok := leaves[sid]; ok {
@@ -657,7 +661,9 @@ func (h *Handler) BulkMarkStudents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		results = append(results, *sa)
+		alpa.add(cs.SchoolID, sid, cs.SessionDate, status)
 	}
+	h.notifyAlpaAsync(alpa) // FR-41-004
 	common.WriteJSONMsg(w, http.StatusOK, results, nil, "Presensi siswa berhasil disimpan")
 }
 
@@ -686,7 +692,10 @@ func (h *Handler) MarkOneStudent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !model.AttendanceStatus(req.Status).Valid() {
-		common.WriteError(w, http.StatusBadRequest, "invalid status, must be one of hadir|sakit|izin|tanpa_keterangan")
+		common.WriteError(w, http.StatusBadRequest, "invalid status, must be one of hadir|terlambat|sakit|izin|tanpa_keterangan")
+		return
+	}
+	if !h.ensureUnlocked(w, r, cs.SchoolID, cs.SessionDate) { // FR-41-003
 		return
 	}
 	sa, err := h.Store.UpsertStudentAttendance(r.Context(), cs.SessionDate, store.MarkInput{
@@ -704,6 +713,9 @@ func (h *Handler) MarkOneStudent(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusInternalServerError, "failed to mark student: "+err.Error())
 		return
 	}
+	var alpa alpaCollector
+	alpa.add(cs.SchoolID, studentID, cs.SessionDate, req.Status)
+	h.notifyAlpaAsync(alpa) // FR-41-004
 	common.WriteJSONMsg(w, http.StatusOK, sa, nil, "Status kehadiran siswa berhasil diubah")
 }
 

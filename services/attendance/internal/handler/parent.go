@@ -29,10 +29,11 @@ type parentAttendanceDay struct {
 // parentAttendanceSummary is the hadir/sakit/izin/alfa recap for the window.
 // "alfa" is the portal-facing name for the store's "tanpa_keterangan".
 type parentAttendanceSummary struct {
-	Hadir int `json:"hadir"`
-	Sakit int `json:"sakit"`
-	Izin  int `json:"izin"`
-	Alfa  int `json:"alfa"`
+	Hadir     int `json:"hadir"`
+	Terlambat int `json:"terlambat"`
+	Sakit     int `json:"sakit"`
+	Izin      int `json:"izin"`
+	Alfa      int `json:"alfa"`
 }
 
 type parentChildAttendanceResponse struct {
@@ -99,6 +100,8 @@ func (h *Handler) ParentChildAttendance(w http.ResponseWriter, r *http.Request) 
 		switch row.Status {
 		case "hadir":
 			summary.Hadir++
+		case "terlambat":
+			summary.Terlambat++
 		case "sakit":
 			summary.Sakit++
 		case "izin":

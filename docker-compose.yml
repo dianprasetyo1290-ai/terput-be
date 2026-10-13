@@ -127,6 +127,9 @@ services:
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
       IDENTITY_SERVICE_URL: http://identity:${IDENTITY_PORT}
       ACADEMIC_SERVICE_URL: http://academic:${ACADEMIC_PORT}
+      NOTIFICATION_SERVICE_URL: http://notification:${NOTIFICATION_PORT}
+      CORE_URL: http://core:${CORE_PORT:-8091}
+      ATTENDANCE_PUBLIC_INTERNAL_URL: http://attendance:${ATTENDANCE_PORT}
     ports: ["${ATTENDANCE_PORT}:${ATTENDANCE_PORT}"]
 
   # ---------- exam ----------

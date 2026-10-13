@@ -896,6 +896,7 @@ func (s *Store) StudentAttendanceMonthlySummary(ctx context.Context, schoolID, a
 	query := fmt.Sprintf(`
 		SELECT sa.student_id, sa.classroom_id,
 			count(*) FILTER (WHERE sa.status = 'hadir'),
+			count(*) FILTER (WHERE sa.status = 'terlambat'),
 			count(*) FILTER (WHERE sa.status = 'sakit'),
 			count(*) FILTER (WHERE sa.status = 'izin'),
 			count(*) FILTER (WHERE sa.status = 'tanpa_keterangan')
@@ -912,7 +913,7 @@ func (s *Store) StudentAttendanceMonthlySummary(ctx context.Context, schoolID, a
 	out := []model.StudentMonthlyAttendance{}
 	for rows.Next() {
 		var m model.StudentMonthlyAttendance
-		if err := rows.Scan(&m.StudentID, &m.ClassroomID, &m.Hadir, &m.Sakit, &m.Izin, &m.TanpaKeterangan); err != nil {
+		if err := rows.Scan(&m.StudentID, &m.ClassroomID, &m.Hadir, &m.Terlambat, &m.Sakit, &m.Izin, &m.TanpaKeterangan); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -1033,13 +1034,14 @@ func (s *Store) StudentAttendanceSummary(ctx context.Context, studentID, termID,
 	query := fmt.Sprintf(`
 		SELECT
 			count(*) FILTER (WHERE sa.status = 'hadir'),
+			count(*) FILTER (WHERE sa.status = 'terlambat'),
 			count(*) FILTER (WHERE sa.status = 'sakit'),
 			count(*) FILTER (WHERE sa.status = 'izin'),
 			count(*) FILTER (WHERE sa.status = 'tanpa_keterangan')
 		FROM student_attendances sa WHERE %s
 	`, strings.Join(where, " AND "))
 	sum := &model.AttendanceSummary{}
-	err := s.DB.QueryRowContext(ctx, query, args...).Scan(&sum.Hadir, &sum.Sakit, &sum.Izin, &sum.TanpaKeterangan)
+	err := s.DB.QueryRowContext(ctx, query, args...).Scan(&sum.Hadir, &sum.Terlambat, &sum.Sakit, &sum.Izin, &sum.TanpaKeterangan)
 	return sum, err
 }
 
@@ -1070,6 +1072,7 @@ func (s *Store) DashboardStudentSummary(ctx context.Context, schoolID, academicY
 	query := fmt.Sprintf(`
 		SELECT COALESCE(sa.term_id::text, 'unknown') AS term_key,
 			count(*) FILTER (WHERE sa.status = 'hadir'),
+			count(*) FILTER (WHERE sa.status = 'terlambat'),
 			count(*) FILTER (WHERE sa.status = 'sakit'),
 			count(*) FILTER (WHERE sa.status = 'izin'),
 			count(*) FILTER (WHERE sa.status = 'tanpa_keterangan')
@@ -1097,7 +1100,7 @@ func (s *Store) DashboardTeacherSummary(ctx context.Context, schoolID, academicY
 	// Grouped by term (semester), same rationale as DashboardStudentSummary
 	// above.
 	query := fmt.Sprintf(`
-		SELECT COALESCE(term_id::text, 'unknown') AS term_key, count(*), 0, 0, 0
+		SELECT COALESCE(term_id::text, 'unknown') AS term_key, count(*), 0, 0, 0, 0
 		FROM class_sessions
 		WHERE %s
 		GROUP BY 1 ORDER BY 1
@@ -1114,7 +1117,7 @@ func scanMonthlyCounts(ctx context.Context, db *sql.DB, query string, args []int
 	var out []model.MonthlyStatusCount
 	for rows.Next() {
 		var m model.MonthlyStatusCount
-		if err := rows.Scan(&m.Month, &m.Hadir, &m.Sakit, &m.Izin, &m.TanpaKeterangan); err != nil {
+		if err := rows.Scan(&m.Month, &m.Hadir, &m.Terlambat, &m.Sakit, &m.Izin, &m.TanpaKeterangan); err != nil {
 			return nil, err
 		}
 		out = append(out, m)

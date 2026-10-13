@@ -46,7 +46,8 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 		pr.Use(cfg.Cache.Middleware(func(r *http.Request) bool {
 			// Leave requests change on every submit/review; a 15s stale
 			// list would hide the action the user just took.
-			if strings.Contains(r.URL.Path, "leave-requests") {
+			if strings.Contains(r.URL.Path, "leave-requests") || strings.Contains(r.URL.Path, "attendance-corrections") ||
+				strings.Contains(r.URL.Path, "attendance-lock-settings") || strings.HasSuffix(r.URL.Path, "/student-attendance/daily") {
 				return true
 			}
 			switch r.URL.Path {
@@ -106,6 +107,14 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 		pr.Post("/leave-requests/{id}/approve", h.ApproveLeaveRequest)
 		pr.Post("/leave-requests/{id}/reject", h.RejectLeaveRequest)
 		pr.Get("/leave-requests/{id}/attachment", h.LeaveAttachment)
+
+		// P4A (menu 41/69): kunci presensi, input harian, koreksi setelah kunci.
+		pr.Get("/admin/attendance-lock-settings", h.GetLockSettingsHandler)
+		pr.Put("/admin/attendance-lock-settings", h.PutLockSettingsHandler)
+		pr.Get("/admin/student-attendance/daily", h.GetDailyAttendance)
+		pr.Post("/admin/student-attendance/daily", h.SaveDailyAttendance)
+		pr.Get("/attendance-corrections", h.ListCorrections)
+		pr.Post("/attendance-corrections", h.CreateCorrection)
 	})
 
 	// report-service integration: reachable either via internal service key
@@ -120,6 +129,7 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 	r.Group(func(in chi.Router) {
 		in.Use(common.InternalOnlyMiddleware(cfg.InternalKey))
 		in.Post("/internal/student-absences/health", h.InternalHealthAbsence)
+		in.Post("/internal/approval-callbacks", h.InternalApprovalCallback) // core Approval Center (P4A)
 	})
 
 	return r

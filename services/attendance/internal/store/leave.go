@@ -167,8 +167,9 @@ func (s *Store) GetLeaveAttachment(ctx context.Context, id string) (name, conten
 // applies BR-ATT-02 in the same transaction: every attendance row already
 // recorded for the student inside the date range becomes izin/sakit. Days
 // not yet recorded get the status when the guru's session seeds/bulk-marks
-// them (see ApprovedLeaveTypes).
-func (s *Store) ReviewLeaveRequest(ctx context.Context, id, status, reviewerID, note string) (*LeaveRequest, error) {
+// them (see ApprovedLeaveTypes). FR-42-002: the decision is also written to
+// the audit outbox in the same transaction (forwarded to core's audit trail).
+func (s *Store) ReviewLeaveRequest(ctx context.Context, id, status, reviewerID, reviewerRole, note string) (*LeaveRequest, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -192,6 +193,17 @@ func (s *Store) ReviewLeaveRequest(ctx context.Context, id, status, reviewerID, 
 		`, l.Type, leaveCatatan(l.Type, l.Reason), reviewerID, l.StudentID, l.SchoolID, l.StartDate, l.EndDate); err != nil {
 			return nil, err
 		}
+	}
+	if err := writeAudit(ctx, tx, AuditEntry{
+		SchoolID: l.SchoolID, Module: "attendance", EntityType: "leave_request", EntityID: l.ID,
+		Action:      "leave." + status,
+		ActorUserID: nilIfEmpty(reviewerID), ActorRole: nilIfEmpty(reviewerRole),
+		Before: map[string]any{"status": "pending"},
+		After: map[string]any{"status": l.Status, "type": l.Type, "student_id": l.StudentID,
+			"start_date": l.StartDate, "end_date": l.EndDate, "review_note": l.ReviewNote},
+		Reason: nilIfEmpty(note), CorrelationID: nilIfEmpty("leave:" + l.ID),
+	}); err != nil {
+		return nil, err
 	}
 	return l, tx.Commit()
 }
