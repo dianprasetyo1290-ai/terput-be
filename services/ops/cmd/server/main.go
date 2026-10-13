@@ -18,6 +18,7 @@ import (
 	"skci/ops/internal/handler"
 	"skci/ops/internal/inventory"
 	"skci/ops/internal/jobs"
+	"skci/ops/internal/library"
 	"skci/ops/internal/procurement"
 	"skci/ops/internal/storage"
 	"skci/ops/internal/store"
@@ -93,6 +94,10 @@ func main() {
 	procStorage := storage.NewLocal(cfg.StorageRoot, cfg.MaxUploadBytes, "application/pdf")
 	procHandler := procurement.NewHandler(procStore, apiClient, procStorage, cfg.OpsPublicInternalURL)
 
+	libStore := library.NewStore(db, loc)
+	libRunner := library.NewJobRunner(db, apiClient, cfg.AccountingURL, cfg.InternalKey, loc)
+	libHandler := library.NewHandler(libStore, apiClient, libRunner)
+
 	fac := &facility.Handler{
 		Store:        facility.NewStore(db, loc),
 		Client:       apiClient,
@@ -108,6 +113,7 @@ func main() {
 		Facility:    fac,
 		Inventory:   invHandler,
 		Procurement: procHandler,
+		Library:     libHandler,
 	}
 
 	syncJob := procurement.NewSyncJob(db, apiClient, cfg.AccountingURL, cfg.InternalKey)
@@ -115,6 +121,8 @@ func main() {
 	runner := jobs.NewRunner(db, cfg.JobInterval)
 	runner.Register("facility_preventive", func(ctx context.Context, _ *sql.DB) error { return fac.RunPreventive(ctx) })
 	runner.Register("vendor_accounting_sync", func(ctx context.Context, _ *sql.DB) error { return syncJob.RunSyncVendors(ctx) })
+	runner.Register("library_daily", func(ctx context.Context, _ *sql.DB) error { return libRunner.RunDailyTasksForAll(ctx) })
+	runner.Register("library_sync_members", func(ctx context.Context, _ *sql.DB) error { return libRunner.RunMemberSyncForAll(ctx) })
 	runner.Register("forward_audit", app.ForwardAudit)
 	runner.Start()
 	defer runner.Stop()

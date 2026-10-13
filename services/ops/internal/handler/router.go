@@ -9,6 +9,7 @@ import (
 	"skci/ops/internal/common"
 	"skci/ops/internal/facility"
 	"skci/ops/internal/inventory"
+	"skci/ops/internal/library"
 	"skci/ops/internal/procurement"
 )
 
@@ -26,6 +27,7 @@ func (a *App) Router() http.Handler {
 	fac := a.Facility
 	inv := a.Inventory
 	proc := a.Procurement
+	lib := a.Library
 	facilityOn := func(r *http.Request, schoolID string) bool { return a.featureOn(r, schoolID, "facility") }
 
 	// Internal routes (X-Internal-Key), T9 §4.2.
@@ -40,6 +42,9 @@ func (a *App) Router() http.Handler {
 		in.Post("/internal/facility/bookings/{id}/cancel", fac.InternalCancelBooking)
 		in.Post("/internal/facility/work-orders", fac.InternalCreateWorkOrder(facilityOn))
 		in.Get("/internal/facility/work-orders", fac.InternalWorkOrders)
+		if lib != nil {
+			in.Post("/internal/library/fines/{id}/bill", lib.InternalBillFine)
+		}
 	})
 
 	// Facility (JWT + feature 'facility'), T9 §5.
@@ -179,6 +184,88 @@ func (a *App) Router() http.Handler {
 				of.Get("/receipts", proc.ListReceipts)
 				of.Post("/receipts", proc.CreateReceipt)
 				of.Post("/returns", proc.CreateReturn)
+			})
+		})
+	}
+
+	// Library (JWT + feature 'library'), T18.
+	if lib != nil {
+		// Self-service for any authenticated member (siswa, guru, staff, etc.)
+		r.Route("/me/library", func(api chi.Router) {
+			api.Use(common.JWTMiddleware(a.Config.JWTSecret))
+			api.Use(a.requireFeature("library"))
+
+			api.Get("/", lib.MyLibrary)
+			api.Post("/loans/{id}/renew", lib.MyRenewLoan)
+			api.Post("/reservations", lib.MyReserveTitle)
+			api.Post("/reservations/{id}/cancel", lib.MyCancelReservation)
+		})
+
+		r.Route("/library", func(api chi.Router) {
+			api.Use(common.JWTMiddleware(a.Config.JWTSecret))
+			api.Use(a.requireFeature("library"))
+
+			// OPAC: accessible to any authenticated user
+			api.Get("/opac", lib.OpacSearch)
+			api.Get("/opac/{id}", lib.OpacDetail)
+
+			// Reports: readers (pustakawan, kepsek, admin, superadmin)
+			api.Group(func(rd chi.Router) {
+				rd.Use(common.RequireAnyRole(library.ReportReaders...))
+				rd.Get("/reports/loans", lib.ReportLoans)
+				rd.Get("/reports/popular", lib.ReportPopular)
+				rd.Get("/reports/overdue", lib.ReportOverdue)
+				rd.Get("/reports/visits", lib.ReportVisits)
+			})
+
+			// Officers: pustakawan, admin, superadmin
+			api.Group(func(of chi.Router) {
+				of.Use(common.RequireAnyRole(library.Officers...))
+
+				// Settings & Master Data
+				of.Get("/settings", lib.GetSettings)
+				of.Put("/settings", lib.UpdateSettings)
+				of.Get("/member-categories", lib.ListMemberCategories)
+				of.Post("/member-categories", lib.CreateMemberCategory)
+				of.Put("/member-categories/{id}", lib.UpdateMemberCategory)
+				of.Delete("/member-categories/{id}", lib.DeleteMemberCategory)
+				of.Get("/fine-rates", lib.ListFineRates)
+				of.Post("/fine-rates", lib.CreateFineRate)
+				of.Delete("/fine-rates/{id}", lib.DeleteFineRate)
+				of.Get("/collection-categories", lib.ListCollectionCategories)
+				of.Post("/collection-categories", lib.CreateCollectionCategory)
+				of.Put("/collection-categories/{id}", lib.UpdateCollectionCategory)
+				of.Delete("/collection-categories/{id}", lib.DeleteCollectionCategory)
+
+				// Catalog & Copies
+				of.Get("/titles", lib.ListTitles)
+				of.Get("/titles/{id}", lib.GetTitle)
+				of.Post("/titles", lib.CreateTitle)
+				of.Put("/titles/{id}", lib.UpdateTitle)
+				of.Delete("/titles/{id}", lib.DeleteTitle)
+				of.Post("/titles/{id}/copies", lib.AddCopy)
+				of.Put("/copies/{id}", lib.UpdateCopy)
+				of.Delete("/copies/{id}", lib.DeleteCopy)
+				of.Get("/copies/{id}/label", lib.GetCopyLabel)
+
+				// Members
+				of.Get("/members", lib.ListMembers)
+				of.Get("/members/{id}", lib.GetMember)
+				of.Put("/members/{id}", lib.UpdateMember)
+				of.Post("/members/sync", lib.SyncMembers)
+				of.Get("/members/{id}/card", lib.GetMemberCard)
+
+				// Circulation
+				of.Post("/loans", lib.CreateLoan)
+				of.Post("/loans/return", lib.ReturnCopy)
+				of.Post("/loans/{id}/renew", lib.RenewLoan)
+				of.Post("/loans/{id}/lost", lib.ReportLost)
+				of.Post("/visits", lib.RecordVisit)
+
+				// Fines
+				of.Get("/fines", lib.ListFines)
+				of.Post("/fines/{id}/pay", lib.PayFine)
+				of.Post("/fines/{id}/waive", lib.WaiveFine)
 			})
 		})
 	}
