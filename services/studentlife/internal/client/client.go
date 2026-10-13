@@ -548,3 +548,26 @@ func (c *Client) CheckBudget(ctx context.Context, budgetURL string, req BudgetCh
 	return &res, nil
 }
 
+// RoleAccount holds identity's reply to POST /internal/role-accounts/create-or-link.
+type RoleAccount struct {
+	UserID          string `json:"user_id"`
+	Created         bool   `json:"created"`
+	DefaultPassword string `json:"default_password,omitempty"`
+}
+
+// CreateOrLinkRoleAccount calls identity to register or link an external role account (T22 §4.1).
+func (c *Client) CreateOrLinkRoleAccount(ctx context.Context, schoolID, email, fullName, role string) (RoleAccount, error) {
+	var out RoleAccount
+	err := c.do(ctx, http.MethodPost, c.URLs.Identity, "/internal/role-accounts/create-or-link", map[string]string{
+		"school_id": schoolID, "email": email, "full_name": fullName, "role": role,
+	}, "", &out)
+	return out, err
+}
+
+// DeactivateUser deactivates a user in a school via identity (§4.1).
+func (c *Client) DeactivateUser(ctx context.Context, schoolID, userID, reason string) error {
+	return c.do(ctx, http.MethodPost, c.URLs.Identity, "/internal/users/"+url.PathEscape(userID)+"/deactivate", map[string]string{
+		"school_id": schoolID, "reason": reason,
+	}, "", nil)
+}
+

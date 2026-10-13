@@ -50,6 +50,7 @@ func main() {
 	runner.Register("studentlife_session_reminders", app.Counseling.JobSessionReminders)
 	runner.Register("studentlife_task_reminders", app.Counseling.JobTaskReminders)
 	runner.Register("studentlife_activity_daily", activity.DailyJob)
+	runner.Register("studentlife_pkl_daily", app.PKL.DailyJob)
 	runner.Register("studentlife_forward_audit", app.JobForwardAudit)
 	runner.Start()
 	defer runner.Stop()

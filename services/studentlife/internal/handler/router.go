@@ -21,6 +21,7 @@ import (
 	"skci/studentlife/internal/counseling"
 	"skci/studentlife/internal/discipline"
 	"skci/studentlife/internal/health"
+	"skci/studentlife/internal/pkl"
 	"skci/studentlife/internal/sensitive"
 	"skci/studentlife/internal/store"
 )
@@ -36,6 +37,7 @@ type App struct {
 	Counseling *counseling.Handler
 	Discipline *discipline.Handler
 	Activity   *activity.Handler
+	PKL        *pkl.Handler
 }
 
 // New builds the App and registers each module's consent subjects and
@@ -46,9 +48,11 @@ func New(db *sql.DB, cfg config.Config, cr *sensitive.Service, cl *client.Client
 	disc := discipline.NewHandler(db, cl, cfg)
 	actStore := activity.NewStore(db)
 	act := activity.NewHandler(db, actStore, cl, cfg, nil)
+	pklStore := pkl.NewStore(db)
+	pklH := pkl.NewHandler(db, pklStore, cl, cfg)
 
 	return &App{
-		DB: db, Cfg: cfg, Client: cl, Health: h, Counseling: coun, Discipline: disc, Activity: act,
+		DB: db, Cfg: cfg, Client: cl, Health: h, Counseling: coun, Discipline: disc, Activity: act, PKL: pklH,
 		Consent: &consent.Handler{DB: db, Client: cl, Subjects: map[string]consent.Subject{
 			health.ConsentSubjectProgram:            h.ConsentSubject(),
 			counseling.ConsentSubjectReferral:       coun.ConsentSubject(),
@@ -295,6 +299,89 @@ func (a *App) Router() http.Handler {
 			par.Post("/extracurriculars/{id}/join", a.Activity.JoinEccByParent)
 			par.Get("/achievements", a.Activity.ListAchievements)
 			par.Post("/achievements", a.Activity.CreateAchievement)
+		})
+
+		pr.Route("/pkl", func(pklr chi.Router) {
+			pklr.Use(a.Client.RequireFeature(common.FeaturePKL))
+			p := a.PKL
+
+			// Majors & Classroom-Majors
+			pklr.Get("/majors", p.ListMajors)
+			pklr.Post("/majors", p.CreateMajor)
+			pklr.Get("/majors/{id}", p.GetMajor)
+			pklr.Put("/majors/{id}", p.UpdateMajor)
+			pklr.Delete("/majors/{id}", p.DeleteMajor)
+			pklr.Get("/classroom-majors", p.ListClassroomMajors)
+			pklr.Put("/classroom-majors", p.PutClassroomMajors)
+
+			// Partners & MoUs
+			pklr.Get("/partners", p.ListPartners)
+			pklr.Post("/partners", p.CreatePartner)
+			pklr.Get("/partners/{id}", p.GetPartner)
+			pklr.Put("/partners/{id}", p.UpdatePartner)
+			pklr.Delete("/partners/{id}", p.DeletePartner)
+			pklr.Get("/partners/{id}/mous", p.ListPartnerMous)
+			pklr.Post("/partners/{id}/mous", p.CreatePartnerMou)
+			pklr.Get("/mous/{id}/file", p.GetMouFile)
+
+			// Periods & Quotas
+			pklr.Get("/periods", p.ListPeriods)
+			pklr.Post("/periods", p.CreatePeriod)
+			pklr.Get("/periods/{id}", p.GetPeriod)
+			pklr.Put("/periods/{id}", p.UpdatePeriod)
+			pklr.Post("/periods/{id}/close", p.ClosePeriod)
+			pklr.Get("/periods/{id}/quotas", p.ListQuotas)
+			pklr.Put("/periods/{id}/quotas", p.PutQuotas)
+			pklr.Get("/periods/{id}/scheme", p.GetScheme)
+			pklr.Put("/periods/{id}/scheme", p.PutScheme)
+
+			// Industry Mentors
+			pklr.Get("/partners/{id}/mentors", p.ListIndustryMentors)
+			pklr.Post("/partners/{id}/mentors", p.CreateIndustryMentor)
+			pklr.Post("/mentors/{id}/deactivate", p.DeactivateIndustryMentor)
+
+			// Placements
+			pklr.Get("/placements/check", p.CheckPlacement)
+			pklr.Get("/placements", p.ListPlacements)
+			pklr.Post("/placements", p.CreatePlacement)
+			pklr.Get("/placements/{id}", p.GetPlacement)
+			pklr.Put("/placements/{id}", p.UpdatePlacement)
+			pklr.Post("/placements/{id}/cancel", p.CancelPlacement)
+			pklr.Get("/placements/{id}/attendance", p.ListPlacementAttendance)
+			pklr.Get("/placements/{id}/journals", p.ListPlacementJournals)
+			pklr.Post("/placements/{id}/journals/{jid}/note", p.AddJournalNote)
+			pklr.Get("/placements/{id}/final-reports", p.ListPlacementFinalReports)
+			pklr.Get("/placements/{id}/scores", p.ListPlacementScores)
+			pklr.Put("/placements/{id}/scores", p.PutPlacementScores)
+			pklr.Post("/placements/{id}/finalize", p.FinalizeResult)
+			pklr.Post("/placements/{id}/certificate", p.IssueCertificate)
+
+			// Certificates
+			pklr.Get("/certificates/{id}/file", p.GetCertificateFile)
+
+			// Attendance confirmation & rejection
+			pklr.Post("/attendance/{id}/confirm", p.ConfirmAttendance)
+			pklr.Post("/attendance/{id}/reject", p.RejectAttendance)
+
+			// Recap
+			pklr.Get("/recap", p.GetRecap)
+
+			// Supervision
+			pklr.Get("/my/supervision", p.ListMySupervision)
+
+			// Student Portal Endpoints
+			pklr.Get("/me", p.GetMyPlacement)
+			pklr.Post("/me/attendance/check-in", p.StudentCheckIn)
+			pklr.Post("/me/attendance/check-out", p.StudentCheckOut)
+			pklr.Post("/me/attendance/leave", p.StudentSubmitLeave)
+			pklr.Get("/me/journals", p.StudentListJournals)
+			pklr.Post("/me/journals", p.StudentCreateJournal)
+			pklr.Put("/me/journals/{id}", p.StudentUpdateJournal)
+			pklr.Post("/me/final-report", p.StudentUploadFinalReport)
+			pklr.Get("/me/result", p.StudentGetResult)
+
+			// File serving
+			pklr.Get("/files/{category}/{filename}", p.ServeFile)
 		})
 	})
 	return r

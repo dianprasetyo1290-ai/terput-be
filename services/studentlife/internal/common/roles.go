@@ -17,6 +17,8 @@ const (
 
 	RoleEventCoordinator = "event_coordinator"
 	RolePembinaEkskul     = "pembina_ekskul"
+	RoleKoordinatorPKL    = "koordinator_pkl"
+	RolePembimbingIndustri = "pembimbing_industri"
 
 	FeatureHealth          = "health"
 	FeatureCounseling      = "counseling"
@@ -24,4 +26,5 @@ const (
 	FeatureEvent           = "event"
 	FeatureExtracurricular = "extracurricular"
 	FeatureAchievement     = "achievement"
+	FeaturePKL             = "pkl"
 )

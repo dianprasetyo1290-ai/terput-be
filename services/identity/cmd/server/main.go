@@ -254,6 +254,7 @@ func main() {
 		in.Post("/internal/guardian-links", app.InternalCreateGuardianLink)
 		in.Get("/internal/conversions/{conversionRef}", app.InternalConversionMapping)
 		in.Post("/internal/employees/create-or-link", app.InternalCreateOrLinkEmployee)
+		in.Post("/internal/role-accounts/create-or-link", app.InternalCreateOrLinkRoleAccount)
 		in.Post("/internal/users/{id}/deactivate", app.InternalDeactivateUser)
 	})
 
