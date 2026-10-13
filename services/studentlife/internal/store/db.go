@@ -5,9 +5,11 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -15,6 +17,18 @@ import (
 
 // ErrNotFound is returned when a school-scoped row does not exist.
 var ErrNotFound = errors.New("not found")
+
+// ErrAlreadyExists is returned when a unique constraint is violated.
+var ErrAlreadyExists = errors.New("already exists")
+
+// NewID returns a newly generated UUID v4 string.
+func NewID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
 
 // Q is satisfied by *sql.DB and *sql.Tx.
 type Q interface {

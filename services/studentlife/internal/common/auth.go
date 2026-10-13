@@ -52,6 +52,15 @@ func FromCtx(r *http.Request) *Claims {
 	return c
 }
 
+// GetClaims returns the verified JWT claims from context, if any.
+func GetClaims(ctx context.Context) *Claims {
+	c, _ := ctx.Value(claimsCtxKey).(*Claims)
+	if c == nil {
+		return &Claims{}
+	}
+	return c
+}
+
 // RequireRole admits only the listed active roles and a resolvable tenant.
 // On failure it writes the error envelope and returns nil, "".
 func RequireRole(w http.ResponseWriter, r *http.Request, roles ...string) (*Claims, string) {

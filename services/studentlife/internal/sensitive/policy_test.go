@@ -27,6 +27,13 @@ func TestCanAccess(t *testing.T) {
 		{"admin none", ModuleHealth, common.RoleAdmin, Facts{}, []string{common.RoleKepalaSekolah}, None},
 		{"guru none", ModuleHealth, common.RoleGuru, Facts{IsHomeroom: true}, nil, None},
 		{"modul konseling: wali tidak otomatis", ModuleCounseling, common.RoleParent, Facts{IsGuardian: true}, nil, None},
+		{"konseling anggota kasus full", ModuleCounseling, common.RoleKonselor, Facts{IsCaseMember: true}, nil, Full},
+		{"konseling konselor bukan anggota none", ModuleCounseling, common.RoleKonselor, Facts{IsCaseMember: false}, nil, None},
+		{"konseling kebijakan konselor full", ModuleCounseling, common.RoleKonselor, Facts{}, []string{common.RoleKonselor}, Full},
+		{"konseling walikelas disclose true status only (AC-130-01)", ModuleCounseling, common.RoleWalikelas, Facts{IsHomeroom: true, HasDisclosedCase: true}, nil, StatusOnly},
+		{"konseling walikelas disclose false none (AC-130-01)", ModuleCounseling, common.RoleWalikelas, Facts{IsHomeroom: true, HasDisclosedCase: false}, nil, None},
+		{"konseling kepala sekolah tanpa kebijakan none (OQ-31)", ModuleCounseling, common.RoleKepalaSekolah, Facts{}, nil, None},
+		{"konseling kepala sekolah dengan kebijakan full", ModuleCounseling, common.RoleKepalaSekolah, Facts{}, []string{common.RoleKepalaSekolah}, Full},
 	}
 	for _, tc := range cases {
 		if got := CanAccess(tc.module, tc.role, tc.facts, tc.policies); got != tc.want {

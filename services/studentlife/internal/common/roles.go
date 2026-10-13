@@ -11,6 +11,11 @@ const (
 	RoleAuditor       = "auditor"
 	RolePetugasUKS    = "petugas_uks"
 	RoleGuru          = "guru"
+	RoleKonselor      = "konselor"
+	RoleKesiswaan     = "kesiswaan"
+	RoleSiswa         = "siswa"
 
-	FeatureHealth = "health"
+	FeatureHealth      = "health"
+	FeatureCounseling  = "counseling"
+	FeatureDiscipline  = "discipline"
 )

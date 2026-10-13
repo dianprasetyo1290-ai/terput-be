@@ -23,11 +23,12 @@ type Level int
 const (
 	None Level = iota
 	AlertOnly
+	StatusOnly
 	Full
 )
 
 // OwnerRoles is the role that fully manages each module's records
-// (BR-HLT-01: petugas UKS). T20 adds the counseling owner here.
+// (BR-HLT-01: petugas UKS). T20 handles counseling per-case membership.
 var OwnerRoles = map[string]string{
 	ModuleHealth: common.RolePetugasUKS,
 }
@@ -35,30 +36,39 @@ var OwnerRoles = map[string]string{
 // Facts are relationship facts the handler fetched (identity/academic)
 // before calling CanAccess; CanAccess itself does no I/O.
 type Facts struct {
-	IsGuardian bool // verified guardian of the subject student
-	IsHomeroom bool // wali kelas of the subject student's classroom
+	IsGuardian       bool // verified guardian of the subject student
+	IsHomeroom       bool // wali kelas of the subject student's classroom
+	IsCaseMember     bool // active member of the counseling case / session counselor
+	HasDisclosedCase bool // open/monitoring case with disclose_to_homeroom=true (AC-130-01)
 }
 
-// CanAccess applies BR-HLT-01 / OQ-31. For the health module: the owner role
-// (petugas_uks) and verified guardians see everything; a role with an active
-// confidential_access_policies row sees everything; the homeroom teacher
-// sees only medical alerts + emergency contacts; anyone else (kepala_sekolah
-// without a policy, admin, guru, superadmin) sees nothing.
+// CanAccess applies BR-HLT-01, BR-CNS-01 & OQ-31.
+// For health: petugas_uks & guardian -> Full; policy roles -> Full; homeroom -> AlertOnly.
+// For counseling (T20, AC-130-01): case member -> Full; policy roles -> Full;
+// homeroom teacher -> StatusOnly if HasDisclosedCase=true; others -> None.
 func CanAccess(module, viewerRole string, f Facts, policyRoles []string) Level {
-	if owner, ok := OwnerRoles[module]; ok && viewerRole == owner {
-		return Full
-	}
 	for _, r := range policyRoles {
 		if r == viewerRole {
 			return Full
 		}
 	}
 	if module == ModuleHealth {
+		if owner, ok := OwnerRoles[module]; ok && viewerRole == owner {
+			return Full
+		}
 		if viewerRole == common.RoleParent && f.IsGuardian {
 			return Full
 		}
 		if viewerRole == common.RoleWalikelas && f.IsHomeroom {
 			return AlertOnly
+		}
+	}
+	if module == ModuleCounseling {
+		if f.IsCaseMember {
+			return Full
+		}
+		if viewerRole == common.RoleWalikelas && f.IsHomeroom && f.HasDisclosedCase {
+			return StatusOnly
 		}
 	}
 	return None

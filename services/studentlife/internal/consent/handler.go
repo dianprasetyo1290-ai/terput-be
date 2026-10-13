@@ -15,6 +15,7 @@ import (
 )
 
 // Subject is a consent subject type registered by its owning module in main
+// Subject is a consent subject type registered by its owning module in main
 // (health_program → health; T20 registers referral → counseling).
 type Subject struct {
 	Feature string
@@ -22,6 +23,8 @@ type Subject struct {
 	Describe func(ctx context.Context, schoolID, subjectID string) (map[string]any, error)
 	// InUse reports whether a granted consent has already been relied upon.
 	InUse func(ctx context.Context, schoolID, consentID string) (bool, error)
+	// OnDecided is invoked inside the decision transaction.
+	OnDecided func(ctx context.Context, tx *sql.Tx, schoolID, subjectID, decision string) error
 }
 
 // Handler serves the generic /consents/* endpoints for orang_tua.
@@ -153,6 +156,11 @@ func (h *Handler) Decide(w http.ResponseWriter, r *http.Request) {
 		err = store.Audit(r.Context(), tx, store.AuditEntry{SchoolID: school, Module: "consent", EntityType: "parent_consent",
 			EntityID: cs.ID, Action: "decide", ActorUserID: &c.UserID, ActorRole: &c.ActiveRole,
 			Before: map[string]any{"status": from}, After: map[string]any{"status": next.Status, "subject_type": cs.SubjectType}})
+	}
+	if err == nil {
+		if s, ok := h.Subjects[cs.SubjectType]; ok && s.OnDecided != nil {
+			err = s.OnDecided(r.Context(), tx, school, cs.SubjectID, body.Decision)
+		}
 	}
 	if err == nil {
 		err = tx.Commit()

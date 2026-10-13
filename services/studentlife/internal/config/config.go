@@ -25,6 +25,7 @@ type Config struct {
 	OpsURL            string // opsional: kosong = pengeluaran stok obat tetap pending (T15)
 	PublicInternalURL string // dipakai sebagai callback_url approval core
 	PortalURL         string // tautan portal di notifikasi wali
+	StoragePath       string
 	EncKey            []byte
 	BlindKey          string
 	DefaultTimezone   string
@@ -66,6 +67,7 @@ func Load() (Config, error) {
 		OpsURL:            trim(os.Getenv("OPS_URL")),
 		PublicInternalURL: trim(env("STUDENTLIFE_PUBLIC_INTERNAL_URL", "http://localhost:8094")),
 		PortalURL:         trim(env("PORTAL_URL", "http://localhost:5173")),
+		StoragePath:       env("STORAGE_PATH", "./data/storage"),
 		EncKey:            encKey,
 		BlindKey:          blindKey,
 		DefaultTimezone:   env("DEFAULT_TIMEZONE", "Asia/Jakarta"),

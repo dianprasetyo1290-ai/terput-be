@@ -46,6 +46,8 @@ func main() {
 	runner.Register("studentlife_visit_sync", app.Health.JobSyncVisits)
 	runner.Register("studentlife_inventory_issues", app.Health.JobInventoryIssues)
 	runner.Register("studentlife_consent_reminders", app.Health.JobConsentReminders)
+	runner.Register("studentlife_session_reminders", app.Counseling.JobSessionReminders)
+	runner.Register("studentlife_task_reminders", app.Counseling.JobTaskReminders)
 	runner.Register("studentlife_forward_audit", app.JobForwardAudit)
 	runner.Start()
 	defer runner.Stop()
