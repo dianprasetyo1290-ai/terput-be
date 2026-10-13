@@ -85,6 +85,13 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 		pr.Get("/admin/teacher-attendance", h.TeacherAttendanceAdmin)
 		pr.Get("/admin/teacher-attendance/export", h.TeacherAttendanceExport)
 
+		// Attendance Report (PRD menu 43) — see report_attendance.go.
+		pr.Get("/admin/attendance-report/recap", h.AttendanceReportRecap)
+		pr.Get("/admin/attendance-report/trend", h.AttendanceReportTrend)
+		pr.Get("/admin/attendance-report/class-comparison", h.AttendanceReportClassComparison)
+		pr.Get("/admin/attendance-report/subjects", h.AttendanceReportSubjects)
+		pr.Get("/admin/attendance-report/export", h.AttendanceReportExport)
+
 		// dashboard
 		pr.Get("/me/sessions/today", h.MySessionsToday)
 		pr.Get("/dashboard/active-teachers", h.ActiveTeachers)
