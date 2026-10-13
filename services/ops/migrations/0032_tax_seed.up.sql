@@ -19,8 +19,14 @@ DO $$
 DECLARE
     r RECORD;
 BEGIN
-    FOR r IN SELECT DISTINCT school_id FROM facility_settings LOOP
-        PERFORM seed_default_tax_types(r.school_id);
-    END LOOP;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'facility_settings') THEN
+        FOR r IN EXECUTE 'SELECT DISTINCT school_id FROM facility_settings' LOOP
+            PERFORM seed_default_tax_types(r.school_id);
+        END LOOP;
+    ELSIF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'tax_settings') THEN
+        FOR r IN SELECT DISTINCT school_id FROM tax_settings LOOP
+            PERFORM seed_default_tax_types(r.school_id);
+        END LOOP;
+    END IF;
 END;
 $$;

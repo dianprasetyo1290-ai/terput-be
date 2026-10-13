@@ -40,7 +40,7 @@ services:
     container_name: teratai-web
     ports: !reset []
     networks: [default, edge]
-    deploy: { resources: { limits: { memory: 64m } } }
+    deploy: { resources: { limits: { memory: 128m } } }
 networks:
   default: { name: teratai_net, external: true }
   edge: { external: true }
