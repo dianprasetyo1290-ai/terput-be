@@ -85,7 +85,7 @@ func (h *Handler) loadVisible(w http.ResponseWriter, r *http.Request, claims *co
 	}
 	user := userInfo(claims)
 	dels := h.delegationsFor(r.Context(), schoolID, user.UserID)
-	if !isAdmin(claims) && !model.CanView(req, user, dels) {
+	if !canViewAllApprovals(claims) && !model.CanView(req, user, dels) {
 		common.WriteError(w, http.StatusNotFound, "permintaan approval tidak ditemukan")
 		return nil, nil, false
 	}

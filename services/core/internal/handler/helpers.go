@@ -114,8 +114,11 @@ func tenant(w http.ResponseWriter, r *http.Request) (*common.Claims, string, boo
 	return claims, schoolID, true
 }
 
-func isAdmin(c *common.Claims) bool {
-	return c.ActiveRole == common.RoleAdmin || c.ActiveRole == common.RoleSuperadmin
+// canViewAllApprovals: only Super Admin (configuration owner) reads any
+// request of the school; everyone else only what model.CanView allows
+// (BUG-112: the unit admin is not part of the Approval Center RBAC row).
+func canViewAllApprovals(c *common.Claims) bool {
+	return c.ActiveRole == common.RoleSuperadmin
 }
 
 func userInfo(c *common.Claims) model.UserInfo {

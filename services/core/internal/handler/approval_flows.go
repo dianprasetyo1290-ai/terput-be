@@ -21,8 +21,8 @@ type createFlowRequest struct {
 
 func (h *Handler) ListFlows(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if claims == nil || (claims.ActiveRole != common.RoleSuperadmin && claims.ActiveRole != common.RoleAdmin) {
-		common.WriteError(w, http.StatusForbidden, "hanya admin dan superadmin yang dapat melihat alur approval")
+	if claims == nil || claims.ActiveRole != common.RoleSuperadmin {
+		common.WriteError(w, http.StatusForbidden, "hanya Super Admin yang dapat melihat alur approval")
 		return
 	}
 
@@ -42,8 +42,8 @@ func (h *Handler) ListFlows(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) GetFlow(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if claims == nil || (claims.ActiveRole != common.RoleSuperadmin && claims.ActiveRole != common.RoleAdmin) {
-		common.WriteError(w, http.StatusForbidden, "hanya admin dan superadmin yang dapat melihat alur approval")
+	if claims == nil || claims.ActiveRole != common.RoleSuperadmin {
+		common.WriteError(w, http.StatusForbidden, "hanya Super Admin yang dapat melihat alur approval")
 		return
 	}
 
@@ -75,8 +75,8 @@ func (h *Handler) GetRequestTypes(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) CreateFlow(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if claims == nil || (claims.ActiveRole != common.RoleSuperadmin && claims.ActiveRole != common.RoleAdmin) {
-		common.WriteError(w, http.StatusForbidden, "hanya admin dan superadmin yang dapat membuat alur approval")
+	if claims == nil || claims.ActiveRole != common.RoleSuperadmin {
+		common.WriteError(w, http.StatusForbidden, "hanya Super Admin yang dapat membuat alur approval")
 		return
 	}
 
@@ -129,8 +129,8 @@ func (h *Handler) CreateFlow(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UpdateFlow(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if claims == nil || (claims.ActiveRole != common.RoleSuperadmin && claims.ActiveRole != common.RoleAdmin) {
-		common.WriteError(w, http.StatusForbidden, "hanya admin dan superadmin yang dapat mengubah alur approval")
+	if claims == nil || claims.ActiveRole != common.RoleSuperadmin {
+		common.WriteError(w, http.StatusForbidden, "hanya Super Admin yang dapat mengubah alur approval")
 		return
 	}
 
@@ -183,8 +183,8 @@ func (h *Handler) UpdateFlow(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteFlow(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	if claims == nil || (claims.ActiveRole != common.RoleSuperadmin && claims.ActiveRole != common.RoleAdmin) {
-		common.WriteError(w, http.StatusForbidden, "hanya admin dan superadmin yang dapat menghapus alur approval")
+	if claims == nil || claims.ActiveRole != common.RoleSuperadmin {
+		common.WriteError(w, http.StatusForbidden, "hanya Super Admin yang dapat menghapus alur approval")
 		return
 	}
 
@@ -250,5 +250,5 @@ func validateFlow(requestType, name string, steps []model.FlowStep) error {
 			return fmt.Errorf("tahap %d: SLA hours harus bernilai positif", st.Seq)
 		}
 	}
-	return nil
+	return model.ValidateAmountThresholds(steps)
 }
