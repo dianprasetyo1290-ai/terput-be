@@ -70,6 +70,25 @@ final class Tenancy
         return $schema;
     }
 
+    /**
+     * Point the connection at an already-validated tenant schema name (CLI
+     * jobs that iterate schemas, e.g. accounting:recurring-journals).
+     */
+    public static function activateSchema(string $schema, ?string $connection = null): void
+    {
+        if (! preg_match('/^tenant_[a-z0-9_]{1,56}$/', $schema)) {
+            throw new InvalidArgumentException('nama schema tenant tidak valid: '.$schema);
+        }
+        DB::connection($connection)->statement('SET search_path TO "'.$schema.'", public');
+    }
+
+    /** @return array<string> every tenant schema in the database */
+    public static function schemas(?string $connection = null): array
+    {
+        return array_map(fn ($r) => $r->schema_name, DB::connection($connection)->select(
+            "select schema_name from information_schema.schemata where schema_name like 'tenant\\_%' order by schema_name"));
+    }
+
     public static function exists(string $schema, ?string $connection = null): bool
     {
         return DB::connection($connection)

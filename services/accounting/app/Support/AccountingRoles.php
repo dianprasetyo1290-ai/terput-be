@@ -40,13 +40,22 @@ final class AccountingRoles
         'consolidation' => 'Consolidation',
         'auto_posting' => 'Auto Posting',
         'import_data' => 'Import Data',
+        'journal_template' => 'Journal Template & Recurring',
+        'period_reopen' => 'Period Reopen',
     ];
+
+    /**
+     * Approving a period reopen (QA BUG-178) is reserved for FinanceManager
+     * (and SuperAdmin via Gate::before): Admin/Accounting may only request it,
+     * so whoever closes the books can never reopen them alone.
+     */
+    public const REOPEN_APPROVE = 'editperiod_reopen';
 
     /** Pages a read-only reviewer (Finance Manager, Auditor) may open. */
     public const READ_MODULES = [
         'journal_transaction', 'history_journal', 'history_journal_detail', 'journal_validation',
         'general_ledger', 'trial_balance', 'financial_report', 'consolidation', 'chart_of_account',
-        'balance', 'auto_posting', 'end_of_month', 'end_of_year',
+        'balance', 'auto_posting', 'end_of_month', 'end_of_year', 'journal_template', 'period_reopen',
     ];
 
     /** Pages kepala sekolah / kepala yayasan may open (besides the dashboard). */
@@ -56,12 +65,12 @@ final class AccountingRoles
     public static function spec(): array
     {
         $view = fn (array $modules) => array_map(fn ($m) => "view$m", $modules);
-        $all = Permission::pluck('name')->all();
+        $all = array_values(array_diff(Permission::pluck('name')->all(), [self::REOPEN_APPROVE]));
 
         return [
             'Admin' => $all,
             'Accounting' => array_values(array_filter($all, fn ($p) => ! preg_match('/user|role|permission|setting_website/', $p))),
-            'FinanceManager' => array_merge($view(self::READ_MODULES), ['editjournal_validation']),
+            'FinanceManager' => array_merge($view(self::READ_MODULES), ['editjournal_validation', 'createperiod_reopen', self::REOPEN_APPROVE]),
             'Auditor' => $view(self::READ_MODULES),
             'Executive' => $view(self::EXECUTIVE_MODULES),
             // Legacy name kepala sekolah/yayasan were mapped to before; kept so a

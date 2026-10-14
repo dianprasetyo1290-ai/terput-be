@@ -43,6 +43,8 @@ class ModulesSeeder extends Seeder
             ['name' => 'consolidation', 'display_name' => 'Consolidation'],
             ['name' => 'auto_posting', 'display_name' => 'Auto Posting'],
             ['name' => 'import_data', 'display_name' => 'Import Data'],
+            ['name' => 'journal_template', 'display_name' => 'Journal Template & Recurring'],
+            ['name' => 'period_reopen', 'display_name' => 'Period Reopen'],
 
             // ['name' => 'balance_currency', 'display_name' => 'Balance Currency'],
             // ['name' => 'budgeting', 'display_name' => 'Budgeting'],
