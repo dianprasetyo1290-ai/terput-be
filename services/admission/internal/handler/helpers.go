@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"skci/admission/internal/common"
 )
@@ -134,11 +135,8 @@ func randomKey() string {
 // isUniqueViolation reports whether an error is a Postgres unique conflict,
 // which the handlers translate into a 409.
 func isUniqueViolation(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "duplicate key") || strings.Contains(msg, "SQLSTATE 23505")
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 // jsonRaw marshals a value for a jsonb column, returning nil for nil input.
@@ -159,4 +157,13 @@ func (a *App) audit(ctx context.Context, schoolID, aggregateType, aggregateID, a
 		`INSERT INTO audit_events(school_id,aggregate_type,aggregate_id,action,actor_type,actor_id,actor_name,before_data,after_data,reason)
 		 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NULLIF($10,''))`,
 		schoolID, aggregateType, aggregateID, action, actorType, actorID, actorName, jsonRaw(before), jsonRaw(after), reason)
+}
+
+func contains(list []string, v string) bool {
+	for _, item := range list {
+		if item == v {
+			return true
+		}
+	}
+	return false
 }

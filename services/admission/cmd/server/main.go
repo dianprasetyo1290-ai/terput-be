@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -32,17 +35,27 @@ func main() {
 	}
 	defer db.Close()
 
+	smtpProvider := otp.SMTPProvider{
+		Host: cfg.SMTPHost, Port: cfg.SMTPPort,
+		User: cfg.SMTPUser, Password: cfg.SMTPPassword,
+		FromName: cfg.SMTPFromName, FromAddr: cfg.SMTPFromAddress,
+		SchoolName: cfg.SchoolName,
+	}
 	var inner otp.Provider = otp.DevProvider{Writer: os.Stdout, Enabled: cfg.OTPProvider == "dev"}
 	if cfg.OTPProvider == "smtp" {
-		inner = otp.SMTPProvider{
-			Host: os.Getenv("SMTP_HOST"), Port: envOr("SMTP_PORT", "587"),
-			User: os.Getenv("SMTP_USER"), Password: os.Getenv("SMTP_PASSWORD"),
-			FromName: os.Getenv("SMTP_FROM_NAME"), FromAddr: os.Getenv("SMTP_FROM_ADDRESS"),
-			SchoolName: cfg.SchoolName,
-		}
+		inner = smtpProvider
 	}
 	provider := otp.SafeProvider{Inner: inner, Production: cfg.Production()}
 	app := handler.New(db, cfg, provider, storage.NewLocal(cfg.StorageRoot, cfg.MaxUploadBytes))
+	if cfg.SMTPHost != "" && cfg.SMTPFromAddress != "" {
+		app.Mailer = smtpProvider
+	}
+
+	// Background PPDB jobs: deadline drops (BR-PPDB-07/08), scheduled
+	// announcements, waitlist expiry and the notification email outbox.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go app.RunJobs(ctx, cfg.JobInterval)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.RealIP, middleware.Logger, middleware.Recoverer)
@@ -74,6 +87,8 @@ func main() {
 		g.Use(common.GuardianAuth(cfg.GuardianJWTSecret))
 
 		g.Get("/guardian/dashboard", app.GuardianDashboard)
+		g.Get("/guardian/notifications", app.ListGuardianNotifications)
+		g.Post("/guardian/notifications/{id}/read", app.MarkGuardianNotificationRead)
 
 		g.Get("/guardian/applicants", app.ListApplicants)
 		g.Post("/guardian/applicants", app.CreateApplicant)
@@ -138,6 +153,7 @@ func main() {
 		ad.Get("/admin/documents", app.DocumentQueue)
 		ad.Post("/admin/documents/{id}/review", app.ReviewDocument)
 		ad.Get("/admin/documents/{id}/download", app.AdminDownloadDocument)
+		ad.Get("/admin/documents/{id}/versions", app.AdminDocumentVersions)
 
 		ad.Get("/admin/finance/fee-schemes", app.ListFeeSchemes)
 		ad.Post("/admin/finance/fee-schemes", app.CreateFeeScheme)
@@ -181,11 +197,4 @@ func main() {
 	if err := http.ListenAndServe(":"+cfg.Port, r); err != nil {
 		log.Fatal(err)
 	}
-}
-
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
 }

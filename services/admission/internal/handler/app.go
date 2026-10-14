@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
 
 	"skci/admission/internal/client"
@@ -22,6 +23,16 @@ type App struct {
 	Identity *client.Client
 	Exam     *client.Client
 	Academic *client.Client
+	Core     *client.Client
+
+	// Mailer delivers guardian notification emails; nil when SMTP is not
+	// configured (notifications then stay in-app only).
+	Mailer Mailer
+}
+
+// Mailer sends one plain-text email.
+type Mailer interface {
+	SendMail(ctx context.Context, to, subject, body string) error
 }
 
 // New wires the application graph.
@@ -35,5 +46,6 @@ func New(db *sql.DB, cfg config.Config, provider otp.Provider, store storage.Sto
 		Identity: client.New(cfg.IdentityURL, cfg.InternalKey),
 		Exam:     client.New(cfg.ExamURL, cfg.InternalKey),
 		Academic: client.New(cfg.AcademicURL, cfg.InternalKey),
+		Core:     client.New(cfg.CoreURL, cfg.InternalKey),
 	}
 }

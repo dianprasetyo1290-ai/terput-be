@@ -77,6 +77,7 @@ func Offset(page, perPage int) int {
 // tokens carry an empty SchoolID and select a school via ?school_id=.
 type AdminClaims struct {
 	UserID     string   `json:"sub"`
+	Name       string   `json:"name,omitempty"`
 	SchoolID   string   `json:"school_id"`
 	ActiveRole string   `json:"active_role"`
 	Roles      []string `json:"roles"`
@@ -121,6 +122,28 @@ func guardianToken(r *http.Request) string {
 
 // AdminAuth verifies the identity JWT and requires an admin/superadmin role.
 func AdminAuth(secret string) func(http.Handler) http.Handler {
+	return roleAuth(secret, adminRoles)
+}
+
+// adminRoles may operate PPDB; viewerRoles may additionally read the PPDB
+// dashboard (Yayasan / kepala sekolah, BUG-030).
+var (
+	adminRoles  = map[string]bool{"admin": true, "superadmin": true}
+	viewerRoles = map[string]bool{"admin": true, "superadmin": true, "kepala_yayasan": true, "kepala_sekolah": true}
+)
+
+// DashboardAuth admits PPDB admins plus read-only foundation/school leaders.
+func DashboardAuth(secret string) func(http.Handler) http.Handler {
+	return roleAuth(secret, viewerRoles)
+}
+
+// CanViewDashboard reports whether the request may read the PPDB dashboard.
+func CanViewDashboard(r *http.Request) bool {
+	c := Admin(r)
+	return c != nil && viewerRoles[c.ActiveRole]
+}
+
+func roleAuth(secret string, allowed map[string]bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims := new(AdminClaims)
@@ -131,7 +154,7 @@ func AdminAuth(secret string) func(http.Handler) http.Handler {
 				WriteError(w, http.StatusUnauthorized, "invalid admin token")
 				return
 			}
-			if claims.ActiveRole != "admin" && claims.ActiveRole != "superadmin" {
+			if !allowed[claims.ActiveRole] {
 				WriteError(w, http.StatusForbidden, "admin role required")
 				return
 			}

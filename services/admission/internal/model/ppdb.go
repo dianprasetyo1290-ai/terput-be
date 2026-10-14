@@ -547,3 +547,103 @@ func ValidateScore(score, max int64) error {
 	}
 	return nil
 }
+
+// DocumentIssue explains why one required document blocks the test stage, or
+// returns "" when its latest review is "accepted" (BUG-033).
+func DocumentIssue(name string, uploaded bool, latestReview string) string {
+	switch {
+	case !uploaded:
+		return "Dokumen wajib belum diunggah: " + name + "."
+	case latestReview == "accepted":
+		return ""
+	case latestReview == "rejected":
+		return "Dokumen wajib ditolak: " + name + "."
+	case latestReview == "correction":
+		return "Dokumen wajib perlu perbaikan: " + name + "."
+	default:
+		return "Dokumen wajib belum diverifikasi: " + name + "."
+	}
+}
+
+// ValidateFeeScheme checks a PPDB fee scheme: non-negative amounts, 1..24
+// installments and a BR-PPDB-04 minimum of 1..100 percent.
+func ValidateFeeScheme(registration, reregistration, entrance int64, installments, minPct int) error {
+	switch {
+	case registration < 0 || reregistration < 0 || entrance < 0:
+		return errors.New("nominal biaya tidak boleh negatif")
+	case installments < 1 || installments > 24:
+		return errors.New("jumlah cicilan harus antara 1 dan 24")
+	case minPct < 1 || minPct > 100:
+		return errors.New("minimum pembayaran daftar ulang harus antara 1 dan 100 persen")
+	}
+	return nil
+}
+
+// PaymentStatusOf summarises an application's PPDB bills for list filters
+// (BUG-157): unbilled, unpaid, partial or paid.
+func PaymentStatusOf(billed, outstanding int64) string {
+	switch {
+	case billed <= 0:
+		return "unbilled"
+	case outstanding <= 0:
+		return "paid"
+	case outstanding >= billed:
+		return "unpaid"
+	default:
+		return "partial"
+	}
+}
+
+// DocumentUploadAllowed decides whether a guardian may (re)upload a document:
+// freely while the application is a draft; after submission only to replace
+// a file the committee rejected or asked to correct, and never once locked.
+func DocumentUploadAllowed(applicationStatus string, exists bool, latestReview string, locked bool) bool {
+	if locked {
+		return false
+	}
+	switch ApplicationStatus(applicationStatus) {
+	case StatusDraft:
+		return true
+	case StatusSubmitted, StatusDocumentReview:
+		return exists && (latestReview == "correction" || latestReview == "rejected")
+	}
+	return false
+}
+
+// DocumentReviewMessage is the guardian notification for a document review.
+func DocumentReviewMessage(requirement, status, note string) (string, string) {
+	switch status {
+	case "accepted":
+		return "Dokumen diterima", "Dokumen " + requirement + " telah diverifikasi dan diterima."
+	case "correction":
+		return "Dokumen perlu diperbaiki", "Dokumen " + requirement + " perlu diperbaiki: " + note + ". Silakan unggah ulang melalui portal PPDB."
+	default:
+		return "Dokumen ditolak", "Dokumen " + requirement + " ditolak: " + note + ". Silakan unggah ulang dokumen yang sesuai."
+	}
+}
+
+// SafeFileName returns a header-safe download name. Quotes, separators and
+// control characters are replaced; an empty name falls back to "dokumen"
+// with the extension of the stored type.
+func SafeFileName(name, mime string) string {
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r < 0x20 || r == 0x7f || r == '"' || r == '\\' || r == '/' || r == ';' || r > 0x7e:
+			b.WriteByte('_')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	out := strings.TrimSpace(b.String())
+	if out == "" || strings.Trim(out, "._") == "" {
+		ext := ".bin"
+		for e, m := range extensionMIME {
+			if m == mime && e != ".jpeg" {
+				ext = e
+			}
+		}
+		return "dokumen" + ext
+	}
+	return out
+}

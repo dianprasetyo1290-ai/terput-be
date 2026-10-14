@@ -33,64 +33,96 @@ func (a *App) resolvePeriodID(r *http.Request, schoolID, explicit string) (strin
 // ---------------------------------------------------------------------------
 
 type feeSchemeInput struct {
-	Name              string `json:"name"`
-	PeriodID          string `json:"period_id"`
-	TrackID           string `json:"track_id"`
-	Status            string `json:"status"`
-	RegistrationFee   int64  `json:"registration_fee"`
-	ReregistrationFee int64  `json:"reregistration_fee"`
-	InstallmentCount  int    `json:"installment_count"`
+	Name                 string `json:"name"`
+	PeriodID             string `json:"period_id"`
+	TrackID              string `json:"track_id"`
+	WaveID               string `json:"wave_id"`
+	Status               string `json:"status"`
+	RegistrationFee      int64  `json:"registration_fee"`
+	ReregistrationFee    int64  `json:"reregistration_fee"`
+	EntranceFee          int64  `json:"entrance_fee"`
+	InstallmentCount     int    `json:"installment_count"`
+	MinReregistrationPct int    `json:"min_reregistration_pct"`
 }
 
-// ListFeeSchemes is GET /admin/finance/fee-schemes.
+func (in *feeSchemeInput) normalize() error {
+	in.Status = normalizeSchemeStatus(in.Status)
+	if in.InstallmentCount == 0 {
+		in.InstallmentCount = 1
+	}
+	if in.MinReregistrationPct == 0 {
+		in.MinReregistrationPct = 100
+	}
+	if err := model.ValidateFeeScheme(in.RegistrationFee, in.ReregistrationFee, in.EntranceFee,
+		in.InstallmentCount, in.MinReregistrationPct); err != nil {
+		return &httpError{http.StatusUnprocessableEntity, err.Error()}
+	}
+	return nil
+}
+
+// ListFeeSchemes is GET /admin/finance/fee-schemes. Installments shown here are
+// the plan template only; each applicant gets their own installments when the
+// re-registration charge is issued (BUG-003).
 func (a *App) ListFeeSchemes(w http.ResponseWriter, r *http.Request) {
 	if !common.RequireAdmin(w, r) {
 		return
 	}
 	schoolID := common.EffectiveSchoolID(r)
 	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT id,name,period_id,COALESCE(track_id::text,''),status,revision,registration_fee_idr,reregistration_fee_idr,installment_count
+		`SELECT id,name,period_id,COALESCE(track_id::text,''),COALESCE(wave_id::text,''),status,revision,
+		        registration_fee_idr,reregistration_fee_idr,entrance_fee_idr,installment_count,min_reregistration_pct
 		 FROM fee_schemes WHERE school_id=$1 ORDER BY created_at DESC`, schoolID)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	defer rows.Close()
-	out := []map[string]any{}
+	type schemeRow struct {
+		id, name, periodID, trackID, waveID, status string
+		revision, installmentCount, minPct          int
+		regFee, reregFee, entranceFee               int64
+	}
+	var list []schemeRow
 	for rows.Next() {
-		var (
-			id, name, periodID, trackID, status string
-			revision                            int
-			regFee, reregFee                    int64
-			installmentCount                    int
-		)
-		if err := rows.Scan(&id, &name, &periodID, &trackID, &status, &revision, &regFee, &reregFee, &installmentCount); err != nil {
+		var s schemeRow
+		if err := rows.Scan(&s.id, &s.name, &s.periodID, &s.trackID, &s.waveID, &s.status, &s.revision,
+			&s.regFee, &s.reregFee, &s.entranceFee, &s.installmentCount, &s.minPct); err != nil {
+			rows.Close()
 			writeErr(w, err)
 			return
 		}
-		items, err := a.feeItems(r, schoolID, id)
+		list = append(list, s)
+	}
+	rows.Close()
+	out := []map[string]any{}
+	for _, s := range list {
+		items, err := a.feeItems(r, schoolID, s.id)
 		if err != nil {
 			writeErr(w, err)
 			return
 		}
-		installments, err := a.installments(r.Context(), schoolID, id)
-		if err != nil {
-			writeErr(w, err)
-			return
+		plan := []map[string]any{}
+		for _, line := range model.PlanInstallments(s.reregFee+s.entranceFee, s.installmentCount, s.minPct, time.Time{}) {
+			plan = append(plan, map[string]any{"sequence": line.Sequence, "description": line.Description, "amount": line.Amount})
 		}
 		scheme := map[string]any{
-			"id":                 id,
-			"name":               name,
-			"period_id":          periodID,
-			"status":             status,
-			"revision":           revision,
-			"registration_fee":   regFee,
-			"reregistration_fee": reregFee,
-			"items":              items,
-			"installments":       installments,
+			"id":                     s.id,
+			"name":                   s.name,
+			"period_id":              s.periodID,
+			"status":                 s.status,
+			"revision":               s.revision,
+			"registration_fee":       s.regFee,
+			"reregistration_fee":     s.reregFee,
+			"entrance_fee":           s.entranceFee,
+			"installment_count":      s.installmentCount,
+			"min_reregistration_pct": s.minPct,
+			"items":                  items,
+			"installments":           plan,
 		}
-		if trackID != "" {
-			scheme["track_id"] = trackID
+		if s.trackID != "" {
+			scheme["track_id"] = s.trackID
+		}
+		if s.waveID != "" {
+			scheme["wave_id"] = s.waveID
 		}
 		out = append(out, scheme)
 	}
@@ -99,7 +131,7 @@ func (a *App) ListFeeSchemes(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) feeItems(r *http.Request, schoolID, schemeID string) ([]map[string]any, error) {
 	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT id,name,amount_idr FROM fee_items WHERE fee_scheme_id=$1 AND school_id=$2 ORDER BY code`, schemeID, schoolID)
+		`SELECT id,code,name,amount_idr FROM fee_items WHERE fee_scheme_id=$1 AND school_id=$2 ORDER BY code`, schemeID, schoolID)
 	if err != nil {
 		return nil, err
 	}
@@ -107,29 +139,35 @@ func (a *App) feeItems(r *http.Request, schoolID, schemeID string) ([]map[string
 	out := []map[string]any{}
 	for rows.Next() {
 		var (
-			id, name string
-			amount   int64
+			id, code, name string
+			amount         int64
 		)
-		if err := rows.Scan(&id, &name, &amount); err != nil {
+		if err := rows.Scan(&id, &code, &name, &amount); err != nil {
 			return nil, err
 		}
-		out = append(out, map[string]any{"id": id, "name": name, "amount": amount, "discount": 0, "net_amount": amount})
+		out = append(out, map[string]any{"id": id, "code": code, "name": name, "amount": amount, "discount": 0, "net_amount": amount})
 	}
 	return out, rows.Err()
 }
 
-// CreateFeeScheme is POST /admin/finance/fee-schemes.
+// CreateFeeScheme is POST /admin/finance/fee-schemes. Schemes can target a
+// period, a track and/or a wave (BUG-091); the most specific one is billed.
 func (a *App) CreateFeeScheme(w http.ResponseWriter, r *http.Request) {
 	if !common.RequireAdmin(w, r) {
 		return
 	}
 	schoolID := common.EffectiveSchoolID(r)
+	claims := common.Admin(r)
 	var in feeSchemeInput
 	if !common.Decode(w, r, &in) {
 		return
 	}
-	if in.Name == "" {
-		common.WriteError(w, http.StatusBadRequest, "name is required")
+	if strings.TrimSpace(in.Name) == "" {
+		common.WriteError(w, http.StatusUnprocessableEntity, "nama skema biaya wajib diisi")
+		return
+	}
+	if err := in.normalize(); err != nil {
+		writeErr(w, err)
 		return
 	}
 	periodID, err := a.resolvePeriodID(r, schoolID, in.PeriodID)
@@ -137,7 +175,6 @@ func (a *App) CreateFeeScheme(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	in.Status = normalizeSchemeStatus(in.Status)
 
 	tx, err := a.DB.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -148,21 +185,31 @@ func (a *App) CreateFeeScheme(w http.ResponseWriter, r *http.Request) {
 
 	var revision int
 	if err = tx.QueryRowContext(r.Context(),
-		`SELECT COALESCE(max(revision),0)+1 FROM fee_schemes WHERE school_id=$1 AND period_id=$2 AND track_id IS NULL`,
-		schoolID, periodID).Scan(&revision); err != nil {
+		`SELECT COALESCE(max(revision),0)+1 FROM fee_schemes
+		 WHERE school_id=$1 AND period_id=$2 AND track_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid`,
+		schoolID, periodID, in.TrackID).Scan(&revision); err != nil {
 		writeErr(w, err)
 		return
 	}
 	var id string
 	err = tx.QueryRowContext(r.Context(),
-		`INSERT INTO fee_schemes(school_id,period_id,track_id,name,revision,status,registration_fee_idr,reregistration_fee_idr,installment_count)
-		 VALUES($1,$2,NULLIF($3,'')::uuid,$4,$5,$6,$7,$8,$9) RETURNING id`,
-		schoolID, periodID, in.TrackID, in.Name, revision, in.Status, in.RegistrationFee, in.ReregistrationFee, maxInt(in.InstallmentCount, 1)).Scan(&id)
+		`INSERT INTO fee_schemes(school_id,period_id,track_id,wave_id,name,revision,status,registration_fee_idr,reregistration_fee_idr,
+		                         entrance_fee_idr,installment_count,min_reregistration_pct)
+		 VALUES($1,$2,NULLIF($3,'')::uuid,NULLIF($4,'')::uuid,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+		schoolID, periodID, in.TrackID, in.WaveID, in.Name, revision, in.Status, in.RegistrationFee, in.ReregistrationFee,
+		in.EntranceFee, in.InstallmentCount, in.MinReregistrationPct).Scan(&id)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	if err = writeFeeSchemeChildren(r, tx, schoolID, id, in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if _, err = tx.ExecContext(r.Context(),
+		`INSERT INTO audit_events(school_id,aggregate_type,aggregate_id,action,actor_type,actor_id,actor_name,after_data)
+		 VALUES($1,'fee_scheme',$2,'fee_scheme_created','admin',$3,$4,$5)`,
+		schoolID, id, claims.UserID, claims.Name, jsonRaw(in)); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -173,18 +220,23 @@ func (a *App) CreateFeeScheme(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusCreated, map[string]any{"id": id, "revision": revision, "status": in.Status}, nil)
 }
 
-// UpdateFeeScheme is PUT /admin/finance/fee-schemes/{id}.
+// UpdateFeeScheme is PUT /admin/finance/fee-schemes/{id}. Issued charges keep
+// their item snapshot, so editing a scheme never changes existing bills.
 func (a *App) UpdateFeeScheme(w http.ResponseWriter, r *http.Request) {
 	if !common.RequireAdmin(w, r) {
 		return
 	}
 	schoolID := common.EffectiveSchoolID(r)
+	claims := common.Admin(r)
 	var in feeSchemeInput
 	if !common.Decode(w, r, &in) {
 		return
 	}
+	if err := in.normalize(); err != nil {
+		writeErr(w, err)
+		return
+	}
 	id := param(r, "id")
-	in.Status = normalizeSchemeStatus(in.Status)
 
 	tx, err := a.DB.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -194,26 +246,27 @@ func (a *App) UpdateFeeScheme(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.ExecContext(r.Context(),
-		`UPDATE fee_schemes SET name=COALESCE(NULLIF($1,''),name),status=$2,registration_fee_idr=$3,reregistration_fee_idr=$4,installment_count=$5
-		 WHERE id=$6 AND school_id=$7`,
-		in.Name, in.Status, in.RegistrationFee, in.ReregistrationFee, maxInt(in.InstallmentCount, 1), id, schoolID)
+		`UPDATE fee_schemes SET name=COALESCE(NULLIF($1,''),name),status=$2,registration_fee_idr=$3,reregistration_fee_idr=$4,
+		        installment_count=$5,entrance_fee_idr=$6,min_reregistration_pct=$7,wave_id=NULLIF($8,'')::uuid
+		 WHERE id=$9 AND school_id=$10`,
+		in.Name, in.Status, in.RegistrationFee, in.ReregistrationFee, in.InstallmentCount, in.EntranceFee,
+		in.MinReregistrationPct, in.WaveID, id, schoolID)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "fee scheme not found")
-		return
-	}
-	if _, err = tx.ExecContext(r.Context(), `DELETE FROM fee_items WHERE fee_scheme_id=$1`, id); err != nil {
-		writeErr(w, err)
-		return
-	}
-	if _, err = tx.ExecContext(r.Context(), `DELETE FROM installment_plans WHERE fee_scheme_id=$1`, id); err != nil {
-		writeErr(w, err)
+		common.WriteError(w, http.StatusNotFound, "skema biaya tidak ditemukan")
 		return
 	}
 	if err = writeFeeSchemeChildren(r, tx, schoolID, id, in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if _, err = tx.ExecContext(r.Context(),
+		`INSERT INTO audit_events(school_id,aggregate_type,aggregate_id,action,actor_type,actor_id,actor_name,after_data)
+		 VALUES($1,'fee_scheme',$2,'fee_scheme_updated','admin',$3,$4,$5)`,
+		schoolID, id, claims.UserID, claims.Name, jsonRaw(in)); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -224,34 +277,24 @@ func (a *App) UpdateFeeScheme(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusOK, map[string]any{"id": id, "status": in.Status}, nil)
 }
 
+// writeFeeSchemeChildren upserts the scheme's fee items. The legacy shared
+// installment_plans rows are no longer written: installments are per
+// applicant (charge_installments) and legacy allocations still reference the
+// old rows, so they are left untouched.
 func writeFeeSchemeChildren(r *http.Request, tx *sql.Tx, schoolID, schemeID string, in feeSchemeInput) error {
 	items := []struct {
 		code, name string
 		amount     int64
 	}{
-		{"registration", "Biaya Pendaftaran", in.RegistrationFee},
+		{"registration", "Biaya Formulir Pendaftaran", in.RegistrationFee},
 		{"reregistration", "Biaya Daftar Ulang", in.ReregistrationFee},
+		{"entrance", "Uang Pangkal", in.EntranceFee},
 	}
 	for _, item := range items {
 		if _, err := tx.ExecContext(r.Context(),
-			`INSERT INTO fee_items(school_id,fee_scheme_id,code,name,amount_idr) VALUES($1,$2,$3,$4,$5)`,
+			`INSERT INTO fee_items(school_id,fee_scheme_id,code,name,amount_idr) VALUES($1,$2,$3,$4,$5)
+			 ON CONFLICT (fee_scheme_id,code) DO UPDATE SET name=EXCLUDED.name,amount_idr=EXCLUDED.amount_idr`,
 			schoolID, schemeID, item.code, item.name, item.amount); err != nil {
-			return err
-		}
-	}
-	count := maxInt(in.InstallmentCount, 1)
-	total := in.RegistrationFee + in.ReregistrationFee
-	base := total / int64(count)
-	remainder := total - base*int64(count)
-	for i := 0; i < count; i++ {
-		amount := base
-		if int64(i) == int64(count)-1 {
-			amount += remainder
-		}
-		due := time.Now().AddDate(0, i, 0)
-		if _, err := tx.ExecContext(r.Context(),
-			`INSERT INTO installment_plans(school_id,fee_scheme_id,sequence,description,amount_idr,due_at) VALUES($1,$2,$3,$4,$5,$6)`,
-			schoolID, schemeID, i+1, "Termin "+itoa(i+1), amount, due); err != nil {
 			return err
 		}
 	}

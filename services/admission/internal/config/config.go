@@ -36,6 +36,19 @@ type Config struct {
 	IdentityURL string
 	ExamURL     string
 	AcademicURL string
+	// CoreURL is the Approval Center (maker-checker) base URL.
+	CoreURL string
+	// InternalURL is how core reaches this service for approval callbacks
+	// ({InternalURL}/internal/approval-callbacks).
+	InternalURL string
+
+	// SMTP delivers guardian notification emails (and OTP when
+	// OTP_PROVIDER=smtp). Empty SMTPHost keeps notifications in-app only.
+	SMTPHost, SMTPPort, SMTPUser, SMTPPassword string
+	SMTPFromName, SMTPFromAddress              string
+
+	// JobInterval drives the PPDB deadline / announcement / email job loop.
+	JobInterval time.Duration
 
 	// ExamPublicURL is the browser-facing base URL used to build the CBT entry
 	// link. When empty, /cbt/enter still provisions the participant but
@@ -78,6 +91,14 @@ func Load() (Config, error) {
 		IdentityURL:       os.Getenv("IDENTITY_URL"),
 		ExamURL:           os.Getenv("EXAM_URL"),
 		AcademicURL:       os.Getenv("ACADEMIC_URL"),
+		CoreURL:           os.Getenv("CORE_URL"),
+		SMTPHost:          os.Getenv("SMTP_HOST"),
+		SMTPPort:          env("SMTP_PORT", "587"),
+		SMTPUser:          os.Getenv("SMTP_USER"),
+		SMTPPassword:      os.Getenv("SMTP_PASSWORD"),
+		SMTPFromName:      os.Getenv("SMTP_FROM_NAME"),
+		SMTPFromAddress:   os.Getenv("SMTP_FROM_ADDRESS"),
+		JobInterval:       duration("ADMISSION_JOB_INTERVAL", time.Minute),
 		ExamPublicURL:     os.Getenv("EXAM_PUBLIC_URL"),
 		DefaultSchoolID:   os.Getenv("ADMISSION_SCHOOL_ID"),
 		SchoolName:        env("SCHOOL_NAME", "Sekolah Teratai"),
@@ -87,6 +108,8 @@ func Load() (Config, error) {
 		SentryDSN:         os.Getenv("SENTRY_DSN"),
 		SentryEnvironment: env("SENTRY_ENVIRONMENT", "development"),
 	}
+
+	c.InternalURL = strings.TrimRight(env("ADMISSION_INTERNAL_URL", "http://localhost:"+c.Port), "/")
 
 	production := strings.EqualFold(c.AppEnv, "production")
 

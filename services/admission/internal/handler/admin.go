@@ -182,19 +182,23 @@ func (a *App) ListApplications(w http.ResponseWriter, r *http.Request) {
 		AND ($3='' OR ap.full_name ILIKE '%'||$3||'%' OR COALESCE(ap.nisn,'') ILIKE '%'||$3||'%' OR a.registration_number ILIKE '%'||$3||'%')
 		AND ($4='' OR a.period_id::text=$4)
 		AND ($5='' OR a.wave_id::text=$5)
-		AND ($6='' OR a.track_id::text=$6)`
+		AND ($6='' OR a.track_id::text=$6)
+		AND ($7='' OR $7=CASE WHEN COALESCE(bill.billed,0)<=0 THEN 'unbilled'
+		                      WHEN COALESCE(bill.outstanding,0)<=0 THEN 'paid'
+		                      WHEN bill.outstanding>=bill.billed THEN 'unpaid' ELSE 'partial' END)`
+	paymentStatus := q.Get("payment_status")
 
 	var total int
 	if err := a.DB.QueryRowContext(r.Context(),
-		`SELECT count(*) FROM applications a JOIN applicants ap ON ap.id=a.applicant_id WHERE `+where,
-		schoolID, status, search, periodID, waveID, trackID).Scan(&total); err != nil {
+		`SELECT count(*) `+listApplicationsFrom+` WHERE `+where,
+		schoolID, status, search, periodID, waveID, trackID, paymentStatus).Scan(&total); err != nil {
 		writeErr(w, err)
 		return
 	}
 
 	rows, err := a.DB.QueryContext(r.Context(),
-		listApplicationsSQL+` WHERE `+where+` ORDER BY a.created_at DESC LIMIT $7 OFFSET $8`,
-		schoolID, status, search, periodID, waveID, trackID, perPage, common.Offset(page, perPage))
+		listApplicationsSQL+` WHERE `+where+` ORDER BY a.created_at DESC LIMIT $8 OFFSET $9`,
+		schoolID, status, search, periodID, waveID, trackID, paymentStatus, perPage, common.Offset(page, perPage))
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -217,18 +221,26 @@ const listApplicationsSQL = `SELECT a.id,a.applicant_id,a.period_id,a.wave_id,a.
 	       (SELECT count(*) FROM application_documents d WHERE d.application_id=a.id),
 	       (SELECT count(*) FROM application_documents d WHERE d.application_id=a.id AND EXISTS
 	           (SELECT 1 FROM document_reviews rv WHERE rv.document_id=d.id AND rv.status='accepted')),
-	       COALESCE((SELECT net_idr FROM charges c WHERE c.application_id=a.id ORDER BY revision DESC LIMIT 1),0)
-	       - COALESCE((SELECT sum(pa.amount_idr) FROM payment_allocations pa
-	                    JOIN payment_submissions ps ON ps.id=pa.payment_id
-	                    WHERE ps.application_id=a.id AND ps.status='verified'),0)
-	       + COALESCE((SELECT sum(pr.amount_idr) FROM payment_reversals pr
-	                    JOIN payment_submissions ps ON ps.id=pr.payment_id
-	                    WHERE ps.application_id=a.id),0),
+	       COALESCE(bill.billed,0),COALESCE(bill.outstanding,0),
 	       COALESCE(w.name,''),COALESCE(t.name,'')
-	FROM applications a
+	` + listApplicationsFrom
+
+const listApplicationsFrom = `FROM applications a
 	JOIN applicants ap ON ap.id=a.applicant_id
 	LEFT JOIN admission_waves w ON w.id=a.wave_id
-	LEFT JOIN admission_tracks t ON t.id=a.track_id`
+	LEFT JOIN admission_tracks t ON t.id=a.track_id
+	LEFT JOIN LATERAL (
+	    -- Per stage: the latest non-cancelled charge minus that stage's
+	    -- verified payments. Reversed payments are no longer 'verified'.
+	    SELECT sum(c.net_idr) AS billed,
+	           sum(GREATEST(c.net_idr-COALESCE((SELECT sum(pa.amount_idr) FROM payment_allocations pa
+	                 JOIN payment_submissions ps ON ps.id=pa.payment_id
+	                 JOIN charges c2 ON c2.id=ps.charge_id
+	                 WHERE ps.application_id=a.id AND ps.status='verified' AND c2.stage=c.stage),0),0)) AS outstanding
+	    FROM (SELECT DISTINCT ON (stage) stage,net_idr,cancelled_at FROM charges
+	          WHERE application_id=a.id ORDER BY stage,revision DESC) c
+	    WHERE c.cancelled_at IS NULL
+	) bill ON true`
 
 func scanAdminApplication(row rowScanner) (map[string]any, error) {
 	var (
@@ -237,11 +249,11 @@ func scanAdminApplication(row rowScanner) (map[string]any, error) {
 		submittedAt                                                            sql.NullTime
 		applicantName, nisn                                                    string
 		documentsCount, documentsVerified                                      int
-		outstanding                                                            int64
+		billed, outstanding                                                    int64
 		waveName, trackName                                                    string
 	)
 	if err := row.Scan(&id, &applicantID, &periodID, &waveID, &trackID, &registrationNumber, &status, &version,
-		&submittedAt, &applicantName, &nisn, &documentsCount, &documentsVerified, &outstanding, &waveName, &trackName); err != nil {
+		&submittedAt, &applicantName, &nisn, &documentsCount, &documentsVerified, &billed, &outstanding, &waveName, &trackName); err != nil {
 		return nil, err
 	}
 	item := map[string]any{
@@ -256,6 +268,8 @@ func scanAdminApplication(row rowScanner) (map[string]any, error) {
 		"documents_count":     documentsCount,
 		"documents_verified":  documentsVerified,
 		"outstanding":         outstanding,
+		"billed":              billed,
+		"payment_status":      model.PaymentStatusOf(billed, outstanding),
 		"applicant": map[string]any{
 			"id":        applicantID,
 			"full_name": applicantName,
@@ -771,6 +785,32 @@ type requirementInput struct {
 	AcceptedTypes []string `json:"accepted_types"`
 	MaxSizeMB     int      `json:"max_size_mb"`
 	Required      *bool    `json:"required"`
+	TrackID       string   `json:"track_id"`
+	Stage         string   `json:"stage"`
+}
+
+// normalize validates the requirement: only PDF/JPG/PNG may be allowed
+// (BUG-100), the stage is registration or reregistration, the size 1..20 MB.
+func (in *requirementInput) normalize() error {
+	if len(in.AcceptedTypes) == 0 {
+		in.AcceptedTypes = defaultMIMEs(nil)
+	}
+	if err := model.ValidateAllowedMIMEs(in.AcceptedTypes); err != nil {
+		return &httpError{http.StatusUnprocessableEntity, err.Error()}
+	}
+	if in.Stage == "" {
+		in.Stage = stageRegistration
+	}
+	if in.Stage != stageRegistration && in.Stage != stageReregistration {
+		return &httpError{http.StatusUnprocessableEntity, "tahap dokumen harus registration atau reregistration"}
+	}
+	if in.MaxSizeMB == 0 {
+		in.MaxSizeMB = 5
+	}
+	if in.MaxSizeMB < 1 || in.MaxSizeMB > 20 {
+		return &httpError{http.StatusUnprocessableEntity, "ukuran maksimal berkas harus 1 sampai 20 MB"}
+	}
+	return nil
 }
 
 // ListRequirements is GET /admin/config/document-requirements.
@@ -780,7 +820,7 @@ func (a *App) ListRequirements(w http.ResponseWriter, r *http.Request) {
 	}
 	schoolID := common.EffectiveSchoolID(r)
 	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT id,name,COALESCE(description,''),allowed_mimes,max_bytes,required
+		`SELECT id,name,COALESCE(description,''),allowed_mimes,max_bytes,required,COALESCE(track_id::text,''),stage
 		 FROM document_requirements WHERE school_id=$1 AND deleted_at IS NULL ORDER BY name`, schoolID)
 	if err != nil {
 		writeErr(w, err)
@@ -790,23 +830,28 @@ func (a *App) ListRequirements(w http.ResponseWriter, r *http.Request) {
 	out := []map[string]any{}
 	for rows.Next() {
 		var (
-			id, name, description string
-			allowed               textArray
-			maxBytes              int64
-			required              bool
+			id, name, description, trackID, stage string
+			allowed                               textArray
+			maxBytes                              int64
+			required                              bool
 		)
-		if err := rows.Scan(&id, &name, &description, &allowed, &maxBytes, &required); err != nil {
+		if err := rows.Scan(&id, &name, &description, &allowed, &maxBytes, &required, &trackID, &stage); err != nil {
 			writeErr(w, err)
 			return
 		}
-		out = append(out, map[string]any{
+		item := map[string]any{
 			"id":             id,
 			"name":           name,
 			"description":    description,
 			"accepted_types": allowed,
 			"max_size_mb":    int(maxBytes / (1 << 20)),
 			"required":       required,
-		})
+			"stage":          stage,
+		}
+		if trackID != "" {
+			item["track_id"] = trackID
+		}
+		out = append(out, item)
 	}
 	common.WriteJSON(w, http.StatusOK, out, nil)
 }
@@ -821,8 +866,12 @@ func (a *App) CreateRequirement(w http.ResponseWriter, r *http.Request) {
 	if !common.Decode(w, r, &in) {
 		return
 	}
-	if in.Name == "" {
-		common.WriteError(w, http.StatusBadRequest, "name is required")
+	if strings.TrimSpace(in.Name) == "" {
+		common.WriteError(w, http.StatusUnprocessableEntity, "nama dokumen wajib diisi")
+		return
+	}
+	if err := in.normalize(); err != nil {
+		writeErr(w, err)
 		return
 	}
 	periodID, err := a.resolvePeriodID(r, schoolID, in.PeriodID)
@@ -830,8 +879,8 @@ func (a *App) CreateRequirement(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	allowed := defaultMIMEs(in.AcceptedTypes)
-	maxBytes := int64(maxInt(in.MaxSizeMB, 5)) * (1 << 20)
+	allowed := in.AcceptedTypes
+	maxBytes := int64(in.MaxSizeMB) * (1 << 20)
 	required := in.Required == nil || *in.Required
 	code := strings.ToUpper(truncateSlug(in.Name))
 	if code == "" {
@@ -839,12 +888,14 @@ func (a *App) CreateRequirement(w http.ResponseWriter, r *http.Request) {
 	}
 	var id string
 	err = a.DB.QueryRowContext(r.Context(),
-		`INSERT INTO document_requirements(school_id,period_id,code,name,description,required,allowed_mimes,max_bytes)
-		 SELECT $1,p.id,$2,$3,NULLIF($4,''),$5,$6,$7 FROM admission_periods p WHERE p.id=$8 AND p.school_id=$1 RETURNING id`,
-		schoolID, code, in.Name, in.Description, required, allowed, maxBytes, periodID).Scan(&id)
+		`INSERT INTO document_requirements(school_id,period_id,code,name,description,required,allowed_mimes,max_bytes,track_id,stage)
+		 SELECT $1,p.id,$2,$3,NULLIF($4,''),$5,$6,$7,
+		        (SELECT t.id FROM admission_tracks t WHERE t.id::text=NULLIF($9,'') AND t.period_id=p.id),$10
+		 FROM admission_periods p WHERE p.id=$8 AND p.school_id=$1 RETURNING id`,
+		schoolID, code, in.Name, in.Description, required, allowed, maxBytes, periodID, in.TrackID, in.Stage).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
-			common.WriteError(w, http.StatusConflict, "a requirement with this name already exists for the period")
+			common.WriteError(w, http.StatusConflict, "dokumen dengan nama ini sudah ada pada periode tersebut")
 			return
 		}
 		writeErr(w, err)
@@ -863,14 +914,18 @@ func (a *App) UpdateRequirement(w http.ResponseWriter, r *http.Request) {
 	if !common.Decode(w, r, &in) {
 		return
 	}
-	allowed := defaultMIMEs(in.AcceptedTypes)
-	maxBytes := int64(maxInt(in.MaxSizeMB, 5)) * (1 << 20)
+	if err := in.normalize(); err != nil {
+		writeErr(w, err)
+		return
+	}
+	maxBytes := int64(in.MaxSizeMB) * (1 << 20)
 	required := in.Required == nil || *in.Required
 	res, err := a.DB.ExecContext(r.Context(),
-		`UPDATE document_requirements SET name=COALESCE(NULLIF($1,''),name),description=NULLIF($2,''),
-		        allowed_mimes=$3,max_bytes=$4,required=$5
+		`UPDATE document_requirements dr SET name=COALESCE(NULLIF($1,''),name),description=NULLIF($2,''),
+		        allowed_mimes=$3,max_bytes=$4,required=$5,stage=$8,
+		        track_id=(SELECT t.id FROM admission_tracks t WHERE t.id::text=NULLIF($9,'') AND t.period_id=dr.period_id)
 		 WHERE id=$6 AND school_id=$7 AND deleted_at IS NULL`,
-		in.Name, in.Description, allowed, maxBytes, required, param(r, "id"), schoolID)
+		in.Name, in.Description, in.AcceptedTypes, maxBytes, required, param(r, "id"), schoolID, in.Stage, in.TrackID)
 	if err != nil {
 		writeErr(w, err)
 		return

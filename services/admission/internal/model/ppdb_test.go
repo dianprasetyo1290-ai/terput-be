@@ -460,3 +460,107 @@ func TestDroppedTransitions(t *testing.T) {
 		t.Error("dropping needs a reason")
 	}
 }
+
+func TestDocumentIssue(t *testing.T) {
+	cases := []struct {
+		name     string
+		uploaded bool
+		review   string
+		want     string
+	}{
+		{"missing", false, "", "Dokumen wajib belum diunggah: KK."},
+		{"accepted", true, "accepted", ""},
+		{"rejected blocks (TC-10 BUG-033)", true, "rejected", "Dokumen wajib ditolak: KK."},
+		{"correction blocks", true, "correction", "Dokumen wajib perlu perbaikan: KK."},
+		{"unreviewed blocks", true, "", "Dokumen wajib belum diverifikasi: KK."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := DocumentIssue("KK", tc.uploaded, tc.review); got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateFeeScheme(t *testing.T) {
+	cases := []struct {
+		name            string
+		reg, rereg, ent int64
+		count, pct      int
+		ok              bool
+	}{
+		{"valid", 250000, 1000000, 5000000, 6, 30, true},
+		{"negative fee", -1, 0, 0, 1, 100, false},
+		{"zero installments", 0, 0, 0, 0, 100, false},
+		{"too many installments", 0, 0, 0, 25, 100, false},
+		{"pct zero", 0, 0, 0, 1, 0, false},
+		{"pct over 100", 0, 0, 0, 1, 101, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateFeeScheme(tc.reg, tc.rereg, tc.ent, tc.count, tc.pct)
+			if (err == nil) != tc.ok {
+				t.Fatalf("err=%v ok=%v", err, tc.ok)
+			}
+		})
+	}
+}
+
+func TestPaymentStatusOf(t *testing.T) {
+	cases := []struct {
+		billed, outstanding int64
+		want                string
+	}{
+		{0, 0, "unbilled"},
+		{250000, 250000, "unpaid"},
+		{250000, 100000, "partial"},
+		{250000, 0, "paid"},
+	}
+	for _, tc := range cases {
+		if got := PaymentStatusOf(tc.billed, tc.outstanding); got != tc.want {
+			t.Fatalf("PaymentStatusOf(%d,%d)=%q want %q", tc.billed, tc.outstanding, got, tc.want)
+		}
+	}
+}
+
+func TestDocumentUploadAllowed(t *testing.T) {
+	cases := []struct {
+		name   string
+		status string
+		exists bool
+		review string
+		locked bool
+		want   bool
+	}{
+		{"draft new", "draft", false, "", false, true},
+		{"draft replace", "draft", true, "", false, true},
+		{"submitted new file refused", "submitted", false, "", false, false},
+		{"submitted correction re-upload", "submitted", true, "correction", false, true},
+		{"review rejected re-upload", "document_review", true, "rejected", false, true},
+		{"review accepted refused", "document_review", true, "accepted", false, false},
+		{"locked refused", "draft", true, "", true, false},
+		{"eligible refused", "eligible_for_test", true, "correction", false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := DocumentUploadAllowed(tc.status, tc.exists, tc.review, tc.locked); got != tc.want {
+				t.Fatalf("got %v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSafeFileName(t *testing.T) {
+	cases := []struct{ in, mime, want string }{
+		{"akta.pdf", "application/pdf", "akta.pdf"},
+		{`a"b;c.pdf`, "application/pdf", "a_b_c.pdf"},
+		{"", "image/png", "dokumen.png"},
+		{"\r\n", "application/pdf", "dokumen.pdf"},
+	}
+	for _, tc := range cases {
+		if got := SafeFileName(tc.in, tc.mime); got != tc.want {
+			t.Fatalf("SafeFileName(%q)=%q want %q", tc.in, got, tc.want)
+		}
+	}
+}
