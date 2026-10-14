@@ -69,6 +69,9 @@ Route::middleware([
     });
     Route::group(['middleware' => ['can:viewjournal_transaction']], function () {
         Route::get('/journaltransaction', JT::class);
+        // Select2 lookups (were unauthenticated under /api).
+        Route::get('/api/search-accounts', [\App\Http\Controllers\SearchController::class, 'searchAccounts'])->name('api.search-accounts');
+        Route::get('/api/search-divisions', [\App\Http\Controllers\SearchController::class, 'searchDivisions'])->name('api.search-divisions');
     });
     Route::group(['middleware' => ['can:viewhistory_journal']], function () {
         Route::get('/historyjournaltransaction', HJT::class);

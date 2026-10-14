@@ -73,4 +73,15 @@ class QaAccRbacTest extends TestCase
         $this->actingAs($this->userAs('ACC', 'Accounting'))->get('/journalvalidation')
             ->assertOk()->assertSee('Jurnal Menunggu Approval');
     }
+
+    public function test_account_lookup_api_needs_login_and_permission(): void
+    {
+        $this->get('/api/search-accounts?q=11')->assertRedirect();
+        $this->actingAs($this->userAs('EXE', 'Executive'))->get('/api/search-accounts?q=11')->assertForbidden();
+    }
+
+    public function test_account_lookup_api_for_accounting(): void
+    {
+        $this->actingAs($this->userAs('ACC', 'Accounting'))->get('/api/search-accounts?q=11')->assertOk();
+    }
 }
