@@ -196,3 +196,48 @@ func (c *IdentityClient) DeactivateUser(schoolID, userID, reason string) error {
 	return nil
 }
 
+
+// ErrAcademicYearNotFound: identity answered 404 for the year.
+var ErrAcademicYearNotFound = fmt.Errorf("academic year not found")
+
+// AcademicYear is the identity view of one year (QA-IDN, identity
+// migration 0020): date range (YYYY-MM-DD, may be null on legacy rows) and
+// the period lock.
+type AcademicYear struct {
+	ID        string     `json:"id"`
+	SchoolID  string     `json:"school_id"`
+	Label     string     `json:"label"`
+	IsCurrent bool       `json:"is_current"`
+	StartDate *string    `json:"start_date"`
+	EndDate   *string    `json:"end_date"`
+	LockedAt  *time.Time `json:"locked_at"`
+}
+
+type academicYearEnvelope struct {
+	Data AcademicYear `json:"data"`
+}
+
+// GetAcademicYear fetches GET /academic-years/{id} with the internal key.
+func (c *IdentityClient) GetAcademicYear(id string) (*AcademicYear, error) {
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/academic-years/%s", c.BaseURL, id), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Internal-Key", c.InternalKey)
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, ErrAcademicYearNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("identity-service returned status %d", resp.StatusCode)
+	}
+	var env academicYearEnvelope
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, err
+	}
+	return &env.Data, nil
+}

@@ -1,0 +1,1 @@
+ALTER TABLE terms DROP CONSTRAINT IF EXISTS terms_dates_check;
