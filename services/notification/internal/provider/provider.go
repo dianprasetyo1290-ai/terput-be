@@ -9,10 +9,16 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
 )
+
+// ErrNotConfigured marks a refusal because no real adapter is wired for the
+// channel. Callers group these into one configuration alert instead of one
+// alert per message.
+var ErrNotConfigured = errors.New("delivery provider not configured")
 
 // Message is one outbound delivery handed to a provider.
 type Message struct {
@@ -56,7 +62,7 @@ func (UnconfiguredProvider) Name() string { return "unconfigured" }
 // Send implements Provider. The error is intentionally explicit so it lands in
 // notification_deliveries.last_error and makes a misconfigured deploy obvious.
 func (UnconfiguredProvider) Send(_ context.Context, msg Message) (string, error) {
-	return "", fmt.Errorf("delivery provider not configured: refusing to send %s message; set NOTIFICATION_PROVIDER and provider credentials", msg.Channel)
+	return "", fmt.Errorf("%w: refusing to send %s message; set NOTIFICATION_EMAIL_PROVIDER/NOTIFICATION_WHATSAPP_PROVIDER and credentials", ErrNotConfigured, msg.Channel)
 }
 
 // New selects the adapter for a provider name.

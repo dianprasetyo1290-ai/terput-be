@@ -114,8 +114,11 @@ func tenant(w http.ResponseWriter, r *http.Request) (*common.Claims, string, boo
 	return claims, schoolID, true
 }
 
-func isAdmin(c *common.Claims) bool {
-	return c.ActiveRole == common.RoleAdmin || c.ActiveRole == common.RoleSuperadmin
+// canViewAllApprovals: only Super Admin (configuration owner) reads any
+// request of the school; everyone else only what model.CanView allows
+// (BUG-112: the unit admin is not part of the Approval Center RBAC row).
+func canViewAllApprovals(c *common.Claims) bool {
+	return c.ActiveRole == common.RoleSuperadmin
 }
 
 func userInfo(c *common.Claims) model.UserInfo {
@@ -146,6 +149,9 @@ func (h *Handler) delegationsFor(ctx context.Context, schoolID, userID string) [
 	return dels
 }
 
+// correlationPtr is the request's correlation id (BUG-117), nil when absent.
+func correlationPtr(r *http.Request) *string { return strPtr(common.CorrelationID(r.Context())) }
+
 // audit writes a core-originated audit event stamped with the caller.
 func (h *Handler) audit(r *http.Request, ev model.AuditEvent) {
 	ev.Service = "core"
@@ -155,6 +161,9 @@ func (h *Handler) audit(r *http.Request, ev model.AuditEvent) {
 	}
 	if ev.IPHash == nil {
 		ev.IPHash = HashIP(ClientIP(r))
+	}
+	if ev.CorrelationID == nil || *ev.CorrelationID == "" {
+		ev.CorrelationID = correlationPtr(r)
 	}
 	if err := h.Store.InsertAudit(r.Context(), ev); err != nil {
 		log.Printf("audit %s/%s: %v", ev.Module, ev.Action, err)

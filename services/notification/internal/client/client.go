@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"skci/notification/internal/common"
 )
 
 // Client talks to one downstream base URL.
@@ -28,7 +30,7 @@ func New(url, key string) *Client {
 	return &Client{
 		BaseURL:     strings.TrimRight(url, "/"),
 		InternalKey: key,
-		HTTP:        &http.Client{Timeout: 5 * time.Second},
+		HTTP:        &http.Client{Timeout: 5 * time.Second, Transport: common.CorrelationTransport{}},
 	}
 }
 

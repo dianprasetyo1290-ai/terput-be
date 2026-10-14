@@ -30,13 +30,14 @@ type RouterConfig struct {
 func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 	r := chi.NewRouter()
 
-	r.Use(middleware.RequestID, middleware.RealIP, middleware.Logger)
+	r.Use(middleware.RequestID, common.CorrelationMiddleware, middleware.RealIP, middleware.Logger)
 	r.Use(common.SentryMiddleware())
 	r.Use(middleware.Recoverer)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   cfg.CORSOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Internal-Key", "Idempotency-Key"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Internal-Key", "Idempotency-Key", common.CorrelationHeader},
+		ExposedHeaders:   []string{common.CorrelationHeader},
 		AllowCredentials: true,
 	}))
 
@@ -77,6 +78,10 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 		pr.Get("/chat/moderation/reports", h.ListReports)
 		pr.Get("/chat/moderation/reports/{id}", h.GetReport)
 		pr.Post("/chat/moderation/reports/{id}/review", h.ReviewReport)
+		pr.Get("/notification-templates", h.AdminListTemplates)
+		pr.Get("/notification-templates/variables", h.AdminTemplateVariables)
+		pr.Post("/notification-templates", h.AdminCreateTemplate)
+		pr.Delete("/notification-templates/{id}", h.AdminDeleteTemplate)
 		pr.Get("/chat-settings", h.GetChatSettings)
 		pr.Put("/chat-settings", h.PutChatSettings)
 

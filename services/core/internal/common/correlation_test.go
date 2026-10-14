@@ -1,0 +1,57 @@
+package common
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestCorrelationMiddleware(t *testing.T) {
+	tests := []struct {
+		name, corr, reqID, want string
+	}{
+		{"pakai header pemanggil", "bill-123", "", "bill-123"},
+		{"fallback X-Request-ID", "", "req-9", "req-9"},
+		{"header tidak valid diganti", "bad id with spaces", "", ""},
+		{"kosong dibuatkan", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var seen string
+			h := CorrelationMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				seen = CorrelationID(r.Context())
+			}))
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			if tt.corr != "" {
+				req.Header.Set(CorrelationHeader, tt.corr)
+			}
+			if tt.reqID != "" {
+				req.Header.Set("X-Request-ID", tt.reqID)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Header().Get(CorrelationHeader) != seen || !ValidCorrelationID(seen) {
+				t.Fatalf("ctx %q, header %q", seen, rec.Header().Get(CorrelationHeader))
+			}
+			if tt.want != "" && seen != tt.want {
+				t.Fatalf("got %q, want %q", seen, tt.want)
+			}
+		})
+	}
+}
+
+func TestCorrelationTransport(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got = r.Header.Get(CorrelationHeader) }))
+	defer srv.Close()
+	cl := &http.Client{Transport: CorrelationTransport{}}
+	req, _ := http.NewRequestWithContext(WithCorrelationID(t.Context(), "flow-1"), http.MethodGet, srv.URL, nil)
+	resp, err := cl.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got != "flow-1" {
+		t.Fatalf("downstream saw %q", got)
+	}
+}

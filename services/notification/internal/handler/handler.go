@@ -8,6 +8,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -108,6 +109,12 @@ type Handler struct {
 	Audit       func(ctx context.Context, e client.AuditEvent)
 	Location    *time.Location
 	Now         func() time.Time
+
+	// BUG-113: failed external deliveries go to core's exception queue.
+	// InternalURL (this service as core reaches it) builds the retry_url.
+	Exceptions  func(ctx context.Context, e client.ExceptionReport) error
+	InternalURL string
+	wg          sync.WaitGroup
 }
 
 // New wires the handler.

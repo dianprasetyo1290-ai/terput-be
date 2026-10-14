@@ -1,12 +1,15 @@
 package handler
 
 import (
+	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"skci/core/internal/client"
 	"skci/core/internal/common"
 	"skci/core/internal/model"
 )
@@ -64,8 +67,17 @@ func (h *Handler) CreateDelegation(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "tidak dapat mendelegasikan wewenang kepada diri sendiri")
 		return
 	}
+	if !isUUID(req.ToUserID) {
+		common.WriteError(w, http.StatusBadRequest, "to_user_id harus berupa UUID")
+		return
+	}
 	if !req.ValidTo.After(req.ValidFrom) {
 		common.WriteError(w, http.StatusBadRequest, "valid_to harus lebih lambat dari valid_from")
+		return
+	}
+	shared, status, msg := h.delegationPeerRoles(r, claims, schoolID, req.ToUserID)
+	if msg != "" {
+		common.WriteError(w, status, msg)
 		return
 	}
 
@@ -92,11 +104,36 @@ func (h *Handler) CreateDelegation(w http.ResponseWriter, r *http.Request) {
 		Action:      "delegation_created",
 		ActorUserID: ptr(claims.GetUserID()),
 		ActorRole:   ptr(claims.ActiveRole),
-		AfterData:   created,
+		AfterData:   map[string]any{"delegation": created, "shared_roles": shared},
 		IPHash:      HashIP(ClientIP(r)),
 	})
 
 	common.WriteJSON(w, http.StatusCreated, created, nil)
+}
+
+// delegationPeerRoles enforces FR-79-005 (BUG-002): the delegate must hold at
+// least one approver role the delegator holds, in the same school. The
+// delegator's roles come from the signed JWT; the delegate's from identity.
+// Without identity the delegation cannot be verified and is refused (503)
+// rather than accepted unchecked.
+func (h *Handler) delegationPeerRoles(r *http.Request, claims *common.Claims, schoolID, toUserID string) ([]string, int, string) {
+	if h.Client == nil || h.Client.IdentityURL == "" {
+		return nil, http.StatusServiceUnavailable, "layanan identitas belum dikonfigurasi sehingga penerima delegasi tidak dapat diverifikasi"
+	}
+	toRoles, err := h.Client.UserRoles(r.Context(), schoolID, toUserID)
+	switch {
+	case errors.Is(err, client.ErrNotFound):
+		return nil, http.StatusUnprocessableEntity, "pengguna penerima delegasi tidak ditemukan"
+	case err != nil:
+		log.Printf("delegation: resolve roles of %s: %v", toUserID, err)
+		return nil, http.StatusServiceUnavailable, "layanan identitas tidak dapat dihubungi untuk memverifikasi penerima delegasi"
+	}
+	fromRoles := append([]string{claims.ActiveRole}, claims.Roles...)
+	shared := model.SharedApproverRoles(fromRoles, toRoles, common.ApproverRoles)
+	if len(shared) == 0 {
+		return nil, http.StatusUnprocessableEntity, "delegasi hanya dapat diberikan kepada pengguna dengan peran penyetuju yang setara di sekolah yang sama"
+	}
+	return shared, 0, ""
 }
 
 func (h *Handler) RevokeDelegation(w http.ResponseWriter, r *http.Request) {

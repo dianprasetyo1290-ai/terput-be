@@ -443,7 +443,8 @@ func TestAC80_03_SensitiveDataMasking(t *testing.T) {
 
 // AC-06-01: Perubahan tarif tercatat di log audit
 func TestAC06_01_PriceChangeAuditLogged(t *testing.T) {
-	_, router, _ := newTestServer(t)
+	fs, router, _ := newTestServer(t)
+	grantAuditor(t, fs, testUserAuditor) // AC-RBAC-10: auditor reads only inside an access window
 
 	// Price change event sent to /internal/audit
 	body := `{

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -13,16 +14,35 @@ import (
 	"skci/core/internal/store"
 )
 
-func parseAuditTime(s string) *time.Time {
-	if s == "" {
-		return nil
+// auditLocation is the school timezone used for date-only filters.
+func (h *Handler) auditLocation() *time.Location {
+	if loc, err := time.LoadLocation(h.Config.SchoolTimezone); err == nil && h.Config.SchoolTimezone != "" {
+		return loc
 	}
-	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02"} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return &t
-		}
+	return time.UTC
+}
+
+// auditorHasAccess (BUG-087, AC-RBAC-10): an auditor reads a school's audit
+// trail / exception queue only inside an active grant window given by a
+// superadmin. Writes 403/500 and returns false otherwise.
+func (h *Handler) auditorHasAccess(w http.ResponseWriter, r *http.Request, claims *common.Claims, schoolID string) bool {
+	if claims.ActiveRole != common.RoleAuditor {
+		return true
 	}
-	return nil
+	if !isUUID(schoolID) {
+		common.WriteError(w, http.StatusBadRequest, "school_id diperlukan")
+		return false
+	}
+	ok, err := h.Store.HasActiveAuditGrant(r.Context(), schoolID, claims.GetUserID())
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "gagal memeriksa masa akses auditor")
+		return false
+	}
+	if !ok {
+		common.WriteError(w, http.StatusForbidden, "akses auditor Anda tidak aktif atau sudah berakhir; minta Super Admin memberikan masa akses")
+		return false
+	}
+	return true
 }
 
 func (h *Handler) ListAudit(w http.ResponseWriter, r *http.Request) {
@@ -44,26 +64,51 @@ func (h *Handler) ListAudit(w http.ResponseWriter, r *http.Request) {
 			schoolIDPtr = &sid
 		}
 	}
+	if claims.ActiveRole == common.RoleAuditor {
+		sid := ""
+		if schoolIDPtr != nil {
+			sid = *schoolIDPtr
+		}
+		if !h.auditorHasAccess(w, r, claims, sid) {
+			return
+		}
+	}
 
-	userID := r.URL.Query().Get("user_id")
-	module := r.URL.Query().Get("module")
-	from := r.URL.Query().Get("from")
-	to := r.URL.Query().Get("to")
-	format := r.URL.Query().Get("format")
+	q := r.URL.Query()
+	from, to, err := model.ParseAuditRange(q.Get("from"), q.Get("to"), h.auditLocation())
+	switch {
+	case errors.Is(err, model.ErrAuditDateRange):
+		common.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	case err != nil:
+		common.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	format := q.Get("format")
 
 	filter := store.AuditFilter{
-		SchoolID: schoolIDPtr,
-		UserID:   userID,
-		Module:   module,
-		From:     parseAuditTime(from),
-		To:       parseAuditTime(to),
+		SchoolID:      schoolIDPtr,
+		UserID:        q.Get("user_id"),
+		Module:        q.Get("module"),
+		Service:       q.Get("service"),
+		Action:        q.Get("action"),
+		EntityID:      q.Get("entity_id"),
+		CorrelationID: q.Get("correlation_id"),
+		From:          from,
+		To:            to,
 	}
 
 	if format == "csv" || strings.Contains(r.Header.Get("Accept"), "text/csv") {
 		// Export CSV (FR-06-003, CC-04)
-		events, _, err := h.Store.ListAudit(r.Context(), filter, 1, 10000)
+		maxRows := h.Config.AuditExportMaxRows
+		events, total, err := h.Store.ListAudit(r.Context(), filter, 1, maxRows)
 		if err != nil {
 			common.WriteError(w, http.StatusInternalServerError, "gagal mengekspor log audit: "+err.Error())
+			return
+		}
+		if total > maxRows {
+			common.WriteError(w, http.StatusUnprocessableEntity,
+				fmt.Sprintf("hasil %d baris melebihi batas ekspor %d baris; persempit filter tanggal/modul", total, maxRows))
 			return
 		}
 
@@ -78,7 +123,11 @@ func (h *Handler) ListAudit(w http.ResponseWriter, r *http.Request) {
 			ActorUserID: ptr(claims.GetUserID()),
 			ActorRole:   ptr(claims.ActiveRole),
 			Reason:      ptr(fmt.Sprintf("ekspor %d baris audit log", len(events))),
-			IPHash:      HashIP(ClientIP(r)),
+			AfterData: map[string]any{"rows": len(events), "filter": map[string]any{
+				"user_id": filter.UserID, "module": filter.Module, "service": filter.Service, "action": filter.Action,
+				"entity_id": filter.EntityID, "correlation_id": filter.CorrelationID, "from": q.Get("from"), "to": q.Get("to")}},
+			CorrelationID: correlationPtr(r),
+			IPHash:        HashIP(ClientIP(r)),
 		})
 
 		w.Header().Set("Content-Type", "text/csv")

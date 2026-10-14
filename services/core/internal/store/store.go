@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"skci/core/internal/model"
 )
@@ -41,6 +42,12 @@ type Store interface {
 	ListExpiredSteps(ctx context.Context) ([]model.ApprovalStep, error)
 	EscalateStep(ctx context.Context, stepID string) (*model.ApprovalStep, error)
 
+	// Auditor access windows (BUG-087)
+	CreateAuditGrant(ctx context.Context, g model.AuditAccessGrant) (*model.AuditAccessGrant, error)
+	ListAuditGrants(ctx context.Context, schoolID string) ([]model.AuditAccessGrant, error)
+	RevokeAuditGrant(ctx context.Context, schoolID, id, revokedBy string) (*model.AuditAccessGrant, error)
+	HasActiveAuditGrant(ctx context.Context, schoolID, userID string) (bool, error)
+
 	// Approval Delegations
 	ListDelegations(ctx context.Context, schoolID, userID string) ([]model.ApprovalDelegation, error)
 	CreateDelegation(ctx context.Context, delegation model.ApprovalDelegation) (*model.ApprovalDelegation, error)
@@ -53,7 +60,7 @@ type Store interface {
 	ListExceptions(ctx context.Context, f ExceptionFilter, page, perPage int) ([]model.IntegrationException, int, error)
 	AssignException(ctx context.Context, schoolID, id, assigneeUserID string) error
 	ResolveException(ctx context.Context, schoolID, id, resolvedBy, reason string) error
-	IncrementExceptionAttempt(ctx context.Context, schoolID, id string) error
+	ClaimExceptionForRetry(ctx context.Context, schoolID, id string, staleAfter time.Duration) error
 	ReopenException(ctx context.Context, schoolID, id, lastError string) error
 
 	// Central Audit Trail

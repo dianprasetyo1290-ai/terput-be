@@ -225,3 +225,11 @@ type ChatMessageReport struct {
 	MessageBody    string     `json:"message_body"`
 	MessageSender  string     `json:"message_sender_user_id"`
 }
+
+// LastErrorText is the delivery's last error, or "" when none.
+func (d NotificationDelivery) LastErrorText() string {
+	if d.LastError == nil {
+		return ""
+	}
+	return *d.LastError
+}

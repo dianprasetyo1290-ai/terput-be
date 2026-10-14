@@ -30,9 +30,10 @@ func newTestServer(t *testing.T) (*fakeStore, http.Handler, *client.Client) {
 	t.Helper()
 	fs := newFakeStore()
 	cfg := config.Config{
-		JWTSecret:   testJWTSecret,
-		InternalKey: testInternalKey,
-		CORSOrigins: []string{"http://localhost:5173"},
+		JWTSecret:        testJWTSecret,
+		InternalKey:      testInternalKey,
+		CORSOrigins:      []string{"http://localhost:5173"},
+		RetryLockSeconds: 300,
 	}
 	cl := client.New("", "", "", testInternalKey)
 	h := New(fs, cfg, cl)

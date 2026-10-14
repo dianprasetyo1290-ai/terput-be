@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 type fakeStore struct {
 	mu           sync.Mutex
 	flows        map[string]model.ApprovalFlow
+	auditGrants  []model.AuditAccessGrant
 	requests     map[string]model.ApprovalRequest
 	steps        map[string][]model.ApprovalStep
 	delegations  map[string]model.ApprovalDelegation
@@ -481,6 +483,9 @@ func (f *fakeStore) ListExceptions(ctx context.Context, filter store.ExceptionFi
 		if filter.Kind != "" && e.Kind != filter.Kind {
 			continue
 		}
+		if !slices.Contains(filter.Kinds, e.Kind) {
+			continue
+		}
 		if filter.Status != "" && e.Status != filter.Status {
 			continue
 		}
@@ -525,13 +530,20 @@ func (f *fakeStore) ResolveException(ctx context.Context, schoolID, id, resolved
 	return nil
 }
 
-func (f *fakeStore) IncrementExceptionAttempt(ctx context.Context, schoolID, id string) error {
+func (f *fakeStore) ClaimExceptionForRetry(ctx context.Context, schoolID, id string, staleAfter time.Duration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	e, ok := f.exceptions[id]
 	if !ok || e.SchoolID != schoolID {
 		return store.ErrNotFound
 	}
+	switch {
+	case e.Status == model.ExceptionStatusResolved:
+		return store.ErrConflict
+	case e.Status == model.ExceptionStatusRetrying && time.Since(e.UpdatedAt) < staleAfter:
+		return store.ErrRetryInProgress
+	}
+	e.Status = model.ExceptionStatusRetrying
 	e.Attempts++
 	e.UpdatedAt = time.Now()
 	f.exceptions[id] = e
@@ -573,6 +585,15 @@ func (f *fakeStore) ListAudit(ctx context.Context, filter store.AuditFilter, pag
 			continue
 		}
 		if filter.Module != "" && a.Module != filter.Module {
+			continue
+		}
+		if filter.CorrelationID != "" && (a.CorrelationID == nil || *a.CorrelationID != filter.CorrelationID) {
+			continue
+		}
+		if filter.Action != "" && a.Action != filter.Action {
+			continue
+		}
+		if filter.Service != "" && a.Service != filter.Service {
 			continue
 		}
 		if filter.From != nil && a.CreatedAt.Before(*filter.From) {
@@ -629,4 +650,50 @@ func (f *fakeStore) ListServiceRequestEvents(ctx context.Context, schoolID, requ
 }
 func (f *fakeStore) CanUserHandleServiceRequests(ctx context.Context, schoolID string, roles []string) ([]string, error) {
 	return nil, nil
+}
+
+func (f *fakeStore) CreateAuditGrant(ctx context.Context, g model.AuditAccessGrant) (*model.AuditAccessGrant, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	g.ID = fmt.Sprintf("00000000-0000-0000-0000-%012d", len(f.auditGrants)+1)
+	g.CreatedAt = time.Now()
+	f.auditGrants = append(f.auditGrants, g)
+	return &g, nil
+}
+
+func (f *fakeStore) ListAuditGrants(ctx context.Context, schoolID string) ([]model.AuditAccessGrant, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []model.AuditAccessGrant
+	for _, g := range f.auditGrants {
+		if g.SchoolID == schoolID {
+			out = append(out, g)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) RevokeAuditGrant(ctx context.Context, schoolID, id, revokedBy string) (*model.AuditAccessGrant, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, g := range f.auditGrants {
+		if g.ID == id && g.SchoolID == schoolID && g.RevokedAt == nil {
+			now := time.Now()
+			f.auditGrants[i].RevokedAt, f.auditGrants[i].RevokedBy = &now, &revokedBy
+			out := f.auditGrants[i]
+			return &out, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
+func (f *fakeStore) HasActiveAuditGrant(ctx context.Context, schoolID, userID string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, g := range f.auditGrants {
+		if g.SchoolID == schoolID && g.UserID == userID && g.Active(time.Now()) {
+			return true, nil
+		}
+	}
+	return false, nil
 }

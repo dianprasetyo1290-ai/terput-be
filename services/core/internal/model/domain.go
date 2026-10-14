@@ -635,3 +635,23 @@ func FinalDecision(req *ApprovalRequest) (decidedBy, comment string) {
 	}
 	return decidedBy, comment
 }
+
+// AuditAccessGrant is a time-boxed window in which an auditor may read the
+// audit trail and exception queue of a school (BUG-087, AC-RBAC-10).
+type AuditAccessGrant struct {
+	ID        string     `json:"id"`
+	SchoolID  string     `json:"school_id"`
+	UserID    string     `json:"user_id"`
+	ValidFrom time.Time  `json:"valid_from"`
+	ValidTo   time.Time  `json:"valid_to"`
+	Reason    string     `json:"reason"`
+	GrantedBy string     `json:"granted_by"`
+	CreatedAt time.Time  `json:"created_at"`
+	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+	RevokedBy *string    `json:"revoked_by,omitempty"`
+}
+
+// Active reports whether the grant allows access at now.
+func (g AuditAccessGrant) Active(now time.Time) bool {
+	return g.RevokedAt == nil && !now.Before(g.ValidFrom) && now.Before(g.ValidTo)
+}

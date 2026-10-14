@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -113,6 +115,11 @@ func (h *Handler) InternalCreateApproval(w http.ResponseWriter, r *http.Request)
 		common.WriteError(w, http.StatusUnprocessableEntity, msg)
 		return
 	}
+	rerouted, msg := h.guardMakerOnlySteps(r.Context(), in.SchoolID, in.MakerUserID, steps)
+	if msg != "" {
+		common.WriteError(w, http.StatusUnprocessableEntity, msg)
+		return
+	}
 
 	created, err := h.Store.CreateRequest(r.Context(), model.ApprovalRequest{
 		SchoolID:       in.SchoolID,
@@ -141,12 +148,13 @@ func (h *Handler) InternalCreateApproval(w http.ResponseWriter, r *http.Request)
 	_ = h.Store.InsertAudit(r.Context(), model.AuditEvent{
 		SchoolID: &in.SchoolID, Service: "core", Module: "approval", EntityType: "approval_request",
 		EntityID: created.ID, Action: "approval_requested", ActorUserID: &in.MakerUserID,
-		AfterData:     map[string]any{"request_type": in.RequestType, "source_service": in.SourceService, "source_id": in.SourceID, "amount_idr": in.AmountIDR, "steps": len(steps)},
+		AfterData: map[string]any{"request_type": in.RequestType, "source_service": in.SourceService, "source_id": in.SourceID,
+			"amount_idr": in.AmountIDR, "steps": len(steps), "rerouted_steps": rerouted},
 		CorrelationID: &in.CorrelationID,
 	})
 	if first := model.CurrentStep(created); first != nil {
 		h.bg(func(ctx context.Context) {
-			jobs.NotifyStep(ctx, h.Client, created, *first, "Permintaan Persetujuan Baru",
+			jobs.NotifyStep(ctx, h.Store, h.Client, created, *first, "Permintaan Persetujuan Baru",
 				fmt.Sprintf("Pengajuan %q menunggu persetujuan Anda.", created.Title))
 		})
 	}
@@ -188,6 +196,56 @@ func (h *Handler) buildSteps(ctx context.Context, in internalCreateApprovalReque
 		snapshot = append(snapshot, fs)
 	}
 	return steps, snapshot, ""
+}
+
+// guardMakerOnlySteps (BUG-111, BR-GEN-09): a step whose only approver is
+// the maker would wait forever, so it is routed to its escalate_to_role, or
+// the request is refused (422) when no independent approver exists. Role
+// holders come from identity; while identity is not configured the guard is
+// skipped and the SLA escalation job stays the safety net.
+func (h *Handler) guardMakerOnlySteps(ctx context.Context, schoolID, makerID string, steps []model.ApprovalStep) ([]int, string) {
+	if h.Client == nil || h.Client.IdentityURL == "" {
+		return nil, ""
+	}
+	holders := func(role string) ([]string, bool) {
+		ids, err := h.Client.UsersByRole(ctx, schoolID, role)
+		if err != nil {
+			log.Printf("maker-only guard: holders of %s: %v", role, err)
+			return nil, false
+		}
+		return ids, true
+	}
+	var rerouted []int
+	for i, st := range steps {
+		var approvers []string
+		switch {
+		case st.ApproverUserID != nil:
+			approvers = []string{*st.ApproverUserID}
+		case st.ApproverRole != nil:
+			ids, ok := holders(*st.ApproverRole)
+			if !ok {
+				continue
+			}
+			approvers = ids
+		}
+		var escalate []string
+		if st.EscalateToRole != nil && !slices.ContainsFunc(approvers, func(id string) bool { return id != makerID }) {
+			ids, ok := holders(*st.EscalateToRole)
+			if !ok {
+				continue
+			}
+			escalate = ids
+		}
+		next, moved, err := model.RerouteMakerOnlyStep(st, makerID, approvers, escalate)
+		if err != nil {
+			return nil, fmt.Sprintf("tahap %d: %v; tambahkan penyetuju lain atau atur peran eskalasi pada alur approval", st.Seq, err)
+		}
+		if moved {
+			steps[i] = next
+			rerouted = append(rerouted, st.Seq)
+		}
+	}
+	return rerouted, ""
 }
 
 func (h *Handler) supervisorOf(ctx context.Context, schoolID, subjectUserID string) (string, string) {
@@ -375,6 +433,9 @@ func (h *Handler) InternalCreateAudit(w http.ResponseWriter, r *http.Request) {
 	if (in.SchoolID != nil && !isUUID(*in.SchoolID)) || (in.ActorUserID != nil && !isUUID(*in.ActorUserID)) {
 		common.WriteError(w, http.StatusUnprocessableEntity, "school_id dan actor_user_id harus berupa UUID")
 		return
+	}
+	if in.CorrelationID == nil || *in.CorrelationID == "" {
+		in.CorrelationID = correlationPtr(r) // BUG-117: X-Correlation-ID of the caller
 	}
 	if err := h.Store.InsertAudit(r.Context(), model.AuditEvent{
 		SchoolID:      in.SchoolID,
