@@ -18,6 +18,12 @@ use App\Livewire\Pages\EndOfYear\EOY;
 use App\Livewire\Pages\HistoryJournalTransaction\HJT;
 use App\Livewire\Pages\HistoryJournalValidation\HJV;
 use App\Livewire\Pages\Home;
+use App\Livewire\Pages\AutoPosting\AutoPosting;
+use App\Livewire\Pages\Import\Import;
+use App\Livewire\Pages\JournalDetail\JournalDetail;
+use App\Livewire\Pages\Report\Consolidation\Consolidation;
+use App\Livewire\Pages\Report\Statements\Statements;
+use App\Livewire\Pages\Report\TrialBalance\TrialBalance;
 use App\Livewire\Pages\JournalTransaction\JT;
 use App\Livewire\Pages\JournalValidation\JV;
 use App\Livewire\Pages\Period\Period;
@@ -94,6 +100,15 @@ Route::middleware([
     Route::group(['middleware' => ['can:viewjournal_validation']], function () {
         Route::get('/journalvalidation', JV::class);
     });
+    Route::group(['middleware' => ['can:viewauto_posting']], function () {
+        Route::get('/autoposting', AutoPosting::class)->name('autoposting');
+    });
+    Route::group(['middleware' => ['can:viewimport_data']], function () {
+        Route::get('/import', Import::class)->name('import');
+    });
+    Route::group(['middleware' => ['can:viewgeneral_ledger']], function () {
+        Route::get('/journal/{transNo}', JournalDetail::class)->name('journal.detail');
+    });
     Route::group(['middleware' => ['can:viewaccount_group_table']], function () {
         Route::get('/agt', AccountGroupPages::class);
     });
@@ -153,6 +168,13 @@ Route::middleware([
     Route::group(['prefix' => 'report', 'as' => 'report.'], function () {
         Route::group(['middleware' => ['can:viewfinancial_report']], function () {
             Route::get('financial', FinancialReport::class)->name('financial');
+            Route::get('statements', Statements::class)->name('statements');
+        });
+        Route::group(['middleware' => ['can:viewtrial_balance']], function () {
+            Route::get('trial-balance', TrialBalance::class)->name('trial-balance');
+        });
+        Route::group(['middleware' => ['can:viewconsolidation']], function () {
+            Route::get('consolidation', Consolidation::class)->name('consolidation');
         });
     });
 
