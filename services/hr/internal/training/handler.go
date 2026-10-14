@@ -39,7 +39,7 @@ func (h *Handler) ListCourses(w http.ResponseWriter, r *http.Request) {
 
 	list, err := h.Store.ListCourses(r.Context(), schoolID, status)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat kursus: "+err.Error())
+		common.InternalError(w, "gagal memuat kursus", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -82,7 +82,7 @@ func (h *Handler) CreateCourse(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.Store.CreateCourse(r.Context(), cr)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal membuat kursus: "+err.Error())
+		common.InternalError(w, "gagal membuat kursus", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, created, nil)
@@ -107,7 +107,7 @@ func (h *Handler) UpdateCourse(w http.ResponseWriter, r *http.Request) {
 
 	updated, err := h.Store.UpdateCourse(r.Context(), cr)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memperbarui kursus: "+err.Error())
+		common.InternalError(w, "gagal memperbarui kursus", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, updated, nil)
@@ -116,9 +116,13 @@ func (h *Handler) UpdateCourse(w http.ResponseWriter, r *http.Request) {
 // Materials
 func (h *Handler) ListMaterials(w http.ResponseWriter, r *http.Request) {
 	courseID := chi.URLParam(r, "courseId")
+	if _, err := h.Store.GetCourse(r.Context(), common.EffectiveSchoolID(r), courseID); err != nil {
+		common.WriteError(w, http.StatusNotFound, "kursus tidak ditemukan")
+		return
+	}
 	list, err := h.Store.ListMaterials(r.Context(), courseID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat materi: "+err.Error())
+		common.InternalError(w, "gagal memuat materi", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -143,7 +147,7 @@ func (h *Handler) CreateMaterial(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.Store.CreateMaterial(r.Context(), m)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal menambah materi: "+err.Error())
+		common.InternalError(w, "gagal menambah materi", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, created, nil)
@@ -154,7 +158,7 @@ func (h *Handler) ListSessions(w http.ResponseWriter, r *http.Request) {
 	courseID := chi.URLParam(r, "courseId")
 	list, err := h.Store.ListSessions(r.Context(), courseID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat sesi: "+err.Error())
+		common.InternalError(w, "gagal memuat sesi", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -174,7 +178,7 @@ func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.Store.CreateSession(r.Context(), ses)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal menambah sesi: "+err.Error())
+		common.InternalError(w, "gagal menambah sesi", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, created, nil)
@@ -185,7 +189,7 @@ func (h *Handler) ListQuestions(w http.ResponseWriter, r *http.Request) {
 	courseID := chi.URLParam(r, "courseId")
 	list, err := h.Store.ListQuestions(r.Context(), courseID, true)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat kuis: "+err.Error())
+		common.InternalError(w, "gagal memuat kuis", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -205,7 +209,7 @@ func (h *Handler) CreateQuestion(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.Store.CreateQuestion(r.Context(), q)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal menambah soal kuis: "+err.Error())
+		common.InternalError(w, "gagal menambah soal kuis", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, created, nil)
@@ -219,7 +223,7 @@ func (h *Handler) ListMandatory(w http.ResponseWriter, r *http.Request) {
 	schoolID := common.EffectiveSchoolID(r)
 	list, err := h.Store.ListMandatory(r.Context(), schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat pelatihan wajib: "+err.Error())
+		common.InternalError(w, "gagal memuat pelatihan wajib", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -242,7 +246,7 @@ func (h *Handler) CreateMandatory(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.Store.CreateMandatory(r.Context(), schoolID, body.PositionID, body.CourseID, body.DueDays)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal membuat penugasan wajib: "+err.Error())
+		common.InternalError(w, "gagal membuat penugasan wajib", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, created, nil)
@@ -258,7 +262,7 @@ func (h *Handler) ListAssignments(w http.ResponseWriter, r *http.Request) {
 
 	list, err := h.Store.ListAssignments(r.Context(), schoolID, empID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat penugasan: "+err.Error())
+		common.InternalError(w, "gagal memuat penugasan", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -278,7 +282,7 @@ func (h *Handler) CreateAssignment(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.Store.CreateAssignment(r.Context(), a)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal menugaskan pelatihan: "+err.Error())
+		common.InternalError(w, "gagal menugaskan pelatihan", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, created, nil)
@@ -333,7 +337,7 @@ func (h *Handler) EnrollCourse(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.Store.DB.BeginTx(r.Context(), nil)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memulai transaksi: "+err.Error())
+		common.InternalError(w, "gagal memulai transaksi", err)
 		return
 	}
 	defer tx.Rollback()
@@ -348,7 +352,12 @@ func (h *Handler) EnrollCourse(w http.ResponseWriter, r *http.Request) {
 			common.WriteError(w, http.StatusNotFound, "kursus tidak ditemukan")
 			return
 		}
-		common.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+		var rejected *EnrollRejectedError
+		if errors.As(err, &rejected) {
+			common.WriteError(w, http.StatusUnprocessableEntity, rejected.Reason)
+			return
+		}
+		common.InternalError(w, "gagal mendaftar kursus", err)
 		return
 	}
 
@@ -375,14 +384,14 @@ func (h *Handler) EnrollCourse(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := h.Store.UpdateAssignmentApprovalTx(r.Context(), tx, as.ID, appID); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "gagal menyimpan approval id: "+err.Error())
+			common.InternalError(w, "gagal menyimpan approval id", err)
 			return
 		}
 		as.ApprovalID = &appID
 	}
 
 	if err := tx.Commit(); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal menyimpan pendaftaran: "+err.Error())
+		common.InternalError(w, "gagal menyimpan pendaftaran", err)
 		return
 	}
 
@@ -401,7 +410,7 @@ func (h *Handler) MyAssignments(w http.ResponseWriter, r *http.Request) {
 	schoolID := common.EffectiveSchoolID(r)
 	list, err := h.Store.ListAssignments(r.Context(), schoolID, claims.UserID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat pelatihan saya: "+err.Error())
+		common.InternalError(w, "gagal memuat pelatihan saya", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -412,7 +421,7 @@ func (h *Handler) MyQuiz(w http.ResponseWriter, r *http.Request) {
 	// Questions returned with correct answers STRIPPED for employee security
 	list, err := h.Store.ListQuestions(r.Context(), courseID, false)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat soal kuis: "+err.Error())
+		common.InternalError(w, "gagal memuat soal kuis", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -432,7 +441,7 @@ func (h *Handler) SubmitQuiz(w http.ResponseWriter, r *http.Request) {
 
 	attempt, err := h.Store.SubmitQuiz(r.Context(), schoolID, assignmentID, body.Answers)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal menilai kuis: "+err.Error())
+		common.InternalError(w, "gagal menilai kuis", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, attempt, nil)
@@ -443,7 +452,7 @@ func (h *Handler) MarkMaterialDone(w http.ResponseWriter, r *http.Request) {
 	materialID := chi.URLParam(r, "materialId")
 
 	if err := h.Store.MarkMaterialDone(r.Context(), assignmentID, materialID); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal menandai materi: "+err.Error())
+		common.InternalError(w, "gagal menandai materi", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "materi selesai"}, nil)
@@ -457,7 +466,7 @@ func (h *Handler) ListOnboardingTemplates(w http.ResponseWriter, r *http.Request
 	schoolID := common.EffectiveSchoolID(r)
 	list, err := h.Store.ListOnboardingTemplates(r.Context(), schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat template: "+err.Error())
+		common.InternalError(w, "gagal memuat template", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -474,7 +483,7 @@ func (h *Handler) CreateOnboardingTemplate(w http.ResponseWriter, r *http.Reques
 
 	created, err := h.Store.CreateOnboardingTemplate(r.Context(), t)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal membuat template onboarding: "+err.Error())
+		common.InternalError(w, "gagal membuat template onboarding", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, created, nil)
@@ -502,8 +511,36 @@ func (h *Handler) MarkOnboardingTaskDone(w http.ResponseWriter, r *http.Request)
 	taskID := chi.URLParam(r, "taskId")
 
 	if err := h.Store.MarkTaskDone(r.Context(), schoolID, taskID, claims.UserID); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal menyelesaikan tugas: "+err.Error())
+		common.InternalError(w, "gagal menyelesaikan tugas", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "tugas diselesaikan"}, nil)
+}
+
+// MyCatalog lists the school's published courses for ESS self-enrolment
+// (GET /me/training/catalog). Drafts stay visible to training admins only.
+func (h *Handler) MyCatalog(w http.ResponseWriter, r *http.Request) {
+	list, err := h.Store.ListCourses(r.Context(), common.EffectiveSchoolID(r), "published")
+	if err != nil {
+		common.InternalError(w, "gagal memuat katalog pelatihan", err)
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, list, nil)
+}
+
+// MyCourseMaterials lists the materials of a published course of the
+// caller's school (GET /me/training/courses/{courseId}/materials).
+func (h *Handler) MyCourseMaterials(w http.ResponseWriter, r *http.Request) {
+	courseID := chi.URLParam(r, "courseId")
+	course, err := h.Store.GetCourse(r.Context(), common.EffectiveSchoolID(r), courseID)
+	if err != nil || course.Status != "published" {
+		common.WriteError(w, http.StatusNotFound, "kursus tidak ditemukan")
+		return
+	}
+	list, err := h.Store.ListMaterials(r.Context(), courseID)
+	if err != nil {
+		common.InternalError(w, "gagal memuat materi", err)
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, list, nil)
 }

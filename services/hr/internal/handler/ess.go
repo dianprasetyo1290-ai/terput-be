@@ -136,7 +136,7 @@ func (a *App) MeCheckIn(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := store.RecordAttendance(r.Context(), a.DB, &att); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal mencatat presensi masuk: "+err.Error())
+		common.InternalError(w, "Gagal mencatat presensi masuk", err)
 		return
 	}
 
@@ -299,12 +299,12 @@ func (a *App) MeCreateLeaveRequest(w http.ResponseWriter, r *http.Request) {
 	// returned to the user, never auto-approved (T2 §approval).
 	tx, err := a.DB.BeginTx(r.Context(), nil)
 	if err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal membuat permohonan cuti: "+err.Error())
+		common.InternalError(w, "Gagal membuat permohonan cuti", err)
 		return
 	}
 	defer tx.Rollback()
 	if err := store.CreateLeaveRequest(r.Context(), tx, &lr); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal membuat permohonan cuti: "+err.Error())
+		common.InternalError(w, "Gagal membuat permohonan cuti", err)
 		return
 	}
 	appID, err := a.Client.CreateApprovalRequest(r.Context(), schoolID, callerID(r), callerID(r),
@@ -316,11 +316,11 @@ func (a *App) MeCreateLeaveRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := store.UpdateLeaveRequestApproval(r.Context(), tx, lr.ID, appID); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan approval cuti: "+err.Error())
+		common.InternalError(w, "Gagal menyimpan approval cuti", err)
 		return
 	}
 	if err := tx.Commit(); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan permohonan cuti: "+err.Error())
+		common.InternalError(w, "Gagal menyimpan permohonan cuti", err)
 		return
 	}
 	lr.ApprovalID = &appID
@@ -349,7 +349,7 @@ func (a *App) MeCancelLeaveRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := store.CancelLeaveRequestTx(r.Context(), a.DB, id); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal membatalkan cuti: "+err.Error())
+		common.InternalError(w, "Gagal membatalkan cuti", err)
 		return
 	}
 
@@ -463,12 +463,12 @@ func (a *App) MeCreateOvertimeRequest(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := a.DB.BeginTx(r.Context(), nil)
 	if err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal mengajukan lembur: "+err.Error())
+		common.InternalError(w, "Gagal mengajukan lembur", err)
 		return
 	}
 	defer tx.Rollback()
 	if err := store.CreateOvertimeRequest(r.Context(), tx, &ot); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal mengajukan lembur: "+err.Error())
+		common.InternalError(w, "Gagal mengajukan lembur", err)
 		return
 	}
 	appID, err := a.Client.CreateApprovalRequest(r.Context(), schoolID, callerID(r), callerID(r),
@@ -480,11 +480,11 @@ func (a *App) MeCreateOvertimeRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := store.UpdateOvertimeRequestApproval(r.Context(), tx, ot.ID, appID); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan approval lembur: "+err.Error())
+		common.InternalError(w, "Gagal menyimpan approval lembur", err)
 		return
 	}
 	if err := tx.Commit(); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan pengajuan lembur: "+err.Error())
+		common.InternalError(w, "Gagal menyimpan pengajuan lembur", err)
 		return
 	}
 	ot.ApprovalID = &appID
@@ -550,12 +550,12 @@ func (a *App) MeCreateProfileChangeRequest(w http.ResponseWriter, r *http.Reques
 
 	tx, err := a.DB.BeginTx(r.Context(), nil)
 	if err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan pengajuan perubahan profil: "+err.Error())
+		common.InternalError(w, "Gagal menyimpan pengajuan perubahan profil", err)
 		return
 	}
 	defer tx.Rollback()
 	if err := store.CreateProfileChangeRequest(r.Context(), tx, &pcr); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan pengajuan perubahan profil: "+err.Error())
+		common.InternalError(w, "Gagal menyimpan pengajuan perubahan profil", err)
 		return
 	}
 	appID, err := a.Client.CreateApprovalRequest(r.Context(), schoolID, callerID(r), callerID(r),
@@ -567,11 +567,11 @@ func (a *App) MeCreateProfileChangeRequest(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := store.UpdateProfileChangeRequestApproval(r.Context(), tx, pcr.ID, appID); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan approval perubahan profil: "+err.Error())
+		common.InternalError(w, "Gagal menyimpan approval perubahan profil", err)
 		return
 	}
 	if err := tx.Commit(); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan pengajuan perubahan profil: "+err.Error())
+		common.InternalError(w, "Gagal menyimpan pengajuan perubahan profil", err)
 		return
 	}
 	pcr.ApprovalID = &appID
@@ -663,4 +663,26 @@ func (a *App) MeUploadDocument(w http.ResponseWriter, r *http.Request) {
 	}
 
 	common.JSON(w, http.StatusCreated, doc)
+}
+
+// MeListAttendance lists the caller's own attendance records. ESS users must
+// not hit the HR-admin /attendance list (which takes any employee_id).
+func (a *App) MeListAttendance(w http.ResponseWriter, r *http.Request) {
+	emp, err := a.getMeEmployee(r)
+	if err != nil {
+		common.Error(w, http.StatusNotFound, "Data pegawai Anda tidak ditemukan dalam sistem HRIS")
+		return
+	}
+	page, perPage := parsePagination(r)
+	list, total, err := store.ListAttendance(r.Context(), a.DB, emp.SchoolID, r.URL.Query().Get("month"), emp.ID, page, perPage)
+	if err != nil {
+		common.InternalError(w, "Gagal memuat riwayat presensi", err)
+		return
+	}
+	common.JSONWithMeta(w, http.StatusOK, list, common.Meta{
+		Page:       page,
+		PerPage:    perPage,
+		Total:      total,
+		TotalPages: (total + perPage - 1) / perPage,
+	})
 }

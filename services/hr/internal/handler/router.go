@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"slices"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -10,6 +11,24 @@ import (
 	"skci/hr/internal/common"
 	"skci/hr/internal/payroll"
 	"skci/hr/internal/training"
+)
+
+// Route role sets, taken from the endpoint tables of the T2–T5 task specs
+// (docs/prd-sekoci/tasks). Superadmin is in every set (cross-school support).
+var (
+	rolesHR      = []string{common.RoleSuperadmin, common.RoleHRAdmin, common.RoleHRManager}
+	rolesOrgRead = append(slices.Clone(rolesHR), common.RoleKepalaSekolah)
+
+	rolesTrainingManage = []string{common.RoleSuperadmin, common.RoleTrainingAdmin, common.RoleHRAdmin}
+	rolesTrainingRead   = append(slices.Clone(rolesTrainingManage), common.RoleHRManager, common.RoleKepalaSekolah)
+
+	rolesRequisitionWrite = append(slices.Clone(rolesHR), common.RoleKepalaSekolah)
+	rolesRequisitionRead  = append(slices.Clone(rolesRequisitionWrite), common.RoleRecruiter)
+	rolesRecruiting       = append(slices.Clone(rolesHR), common.RoleRecruiter)
+	rolesCandidateRead    = append(slices.Clone(rolesRecruiting), common.RoleKepalaSekolah)
+
+	rolesPayrollOperate = append(slices.Clone(rolesHR), common.RolePayroll)
+	rolesPayrollRead    = append(slices.Clone(rolesPayrollOperate), common.RoleFinanceManager)
 )
 
 func (a *App) Router() http.Handler {
@@ -84,13 +103,29 @@ func (a *App) Router() http.Handler {
 		// ESS Payslips
 		api.Get("/me/payslips", payHandler.MyPayslips)
 
+		// ESS reads that previously went through HR-admin endpoints and so
+		// 403'd for pegawai/guru (QA BUG-WEB role sweep).
+		api.Get("/me/attendance", a.MeListAttendance)
+		api.Get("/me/training/catalog", trHandler.MyCatalog)
+		api.Get("/me/training/courses/{courseId}/materials", trHandler.MyCourseMaterials)
+		// Non-sensitive master data every staff form needs (leave request,
+		// document upload).
+		api.Get("/leave-types", a.ListLeaveTypes)
+		api.Get("/document-types", a.ListDocumentTypes)
+
+		// Organisation reads: T2 §7 "baca: hr_manager, kepala_sekolah".
+		api.Group(func(org chi.Router) {
+			org.Use(common.RequireAnyRole(rolesOrgRead...))
+			org.Get("/departments", a.ListDepartments)
+			org.Get("/positions", a.ListPositions)
+			org.Get("/org-chart", a.GetOrgChart)
+			org.Get("/headcount-plans", a.ListHeadcountPlans)
+			org.Get("/headcount", a.GetHeadcountOverview)
+		})
+
 		// 2. HR Management routes: HR Admin, HR Manager, Superadmin
 		api.Group(func(hr chi.Router) {
-			hr.Use(common.RequireAnyRole(
-				common.RoleSuperadmin,
-				common.RoleHRAdmin,
-				common.RoleHRManager,
-			))
+			hr.Use(common.RequireAnyRole(rolesHR...))
 
 			// Employees
 			hr.Get("/employees", a.ListEmployees)
@@ -98,15 +133,7 @@ func (a *App) Router() http.Handler {
 			hr.Get("/employees/{id}", a.GetEmployee)
 			hr.Get("/employees/{id}/timeline", a.GetEmployeeTimeline)
 
-			// Organization
-			hr.Get("/departments", a.ListDepartments)
-			hr.Get("/positions", a.ListPositions)
-			hr.Get("/org-chart", a.GetOrgChart)
-			hr.Get("/headcount-plans", a.ListHeadcountPlans)
-			hr.Get("/headcount", a.GetHeadcountOverview)
-
 			// Documents
-			hr.Get("/document-types", a.ListDocumentTypes)
 			hr.Get("/required-documents", a.ListRequiredDocuments)
 			hr.Get("/employees/{id}/documents", a.ListEmployeeDocuments)
 			hr.Get("/documents/completeness", a.GetDocumentCompleteness)
@@ -119,13 +146,16 @@ func (a *App) Router() http.Handler {
 			hr.Get("/attendance/recap", a.GetAttendanceRecap)
 
 			// Leave & Overtime
-			hr.Get("/leave-types", a.ListLeaveTypes)
 			hr.Get("/leave-balances", a.ListLeaveBalances)
 			hr.Get("/leave-requests", a.ListLeaveRequests)
 			hr.Get("/overtime-requests", a.ListOvertimeRequests)
 
 			// Settings
 			hr.Get("/settings/hr", a.GetHRSettings)
+
+			// Onboarding (T5 §5: hr_admin; hr_manager reads the plans page)
+			hr.Get("/onboarding/templates", trHandler.ListOnboardingTemplates)
+			hr.Post("/onboarding/templates", trHandler.CreateOnboardingTemplate)
 
 			// Mutations (HR Admin & Superadmin only)
 			hr.Group(func(admin chi.Router) {
@@ -190,63 +220,90 @@ func (a *App) Router() http.Handler {
 				// Settings mutations
 				admin.Put("/settings/hr", a.UpdateHRSettings)
 			})
+		})
 
-			// Training & Onboarding Management
-			hr.Get("/training/courses", trHandler.ListCourses)
-			hr.Post("/training/courses", trHandler.CreateCourse)
-			hr.Get("/training/courses/{id}", trHandler.GetCourse)
-			hr.Put("/training/courses/{id}", trHandler.UpdateCourse)
-			hr.Get("/training/courses/{courseId}/materials", trHandler.ListMaterials)
-			hr.Post("/training/courses/{courseId}/materials", trHandler.CreateMaterial)
-			hr.Get("/training/courses/{courseId}/sessions", trHandler.ListSessions)
-			hr.Post("/training/courses/{courseId}/sessions", trHandler.CreateSession)
-			hr.Get("/training/courses/{courseId}/questions", trHandler.ListQuestions)
-			hr.Post("/training/courses/{courseId}/questions", trHandler.CreateQuestion)
-			hr.Get("/training/mandatory", trHandler.ListMandatory)
-			hr.Post("/training/mandatory", trHandler.CreateMandatory)
-			hr.Get("/training/assignments", trHandler.ListAssignments)
-			hr.Post("/training/assignments", trHandler.CreateAssignment)
-			hr.Get("/onboarding/templates", trHandler.ListOnboardingTemplates)
-			hr.Post("/onboarding/templates", trHandler.CreateOnboardingTemplate)
+		// Training (T5 §5): training_admin manages; hr_manager and
+		// kepala_sekolah read assignments/compliance.
+		api.Group(func(tr chi.Router) {
+			tr.Use(common.RequireAnyRole(rolesTrainingRead...))
+			tr.Get("/training/courses", trHandler.ListCourses)
+			tr.Get("/training/courses/{id}", trHandler.GetCourse)
+			tr.Get("/training/mandatory", trHandler.ListMandatory)
+			tr.Get("/training/assignments", trHandler.ListAssignments)
+		})
+		api.Group(func(tr chi.Router) {
+			tr.Use(common.RequireAnyRole(rolesTrainingManage...))
+			tr.Post("/training/courses", trHandler.CreateCourse)
+			tr.Put("/training/courses/{id}", trHandler.UpdateCourse)
+			tr.Get("/training/courses/{courseId}/materials", trHandler.ListMaterials)
+			tr.Post("/training/courses/{courseId}/materials", trHandler.CreateMaterial)
+			tr.Get("/training/courses/{courseId}/sessions", trHandler.ListSessions)
+			tr.Post("/training/courses/{courseId}/sessions", trHandler.CreateSession)
+			tr.Get("/training/courses/{courseId}/questions", trHandler.ListQuestions)
+			tr.Post("/training/courses/{courseId}/questions", trHandler.CreateQuestion)
+			tr.Post("/training/mandatory", trHandler.CreateMandatory)
+			tr.Post("/training/assignments", trHandler.CreateAssignment)
+		})
 
-			// ATS (Applicant Tracking System)
-			hr.Get("/ats/requisitions", atsHandler.ListRequisitions)
-			hr.Post("/ats/requisitions", atsHandler.CreateRequisition)
-			hr.Post("/ats/requisitions/{id}/submit", atsHandler.SubmitRequisition)
-			hr.Get("/ats/postings", atsHandler.ListPostings)
-			hr.Get("/ats/postings/{id}", atsHandler.GetPosting)
-			hr.Post("/ats/postings", atsHandler.CreatePosting)
-			hr.Post("/ats/postings/{id}/publish", atsHandler.PublishPosting)
-			hr.Post("/ats/postings/{id}/close", atsHandler.ClosePosting)
-			hr.Get("/ats/applications", atsHandler.ListApplications)
-			hr.Post("/ats/applications/{id}/move", atsHandler.MoveApplication)
-			hr.Get("/ats/stages", atsHandler.ListStages)
-			hr.Get("/ats/scorecard-templates", atsHandler.ListScorecardTemplates)
-			hr.Post("/ats/scorecard-templates", atsHandler.CreateScorecardTemplate)
-			hr.Post("/ats/interviews", atsHandler.ScheduleInterview)
-			hr.Get("/ats/offers", atsHandler.ListOffers)
-			hr.Post("/ats/offers", atsHandler.CreateOffer)
-			hr.Post("/ats/offers/{id}/submit", atsHandler.SubmitOffer)
-			hr.Post("/ats/offers/{id}/send", atsHandler.SendOffer)
-			hr.Get("/ats/settings", atsHandler.GetSettings)
-			hr.Get("/ats/talent-pool", atsHandler.ListTalentPool)
+		// ATS (T4 §4)
+		api.Group(func(ats chi.Router) {
+			ats.Use(common.RequireAnyRole(rolesRequisitionRead...))
+			ats.Get("/ats/requisitions", atsHandler.ListRequisitions)
+		})
+		api.Group(func(ats chi.Router) {
+			ats.Use(common.RequireAnyRole(rolesRequisitionWrite...))
+			ats.Post("/ats/requisitions", atsHandler.CreateRequisition)
+			ats.Post("/ats/requisitions/{id}/submit", atsHandler.SubmitRequisition)
+		})
+		api.Group(func(ats chi.Router) {
+			ats.Use(common.RequireAnyRole(rolesCandidateRead...))
+			ats.Get("/ats/applications", atsHandler.ListApplications)
+			ats.Get("/ats/offers", atsHandler.ListOffers)
+		})
+		api.Group(func(ats chi.Router) {
+			ats.Use(common.RequireAnyRole(rolesRecruiting...))
+			ats.Get("/ats/postings", atsHandler.ListPostings)
+			ats.Get("/ats/postings/{id}", atsHandler.GetPosting)
+			ats.Post("/ats/postings", atsHandler.CreatePosting)
+			ats.Post("/ats/postings/{id}/publish", atsHandler.PublishPosting)
+			ats.Post("/ats/postings/{id}/close", atsHandler.ClosePosting)
+			ats.Post("/ats/applications/{id}/move", atsHandler.MoveApplication)
+			ats.Get("/ats/stages", atsHandler.ListStages)
+			ats.Get("/ats/scorecard-templates", atsHandler.ListScorecardTemplates)
+			ats.Post("/ats/interviews", atsHandler.ScheduleInterview)
+			ats.Get("/ats/talent-pool", atsHandler.ListTalentPool)
+		})
+		api.Group(func(ats chi.Router) {
+			ats.Use(common.RequireAnyRole(rolesHR...))
+			ats.Post("/ats/scorecard-templates", atsHandler.CreateScorecardTemplate)
+			ats.Post("/ats/offers", atsHandler.CreateOffer)
+			ats.Post("/ats/offers/{id}/submit", atsHandler.SubmitOffer)
+			ats.Post("/ats/offers/{id}/send", atsHandler.SendOffer)
+			ats.Get("/ats/settings", atsHandler.GetSettings)
+		})
 
-			// Payroll Management
-			hr.Get("/payroll/components", payHandler.ListComponents)
-			hr.Post("/payroll/components", payHandler.CreateComponent)
-			hr.Post("/payroll/components/{id}/submit-approval", payHandler.SubmitComponentApproval)
-			hr.Get("/payroll/inputs", payHandler.ListInputs)
-			hr.Post("/payroll/inputs", payHandler.SaveInput)
-			hr.Post("/payroll/inputs/pull-attendance", payHandler.PullAttendance)
-			hr.Get("/payroll/runs", payHandler.ListRuns)
-			hr.Post("/payroll/runs", payHandler.CreateRun)
-			hr.Get("/payroll/runs/{id}", payHandler.GetRun)
-			hr.Post("/payroll/runs/{id}/calculate", payHandler.CalculateRun)
-			hr.Post("/payroll/runs/{id}/submit", payHandler.SubmitRun)
-			hr.Post("/payroll/runs/{id}/finalize", payHandler.FinalizeRun)
-			hr.Get("/payroll/runs/{id}/lines", payHandler.ListLines)
-			hr.Get("/payroll/payslips", payHandler.ListPayslips)
-			hr.Get("/payroll/journals", payHandler.ListJournals)
+		// Payroll (T3 §5): payroll_officer runs it; hr_manager and
+		// finance_manager read runs/components/journals.
+		api.Group(func(pay chi.Router) {
+			pay.Use(common.RequireAnyRole(rolesPayrollRead...))
+			pay.Get("/payroll/components", payHandler.ListComponents)
+			pay.Get("/payroll/runs", payHandler.ListRuns)
+			pay.Get("/payroll/runs/{id}", payHandler.GetRun)
+			pay.Get("/payroll/runs/{id}/lines", payHandler.ListLines)
+			pay.Get("/payroll/journals", payHandler.ListJournals)
+		})
+		api.Group(func(pay chi.Router) {
+			pay.Use(common.RequireAnyRole(rolesPayrollOperate...))
+			pay.Post("/payroll/components", payHandler.CreateComponent)
+			pay.Post("/payroll/components/{id}/submit-approval", payHandler.SubmitComponentApproval)
+			pay.Get("/payroll/inputs", payHandler.ListInputs)
+			pay.Post("/payroll/inputs", payHandler.SaveInput)
+			pay.Post("/payroll/inputs/pull-attendance", payHandler.PullAttendance)
+			pay.Post("/payroll/runs", payHandler.CreateRun)
+			pay.Post("/payroll/runs/{id}/calculate", payHandler.CalculateRun)
+			pay.Post("/payroll/runs/{id}/submit", payHandler.SubmitRun)
+			pay.Post("/payroll/runs/{id}/finalize", payHandler.FinalizeRun)
+			pay.Get("/payroll/payslips", payHandler.ListPayslips)
 		})
 	})
 
