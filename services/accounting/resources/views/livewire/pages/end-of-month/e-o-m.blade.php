@@ -86,7 +86,7 @@
                                         <span class="text-sm font-medium" style="color: #374151;">{{ $check['label'] }}</span>
                                         <span class="block text-xs" style="color: #6b7280;">{{ $check['desc'] }}</span>
                                     </div>
-                                    <span class="ml-auto text-xs font-medium px-2 py-1 rounded-full" style="background-color: #dcfce7; color: #166534;">Passed</span>
+                                    <span class="ml-auto text-xs font-medium px-2 py-1 rounded-full" style="background-color: #dcfce7; color: #166534;">{{ !empty($check['info']) ? 'Info' : 'Passed' }}</span>
                                 </div>
                             @else
                                 <div class="flex items-center px-4 py-3 rounded-lg" style="background-color: #fef2f2; border: 1px solid #fecaca;">
@@ -94,6 +94,9 @@
                                     <div>
                                         <span class="text-sm font-medium" style="color: #374151;">{{ $check['label'] }}</span>
                                         <span class="block text-xs" style="color: #ef4444;">{{ $check['issue'] }} masalah ditemukan</span>
+                                        @if (!empty($check['items']))
+                                            <span class="block text-xs" style="color: #7f1d1d;">{{ implode(', ', $check['items']) }}{{ $check['issue'] > count($check['items']) ? ', ...' : '' }}</span>
+                                        @endif
                                     </div>
                                     <span class="ml-auto text-xs font-medium px-2 py-1 rounded-full" style="background-color: #fee2e2; color: #991b1b;">Failed</span>
                                 </div>
@@ -116,6 +119,10 @@
                 </div>
 
                 {{-- Action Button --}}
+                <div class="mb-3 text-sm text-center" style="color: #64748b;">
+                    Jurnal draft diajukan &amp; disetujui di menu Jurnal Transaksi / Approval Jurnal;
+                    posting otomatis gagal dilihat di menu <a href="{{ url('autoposting') }}">Posting Otomatis</a>.
+                </div>
                 <form wire:submit="confirmTransfer">
                     @can('createend_of_month')
                         <div class="text-center">
