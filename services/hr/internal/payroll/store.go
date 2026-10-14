@@ -145,7 +145,7 @@ func (s *Store) ApplyComponentDecision(ctx context.Context, sourceID, decision s
 
 func (s *Store) ListInputs(ctx context.Context, schoolID, period string) ([]PayrollInputView, error) {
 	query := `
-		SELECT i.id, i.school_id, i.period, i.employee_id, coalesce(e.full_name, ''), coalesce(e.nip, ''),
+		SELECT i.id, i.school_id, i.period, i.employee_id, coalesce(e.full_name, ''), e.employee_no,
 		       i.component_id, coalesce(c.name, ''), i.amount_idr, i.source, i.locked,
 		       EXISTS(SELECT 1 FROM payroll_input_changes pic WHERE pic.input_id = i.id AND pic.status = 'pending_approval'),
 		       i.created_at
@@ -458,7 +458,7 @@ func (s *Store) CalculateRun(ctx context.Context, schoolID, runID string) error 
 
 	// 2. Fetch active employees
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, full_name, COALESCE(nip, '') FROM employees
+		SELECT id, full_name, employee_no FROM employees
 		WHERE school_id = $1 AND status = 'active'`, schoolID)
 	if err != nil {
 		return err
@@ -591,7 +591,7 @@ func (s *Store) FinalizeRun(ctx context.Context, schoolID, runID, userID string)
 func (s *Store) ListLines(ctx context.Context, schoolID, runID string, flaggedOnly bool) ([]PayrollLine, error) {
 	q := `
 		SELECT l.id, l.school_id, l.run_id, l.employee_id, e.full_name as employee_name,
-		       COALESCE(e.nip, '') as employee_nip, l.gross_idr, l.taxable_idr, l.bpjs_base_idr,
+		       e.employee_no AS employee_nip, l.gross_idr, l.taxable_idr, l.bpjs_base_idr,
 		       l.bpjs_employee_idr, l.bpjs_employer_idr, l.pph21_idr, l.other_deductions_idr,
 		       l.net_idr, l.prev_net_idr, l.variance_bp, l.flagged, l.payment_status, l.created_at
 		FROM payroll_lines l

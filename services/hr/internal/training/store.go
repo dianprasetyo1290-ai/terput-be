@@ -16,6 +16,13 @@ var (
 	ErrConflict = errors.New("conflict")
 )
 
+// EnrollRejectedError is a business-rule refusal (unpublished course, full
+// quota) whose message is safe to show the user; any other EnrollTx error is
+// an internal failure.
+type EnrollRejectedError struct{ Reason string }
+
+func (e *EnrollRejectedError) Error() string { return e.Reason }
+
 type Store struct {
 	DB *sql.DB
 }
@@ -324,12 +331,12 @@ func (s *Store) CreateQuestion(ctx context.Context, q QuizQuestion) (*QuizQuesti
 
 func (s *Store) ListMandatory(ctx context.Context, schoolID string) ([]MandatoryTraining, error) {
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT m.id, m.school_id, m.position_id, coalesce(pos.title, ''), m.course_id, c.title, m.due_days, m.created_at
+		SELECT m.id, m.school_id, m.position_id, coalesce(pos.name, ''), m.course_id, c.title, m.due_days, m.created_at
 		FROM mandatory_trainings m
 		JOIN courses c ON c.id = m.course_id
 		LEFT JOIN positions pos ON pos.id = m.position_id
 		WHERE m.school_id = $1
-		ORDER BY pos.title ASC, c.title ASC`, schoolID)
+		ORDER BY pos.name ASC, c.title ASC`, schoolID)
 	if err != nil {
 		return nil, err
 	}
@@ -431,7 +438,7 @@ func (s *Store) EnrollTx(ctx context.Context, tx *sql.Tx, schoolID, employeeID, 
 		return nil, err
 	}
 	if status != "published" {
-		return nil, fmt.Errorf("kursus belum dipublikasikan")
+		return nil, &EnrollRejectedError{Reason: "kursus belum dipublikasikan"}
 	}
 
 	// 2. Check quota (AC-99-01)
@@ -442,7 +449,7 @@ func (s *Store) EnrollTx(ctx context.Context, tx *sql.Tx, schoolID, employeeID, 
 	`, courseID, schoolID).Scan(&taken)
 	canEnroll, reason := calc.CanEnroll(quota, taken)
 	if !canEnroll {
-		return nil, fmt.Errorf("%s", reason)
+		return nil, &EnrollRejectedError{Reason: reason}
 	}
 
 	// 3. Check if already enrolled
