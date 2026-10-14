@@ -476,6 +476,8 @@ services:
       SEKOCI_JWT_SECRET: ${SEKOCI_JWT_SECRET}
       SEKOCI_INTERNAL_KEY: ${SEKOCI_INTERNAL_KEY}
       IDENTITY_SERVICE_URL: http://identity:${IDENTITY_PORT}
+      # GL drilldown to source payments + receivable control check (QA BUG-148/059).
+      BILLING_INTERNAL_URL: http://billing:${BILLING_PORT}
     ports: ["${ACCOUNTING_PORT:-8087}:80"]
 
   # ---------- ops (Teratai: Fasilitas, Inventaris, Pengadaan, Aset, Anggaran, Pajak, Hutang, Perpustakaan, Transportasi, Kampus 3D) ----------

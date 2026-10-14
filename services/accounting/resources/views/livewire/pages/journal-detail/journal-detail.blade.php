@@ -37,7 +37,6 @@
                         @endforeach
                         @if ($posting)
                             <tr><th>Posting otomatis</th><td>{{ $posting->kind }} &middot; {{ $posting->status }} &middot; {{ $posting->posting_date }}</td></tr>
-                            <tr><th>ID sumber</th><td class="small">{{ $sourceIds ? implode(', ', array_map(fn ($v) => is_scalar($v) ? (string) $v : json_encode($v), $sourceIds)) : '-' }}</td></tr>
                         @endif
                     </table>
                 </div>
@@ -67,4 +66,49 @@
             </table>
         </div>
     </div>
+
+    @if ($isAuto)
+        <div class="card" wire:init="loadSources">
+            <div class="card-header"><h5 class="card-title">Transaksi Sumber</h5></div>
+            <div class="card-body">
+                @if ($sourceIds)
+                    <div class="mb-2 small">
+                        <strong>ID yang dikirim sumber:</strong>
+                        @foreach ($sourceIds as $t => $ids)
+                            <div>{{ $t }}: {{ implode(', ', array_slice($ids, 0, 50)) }}{{ count($ids) > 50 ? ' … (+'.(count($ids) - 50).')' : '' }}</div>
+                        @endforeach
+                    </div>
+                @endif
+                @if ($sources === null)
+                    <div class="text-muted" wire:loading.remove wire:target="loadSources">Memuat transaksi sumber…</div>
+                    <div class="text-muted" wire:loading wire:target="loadSources">Memuat transaksi sumber dari billing…</div>
+                @elseif ($sourcesError)
+                    <div class="alert alert-secondary mb-0">{{ $sourcesError }}
+                        @if (! $sourceIds) Jurnal ini tidak menyimpan ID sumber. @endif
+                    </div>
+                @elseif (count($sources) === 0)
+                    <div class="text-muted">Billing tidak mengembalikan transaksi untuk referensi {{ $head->reference }}.</div>
+                @else
+                    <table class="table table-sm table-bordered mb-0">
+                        <thead class="thead-light"><tr><th>Jenis</th><th>Nomor</th><th>Siswa</th><th>Unit</th><th>Tanggal</th><th>Status</th><th class="text-right">Nominal</th></tr></thead>
+                        <tbody>
+                            @foreach ($sources as $it)
+                                <tr>
+                                    <td>{{ $it['type'] ?? '-' }}</td>
+                                    <td>{{ $it['number'] ?? ($it['id'] ?? '-') }}</td>
+                                    <td>{{ $it['student_name'] ?? '-' }} @if (!empty($it['nis']))<span class="text-muted small">({{ $it['nis'] }})</span>@endif</td>
+                                    <td>{{ $it['unit'] ?? '-' }}</td>
+                                    <td>{{ $it['date'] ?? '-' }}</td>
+                                    <td>{{ $it['status'] ?? '-' }}</td>
+                                    <td class="text-right">{{ $fmt($it['amount_idr'] ?? 0) }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                        <tfoot class="font-weight-bold"><tr><td colspan="6">Total sumber</td>
+                            <td class="text-right">{{ $fmt(collect($sources)->sum(fn ($i) => (float) ($i['amount_idr'] ?? 0))) }}</td></tr></tfoot>
+                    </table>
+                @endif
+            </div>
+        </div>
+    @endif
 </div>

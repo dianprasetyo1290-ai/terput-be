@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Pages\JournalDetail;
 
+use App\Support\Billing;
 use Illuminate\Support\Facades\DB;
 use Livewire\Component;
 
@@ -16,11 +17,34 @@ class JournalDetail extends Component
     public string $transNo;
     public ?string $date = null;
 
+    /** Source transactions from billing (QA BUG-148), loaded after the page renders. */
+    public ?array $sources = null;
+    public ?string $sourcesError = null;
+
     public function mount(string $transNo): void
     {
         $this->transNo = $transNo;
         $d = request()->query('date');
         $this->date = is_string($d) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $d) ? $d : null;
+    }
+
+    /**
+     * wire:init: ask billing which payments/invoices are behind this auto
+     * journal. Never throws -- an unconfigured or unreachable billing is shown
+     * as a message next to the ids stored with the journal.
+     */
+    public function loadSources(): void
+    {
+        $ref = DB::table('trans_head')->where('trans_no', $this->transNo)->value('reference')
+            ?? DB::table('this_head')->where('trans_no', $this->transNo)->orderByDesc('trans_date')->value('reference');
+        if (! $ref) {
+            $this->sources = [];
+
+            return;
+        }
+        $r = Billing::journalSources((string) $ref);
+        $this->sources = $r['ok'] ? $r['data'] : [];
+        $this->sourcesError = $r['ok'] ? null : $r['error'];
     }
 
     public function render()
@@ -58,8 +82,22 @@ class JournalDetail extends Component
             'lines' => $lines,
             'reversedBy' => $reversedBy,
             'posting' => $posting,
-            'sourceIds' => $posting ? (json_decode((string) $posting->source_ids, true) ?: []) : [],
+            'sourceIds' => self::groupIds($posting ? json_decode((string) $posting->source_ids, true) : null),
+            'isAuto' => ! empty($head->reference) && ($head->source ?? 'manual') !== 'manual',
             'type' => DB::table('mst_transaction')->where('trans_code', $head->trans_code)->value('trans_name'),
         ]);
+    }
+
+    /** source_ids as {type: [ids]}; older rows stored a flat list. */
+    private static function groupIds(mixed $ids): array
+    {
+        if (! is_array($ids) || $ids === []) {
+            return [];
+        }
+        if (array_is_list($ids)) {
+            return ['id' => array_map(fn ($v) => is_scalar($v) ? (string) $v : json_encode($v), $ids)];
+        }
+
+        return array_map(fn ($v) => array_map(fn ($x) => is_scalar($x) ? (string) $x : json_encode($x), (array) $v), $ids);
     }
 }

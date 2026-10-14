@@ -22,6 +22,11 @@ return [
     'identity_service_url' => env('IDENTITY_SERVICE_URL', 'http://identity:8081'),
     'sekoci_internal_key' => env('SEKOCI_INTERNAL_KEY', ''),
 
+    // SEKOCI billing (internal API, X-Internal-Key): source payments behind an
+    // auto journal (GL drilldown) and the per-student receivable total for the
+    // control-account reconciliation. Empty = feature shows "belum dikonfigurasi".
+    'billing_internal_url' => env('BILLING_INTERNAL_URL', ''),
+
     /*
     |--------------------------------------------------------------------------
     | Application Environment
