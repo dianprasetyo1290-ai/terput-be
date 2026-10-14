@@ -21,6 +21,7 @@ type fakeStore struct {
 	exceptions   map[string]model.IntegrationException
 	audits       []model.AuditEvent
 	srCategories map[string]*model.ServiceRequestCategory
+	helpArticles []model.HelpArticle
 	idCounter    int
 }
 
@@ -719,4 +720,66 @@ func (f *fakeStore) AuditFacets(_ context.Context, schoolID *string, since time.
 	slices.Sort(out.Modules)
 	slices.Sort(out.Actions)
 	return out, nil
+}
+
+func (f *fakeStore) ListHelpArticles(_ context.Context, schoolID, audience string) ([]model.HelpArticle, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []model.HelpArticle
+	for _, a := range f.helpArticles {
+		if (a.SchoolID == nil || *a.SchoolID == schoolID) && a.Audience == audience {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) GetHelpArticle(_ context.Context, schoolID, id string) (*model.HelpArticle, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, a := range f.helpArticles {
+		if a.ID == id && (a.SchoolID == nil || *a.SchoolID == schoolID) {
+			return &a, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
+func (f *fakeStore) CreateHelpArticle(_ context.Context, a model.HelpArticle, _ string) (*model.HelpArticle, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, x := range f.helpArticles {
+		if a.ReplacesID != nil && x.ReplacesID != nil && *x.ReplacesID == *a.ReplacesID && *x.SchoolID == *a.SchoolID {
+			return nil, store.ErrConflict
+		}
+	}
+	a.ID = f.nextID("help")
+	a.CreatedAt, a.UpdatedAt = time.Now(), time.Now()
+	f.helpArticles = append(f.helpArticles, a)
+	return &a, nil
+}
+
+func (f *fakeStore) UpdateHelpArticle(_ context.Context, schoolID, id string, a model.HelpArticle, _ string) (*model.HelpArticle, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, x := range f.helpArticles {
+		if x.ID == id && x.SchoolID != nil && *x.SchoolID == schoolID {
+			x.Audience, x.Kind, x.Title, x.Body, x.SortOrder, x.Published = a.Audience, a.Kind, a.Title, a.Body, a.SortOrder, a.Published
+			f.helpArticles[i] = x
+			return &x, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
+func (f *fakeStore) DeleteHelpArticle(_ context.Context, schoolID, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, x := range f.helpArticles {
+		if x.ID == id && x.SchoolID != nil && *x.SchoolID == schoolID {
+			f.helpArticles = append(f.helpArticles[:i], f.helpArticles[i+1:]...)
+			return nil
+		}
+	}
+	return store.ErrNotFound
 }

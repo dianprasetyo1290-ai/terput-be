@@ -48,6 +48,13 @@ type Store interface {
 	RevokeAuditGrant(ctx context.Context, schoolID, id, revokedBy string) (*model.AuditAccessGrant, error)
 	HasActiveAuditGrant(ctx context.Context, schoolID, userID string) (bool, error)
 
+	// Help articles: guides & FAQ (BUG-165)
+	ListHelpArticles(ctx context.Context, schoolID, audience string) ([]model.HelpArticle, error)
+	GetHelpArticle(ctx context.Context, schoolID, id string) (*model.HelpArticle, error)
+	CreateHelpArticle(ctx context.Context, a model.HelpArticle, actor string) (*model.HelpArticle, error)
+	UpdateHelpArticle(ctx context.Context, schoolID, id string, a model.HelpArticle, actor string) (*model.HelpArticle, error)
+	DeleteHelpArticle(ctx context.Context, schoolID, id string) error
+
 	// Approval Delegations
 	ListDelegations(ctx context.Context, schoolID, userID string) ([]model.ApprovalDelegation, error)
 	CreateDelegation(ctx context.Context, delegation model.ApprovalDelegation) (*model.ApprovalDelegation, error)

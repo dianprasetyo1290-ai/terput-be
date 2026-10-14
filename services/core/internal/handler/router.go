@@ -86,6 +86,13 @@ func NewRouter(h *Handler, cfg config.Config) http.Handler {
 		pr.Post("/audit/access-grants", h.CreateAuditGrant)
 		pr.Delete("/audit/access-grants/{id}", h.RevokeAuditGrant)
 
+		// Guides & FAQ (menu 50, BUG-165)
+		pr.Get("/help-articles", h.ListHelpArticles)
+		pr.Get("/help-articles/manage", h.ManageHelpArticles)
+		pr.Post("/help-articles", h.CreateHelpArticle)
+		pr.Put("/help-articles/{id}", h.UpdateHelpArticle)
+		pr.Delete("/help-articles/{id}", h.DeleteHelpArticle)
+
 		// Parent Service Requests (Menu 81)
 		pr.Get("/service-request-categories", h.ListCategories)
 		pr.Post("/service-request-categories", h.CreateCategory)
