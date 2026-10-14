@@ -96,6 +96,7 @@ func main() {
 	exceptions := common.NewExceptionReporter(cfg.CoreURL, cfg.InternalKey, "notification")
 	h.Exceptions = exceptions.Report
 	h.InternalURL = cfg.InternalURL
+	h.CampaignWhatsApp = whatsapp
 	h.Location = loc
 	h.PushProvider = provider.NewWebPushProvider(provider.WebPushConfig{
 		VAPIDPublicKey:  cfg.WebPushVAPIDPublicKey,

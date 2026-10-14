@@ -240,3 +240,45 @@ func (p *HTTPWhatsApp) Send(ctx context.Context, msg Message) (string, error) {
 	}
 	return "", fmt.Errorf("whatsapp gateway tidak mengembalikan id pesan")
 }
+
+// For returns the provider that delivers channel.
+func (r ChannelRouter) For(channel string) Provider {
+	switch {
+	case channel == "email" && r.Email != nil:
+		return r.Email
+	case channel == "whatsapp" && r.WhatsApp != nil:
+		return r.WhatsApp
+	}
+	return r.Default
+}
+
+// Channel states shown on the admin notification pages.
+const (
+	ChannelStateActive       = "aktif"
+	ChannelStateSimulated    = "simulasi"
+	ChannelStateUnconfigured = "belum_dikonfigurasi"
+)
+
+// ChannelState tells admins whether an external channel can deliver, without
+// exposing any credential.
+type ChannelState struct {
+	Channel    string `json:"channel"`
+	Provider   string `json:"provider"`
+	State      string `json:"state"`
+	Configured bool   `json:"configured"`
+}
+
+// DescribeChannel classifies a provider by name: unconfigured/disabled cannot
+// deliver, dev-noop/noop only simulate, anything else is a real adapter.
+func DescribeChannel(channel, providerName string) ChannelState {
+	s := ChannelState{Channel: channel, Provider: providerName}
+	switch providerName {
+	case "", "unconfigured", "disabled":
+		s.Provider, s.State = "unconfigured", ChannelStateUnconfigured
+	case "dev-noop", "noop":
+		s.State = ChannelStateSimulated
+	default:
+		s.State, s.Configured = ChannelStateActive, true
+	}
+	return s
+}

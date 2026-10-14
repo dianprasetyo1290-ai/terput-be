@@ -78,6 +78,7 @@ func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 		pr.Get("/chat/moderation/reports", h.ListReports)
 		pr.Get("/chat/moderation/reports/{id}", h.GetReport)
 		pr.Post("/chat/moderation/reports/{id}/review", h.ReviewReport)
+		pr.Get("/notification-channels/status", h.ChannelStatus)
 		pr.Get("/notification-templates", h.AdminListTemplates)
 		pr.Get("/notification-templates/variables", h.AdminTemplateVariables)
 		pr.Post("/notification-templates", h.AdminCreateTemplate)

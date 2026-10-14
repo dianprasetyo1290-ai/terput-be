@@ -114,7 +114,10 @@ type Handler struct {
 	// InternalURL (this service as core reaches it) builds the retry_url.
 	Exceptions  func(ctx context.Context, e common.ExceptionReport) error
 	InternalURL string
-	wg          sync.WaitGroup
+	// CampaignWhatsApp is the marketing WA adapter (nil = disabled); only
+	// its configured state is reported.
+	CampaignWhatsApp provider.TemplateSender
+	wg               sync.WaitGroup
 }
 
 // New wires the handler.
