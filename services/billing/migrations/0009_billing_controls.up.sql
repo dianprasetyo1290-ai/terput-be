@@ -203,3 +203,41 @@ CREATE TABLE bill_change_requests (
 );
 CREATE UNIQUE INDEX bill_change_requests_one_pending ON bill_change_requests (bill_id) WHERE status = 'pending_approval';
 CREATE INDEX bill_change_requests_school_idx ON bill_change_requests (school_id, created_at DESC);
+
+-- BUG-055: scholarship/discount programs are created in the app and become
+-- active only after approval in the Approval Center (request_type
+-- discount_award); an optional validity period limits the bill periods
+-- they apply to.
+ALTER TABLE bill_discounts
+    ADD COLUMN valid_from   date NULL,
+    ADD COLUMN valid_to     date NULL,
+    ADD COLUMN status       text NOT NULL DEFAULT 'active'
+                            CHECK (status IN ('pending_approval','active','rejected','inactive')),
+    ADD COLUMN reason       text NULL,
+    ADD COLUMN approval_id  text NULL,
+    ADD COLUMN requested_by uuid NULL,
+    ADD COLUMN decided_by   text NULL,
+    ADD COLUMN decision_note text NULL,
+    ADD COLUMN idempotency_key text NULL,
+    ADD CONSTRAINT bill_discounts_period_order CHECK (valid_from IS NULL OR valid_to IS NULL OR valid_to >= valid_from);
+UPDATE bill_discounts SET status = 'inactive' WHERE NOT active;
+ALTER TABLE bill_discounts ADD CONSTRAINT bill_discounts_active_status CHECK (active = (status = 'active'));
+CREATE UNIQUE INDEX bill_discounts_idem ON bill_discounts (school_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+
+-- BUG-122: payment history imported from the previous aggregator.
+ALTER TABLE bill_payments DROP CONSTRAINT IF EXISTS bill_payments_source_check;
+ALTER TABLE bill_payments ADD CONSTRAINT bill_payments_source_check
+    CHECK (source IN ('upload','gateway','cashier','deposit','import'));
+CREATE TABLE payment_imports (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id    uuid NOT NULL,
+    file_name    text NOT NULL DEFAULT '',
+    source_name  text NOT NULL CHECK (btrim(source_name) <> ''),
+    row_count    integer NOT NULL CHECK (row_count >= 0),
+    imported     integer NOT NULL CHECK (imported >= 0),
+    skipped      integer NOT NULL CHECK (skipped >= 0),
+    total_idr    bigint NOT NULL CHECK (total_idr >= 0),
+    imported_by  uuid NOT NULL,
+    created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX payment_imports_school_idx ON payment_imports (school_id, created_at DESC);

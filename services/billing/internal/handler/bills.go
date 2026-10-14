@@ -134,13 +134,15 @@ func rulesForStudent(rules []discountRule, schemeID, gradeLevel, studentUserID s
 	return out
 }
 
-// loadDiscountRules loads every active discount for the school. The list is
-// small (per school) so it is filtered in Go per student.
-func (a *App) loadDiscountRules(ctx context.Context, schoolID string) ([]discountRule, error) {
+// loadDiscountRules loads every approved, active discount for the school
+// whose validity period covers the bill period (BUG-055). The list is small
+// (per school) so it is filtered in Go per student.
+func (a *App) loadDiscountRules(ctx context.Context, schoolID string, year, month int) ([]discountRule, error) {
 	rows, err := a.DB.QueryContext(ctx,
 		`SELECT id,name,kind,value,COALESCE(cap_idr,0),priority,scope,
-		        COALESCE(scheme_id::text,''),COALESCE(grade_level,''),COALESCE(student_user_id::text,''),created_at
-		 FROM bill_discounts WHERE school_id=$1 AND active
+		        COALESCE(scheme_id::text,''),COALESCE(grade_level,''),COALESCE(student_user_id::text,''),created_at,
+		        valid_from,valid_to
+		 FROM bill_discounts WHERE school_id=$1 AND active AND status='active'
 		 ORDER BY priority,created_at,id`, schoolID)
 	if err != nil {
 		return nil, err
@@ -153,10 +155,21 @@ func (a *App) loadDiscountRules(ctx context.Context, schoolID string) ([]discoun
 			name, kind string
 			value, cap int64
 			priority   int
+			from, to   sql.NullTime
 		)
 		if err := rows.Scan(&r.candidate.ID, &name, &kind, &value, &cap, &priority, &r.scope,
-			&r.schemeID, &r.gradeLevel, &r.studentUserID, &r.candidate.CreatedAt); err != nil {
+			&r.schemeID, &r.gradeLevel, &r.studentUserID, &r.candidate.CreatedAt, &from, &to); err != nil {
 			return nil, err
+		}
+		var fromP, toP *time.Time
+		if from.Valid {
+			fromP = &from.Time
+		}
+		if to.Valid {
+			toP = &to.Time
+		}
+		if !model.DiscountActiveInPeriod(fromP, toP, year, month) {
+			continue
 		}
 		r.candidate.Source = "bill_discount"
 		r.candidate.Label = name
@@ -266,7 +279,7 @@ func (a *App) generateBills(ctx context.Context, schoolID string, in generateReq
 			"mapping akun belum lengkap, tagihan tidak diterbitkan: " + err.Error() + " (atur di menu Mapping Akun Jurnal)"}
 	}
 
-	rules, err := a.loadDiscountRules(ctx, schoolID)
+	rules, err := a.loadDiscountRules(ctx, schoolID, in.PeriodYear, in.PeriodMonth)
 	if err != nil {
 		return result, err
 	}

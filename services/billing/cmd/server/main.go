@@ -188,6 +188,8 @@ func main() {
 
 		ad.Get("/admin/discounts", app.ListDiscounts)
 		ad.Get("/admin/discounts/recipients", app.ListDiscountRecipients)
+		ad.Post("/admin/discounts", app.CreateDiscount)
+		ad.Post("/admin/discounts/{id}/deactivate", app.DeactivateDiscount)
 
 		ad.Get("/admin/refunds", app.ListRefunds)
 		ad.Post("/admin/refunds", app.CreateRefund)
@@ -264,6 +266,7 @@ func main() {
 		in.Post("/internal/bills/generate", app.InternalGenerateBills)
 		in.Post("/internal/bills/generate-annual", app.InternalGenerateAnnualBills)
 		in.Post("/internal/bills/change-requests/{id}/callback", app.BillChangeCallback)
+		in.Post("/internal/discounts/{id}/callback", app.DiscountCallback)
 		in.Get("/internal/students/{studentUserId}/outstanding", app.InternalStudentOutstanding)
 		in.Post("/internal/corrections/{id}/callback", app.CorrectionCallback)
 		in.Post("/internal/schemes/changes/{id}/callback", app.SchemeChangeCallback)

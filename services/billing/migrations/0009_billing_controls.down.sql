@@ -1,3 +1,14 @@
+DROP TABLE IF EXISTS payment_imports;
+DELETE FROM bill_payment_allocations WHERE payment_id IN (SELECT id FROM bill_payments WHERE source = 'import');
+DELETE FROM bill_payments WHERE source = 'import';
+ALTER TABLE bill_payments DROP CONSTRAINT IF EXISTS bill_payments_source_check;
+ALTER TABLE bill_payments ADD CONSTRAINT bill_payments_source_check CHECK (source IN ('upload','gateway','cashier','deposit'));
+DROP INDEX IF EXISTS bill_discounts_idem;
+ALTER TABLE bill_discounts DROP CONSTRAINT IF EXISTS bill_discounts_active_status,
+    DROP CONSTRAINT IF EXISTS bill_discounts_period_order,
+    DROP COLUMN IF EXISTS valid_from, DROP COLUMN IF EXISTS valid_to, DROP COLUMN IF EXISTS status,
+    DROP COLUMN IF EXISTS reason, DROP COLUMN IF EXISTS approval_id, DROP COLUMN IF EXISTS requested_by,
+    DROP COLUMN IF EXISTS decided_by, DROP COLUMN IF EXISTS decision_note, DROP COLUMN IF EXISTS idempotency_key;
 DROP TABLE IF EXISTS bill_change_requests;
 UPDATE bill_adjustments SET kind = 'adjust' WHERE kind = 'cancel';
 ALTER TABLE bill_adjustments DROP CONSTRAINT IF EXISTS bill_adjustments_kind_check;
