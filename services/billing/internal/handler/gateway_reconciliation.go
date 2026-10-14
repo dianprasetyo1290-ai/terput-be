@@ -1,14 +1,12 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
-	"strings"
 	"time"
 
 	"skci/billing/internal/common"
@@ -233,7 +231,10 @@ func (a *App) AdminResolveException(w http.ResponseWriter, r *http.Request) {
 	common.WriteSuccess(w, map[string]string{"id": id, "status": "resolved"}, nil)
 }
 
-// AdminImportBankStatement imports bank mutation statement CSV lines (AC-31-02).
+// AdminImportBankStatement imports a bank mutation file (AC-31-02). The
+// file is validated as a whole: any unreadable row rejects it with 400 and
+// the supported format. Re-importing the same file is idempotent through
+// line_hash (UNIQUE per school).
 func (a *App) AdminImportBankStatement(w http.ResponseWriter, r *http.Request) {
 	claims := common.RequireFinanceOrAccounting(w, r)
 	if claims == nil {
@@ -249,36 +250,22 @@ func (a *App) AdminImportBankStatement(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "invalid multipart form")
 		return
 	}
-
 	file, _, err := r.FormFile("file")
 	if err != nil {
 		common.WriteError(w, http.StatusBadRequest, "file is required")
 		return
 	}
 	defer file.Close()
-
-	reader := csv.NewReader(file)
-	headers, err := reader.Read()
+	data, err := io.ReadAll(io.LimitReader(file, 10<<20))
 	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "invalid CSV format")
+		common.WriteError(w, http.StatusBadRequest, "file tidak terbaca")
 		return
 	}
-
-	headerMap := make(map[string]int)
-	for i, h := range headers {
-		headerMap[strings.ToLower(strings.TrimSpace(h))] = i
+	rows, err := model.ParseBankStatementCSV(data, r.FormValue("account"))
+	if err != nil {
+		common.WriteError(w, http.StatusBadRequest, err.Error())
+		return
 	}
-
-	accIdx := headerMap["account"]
-	dateIdx := headerMap["posted_on"]
-	if _, ok := headerMap["posted_on"]; !ok {
-		dateIdx = headerMap["date"]
-	}
-	amtIdx := headerMap["amount_idr"]
-	if _, ok := headerMap["amount_idr"]; !ok {
-		amtIdx = headerMap["amount"]
-	}
-	descIdx := headerMap["description"]
 
 	importID := randomKey()
 	tx, err := a.DB.BeginTx(r.Context(), nil)
@@ -288,55 +275,43 @@ func (a *App) AdminImportBankStatement(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	inserted := 0
-	for {
-		rec, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
+	inserted, duplicates := 0, 0
+	for _, row := range rows {
+		res, err := tx.ExecContext(r.Context(),
+			`INSERT INTO bank_statement_lines (school_id, account, posted_on, amount_idr, description, line_hash, import_id)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)
+			 ON CONFLICT (school_id, line_hash) DO NOTHING`,
+			schoolID, row.Account, row.PostedOn, row.AmountIDR, row.Description, row.Hash, importID)
 		if err != nil {
-			continue
+			writeErr(w, err)
+			return
 		}
-		acc := "BANK-01"
-		if accIdx < len(rec) && strings.TrimSpace(rec[accIdx]) != "" {
-			acc = strings.TrimSpace(rec[accIdx])
-		}
-		dt := time.Now().Format("2006-01-02")
-		if dateIdx < len(rec) && strings.TrimSpace(rec[dateIdx]) != "" {
-			dt = strings.TrimSpace(rec[dateIdx])
-		}
-		var amt int64
-		if amtIdx < len(rec) {
-			amt, _ = strconv.ParseInt(strings.TrimSpace(rec[amtIdx]), 10, 64)
-		}
-		desc := ""
-		if descIdx < len(rec) {
-			desc = strings.TrimSpace(rec[descIdx])
-		}
-
-		if amt != 0 {
-			_, err = tx.ExecContext(r.Context(),
-				`INSERT INTO bank_statement_lines (school_id, account, posted_on, amount_idr, description, import_id)
-				 VALUES ($1, $2, $3, $4, $5, $6)`,
-				schoolID, acc, dt, amt, desc, importID)
-			if err == nil {
-				inserted++
-			}
+		if n, _ := res.RowsAffected(); n == 1 {
+			inserted++
+		} else {
+			duplicates++
 		}
 	}
-
 	if err := tx.Commit(); err != nil {
 		writeErr(w, err)
 		return
 	}
+	a.audit(r.Context(), schoolID, "bank_statement_import", importID, "bank_statement_imported", claims.ActiveRole, claims.UserID, "", "",
+		nil, map[string]any{"rows": len(rows), "inserted": inserted, "duplicates": duplicates})
 
 	common.WriteSuccess(w, map[string]any{
-		"import_id": importID,
-		"inserted":  inserted,
+		"import_id":  importID,
+		"rows":       len(rows),
+		"inserted":   inserted,
+		"duplicates": duplicates,
 	}, nil)
 }
 
-// AdminRunBankReconciliation matches bank statement lines against payments (AC-31-02).
+// AdminRunBankReconciliation matches unmatched bank lines against the money
+// SEKOCI expects in the bank (AC-31-02): verified transfer proofs, cashier
+// transfers and gateway settlement batches. A matched line records which
+// record it matched (matched_ref) so the record is never matched twice;
+// the rest become open bank_unmatched exceptions for follow-up.
 func (a *App) AdminRunBankReconciliation(w http.ResponseWriter, r *http.Request) {
 	claims := common.RequireFinanceOrAccounting(w, r)
 	if claims == nil {
@@ -347,74 +322,118 @@ func (a *App) AdminRunBankReconciliation(w http.ResponseWriter, r *http.Request)
 		common.WriteError(w, http.StatusBadRequest, "school_id required")
 		return
 	}
-
-	// 1. Fetch unmatched bank statement lines
-	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT id, account, posted_on, amount_idr, description
-		 FROM bank_statement_lines
-		 WHERE school_id = $1 AND matched_ref IS NULL`, schoolID)
+	res, err := a.runBankReconciliation(r.Context(), schoolID)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	defer rows.Close()
+	a.audit(r.Context(), schoolID, "bank_reconciliation", schoolID, "bank_reconciliation_run", claims.ActiveRole, claims.UserID, "", "",
+		nil, map[string]any{"matched": len(res.Matches), "unmatched": len(res.Exceptions)})
+	common.WriteSuccess(w, map[string]any{
+		"matched_count": len(res.Matches),
+		"unmatched":     len(res.Exceptions),
+		"matches":       res.Matches,
+	}, nil)
+}
 
+func (a *App) runBankReconciliation(ctx context.Context, schoolID string) (model.BankMatchResult, error) {
+	var res model.BankMatchResult
+	tolerance := 2
+	if err := a.DB.QueryRowContext(ctx,
+		`SELECT bank_match_tolerance_days FROM gateway_settings WHERE school_id = $1`, schoolID).Scan(&tolerance); err != nil && err != sql.ErrNoRows {
+		return res, err
+	}
+
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return res, err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id::text, account, posted_on, amount_idr, description
+		   FROM bank_statement_lines
+		  WHERE school_id = $1 AND matched_ref IS NULL
+		  ORDER BY posted_on, id
+		  FOR UPDATE`, schoolID)
+	if err != nil {
+		return res, err
+	}
 	var lines []model.BankLine
 	for rows.Next() {
 		var l model.BankLine
-		if err := rows.Scan(&l.ID, &l.Account, &l.PostedOn, &l.AmountIDR, &l.Description); err == nil {
-			lines = append(lines, l)
+		if err := rows.Scan(&l.ID, &l.Account, &l.PostedOn, &l.AmountIDR, &l.Description); err != nil {
+			rows.Close()
+			return res, err
 		}
+		lines = append(lines, l)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return res, err
 	}
 
-	// 2. Fetch recorded verified payments in SEKOCI
-	pRows, err := a.DB.QueryContext(r.Context(),
-		`SELECT id, transfer_at, amount_idr, reference
-		 FROM bill_payments
-		 WHERE school_id = $1 AND status = 'verified'`, schoolID)
+	// Expected bank credits, keyed "<kind>:<id>"; keys already recorded as
+	// a line's matched_ref are excluded.
+	recRows, err := tx.QueryContext(ctx,
+		`WITH expected AS (
+		   SELECT 'bill_payment:' || p.id::text AS key, COALESCE(p.transfer_at, p.verified_at) AS at, p.amount_idr, COALESCE(p.reference, '') AS ref
+		     FROM bill_payments p
+		    WHERE p.school_id = $1 AND p.source = 'upload' AND p.status = 'verified'
+		   UNION ALL
+		   SELECT 'cashier:' || c.id::text, c.created_at, c.amount_idr, COALESCE(rc.receipt_no, '')
+		     FROM cashier_payments c
+		     LEFT JOIN receipts rc ON rc.school_id = c.school_id AND rc.source = 'cashier' AND rc.source_id = c.id
+		    WHERE c.school_id = $1 AND c.method = 'transfer' AND c.status = 'recorded'
+		   UNION ALL
+		   SELECT 'settlement:' || s.id::text, s.settled_on::timestamptz, s.net_idr, ''
+		     FROM settlement_batches s
+		    WHERE s.school_id = $1 AND s.net_idr > 0
+		 )
+		 SELECT e.key, e.at, e.amount_idr, e.ref FROM expected e
+		  WHERE NOT EXISTS (SELECT 1 FROM bank_statement_lines l WHERE l.school_id = $1 AND l.matched_ref = e.key)`, schoolID)
 	if err != nil {
-		writeErr(w, err)
-		return
+		return res, err
 	}
-	defer pRows.Close()
-
 	var records []model.BankPaymentRecord
-	for pRows.Next() {
+	for recRows.Next() {
 		var rec model.BankPaymentRecord
-		var tAt sql.NullTime
-		var ref sql.NullString
-		if err := pRows.Scan(&rec.ID, &tAt, &rec.AmountIDR, &ref); err == nil {
-			if tAt.Valid {
-				rec.Date = tAt.Time
-			} else {
-				rec.Date = time.Now()
-			}
-			if ref.Valid {
-				rec.Ref = ref.String
-			}
-			records = append(records, rec)
+		if err := recRows.Scan(&rec.ID, &rec.Date, &rec.AmountIDR, &rec.Ref); err != nil {
+			recRows.Close()
+			return res, err
+		}
+		records = append(records, rec)
+	}
+	recRows.Close()
+	if err := recRows.Err(); err != nil {
+		return res, err
+	}
+
+	res = model.BankReconcile(lines, records, tolerance)
+	for _, m := range res.Matches {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE bank_statement_lines SET matched_ref = $1 WHERE id = $2::uuid AND school_id = $3`,
+			m.RecordID, m.LineID, schoolID); err != nil {
+			return res, err
+		}
+		// A line that had been flagged earlier and now matches closes its exception.
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE reconciliation_exceptions
+			    SET status = 'resolved', resolution_note = 'cocok otomatis dengan ' || $1::text, resolved_by = 'system', resolved_at = now(), updated_at = now()
+			  WHERE school_id = $2 AND provider = 'bank' AND kind = 'bank_unmatched' AND ref = $3 AND status = 'open'`,
+			m.RecordID, schoolID, m.LineID); err != nil {
+			return res, err
 		}
 	}
-
-	// 3. Match with tolerance of 2 days
-	res := model.BankReconcile(lines, records, 2)
-
-	// 4. Mark matched lines
-	for _, lineID := range res.MatchedLines {
-		_, _ = a.DB.ExecContext(r.Context(),
-			`UPDATE bank_statement_lines SET matched_ref = 'matched' WHERE id = $1`, lineID)
-	}
-
-	// 5. Save unmatched to exceptions
 	for _, ex := range res.Exceptions {
-		_, _ = a.DB.ExecContext(r.Context(),
-			`INSERT INTO reconciliation_exceptions (school_id, kind, ref, detail, status, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, 'open', now(), now())`,
-			schoolID, string(ex.Kind), ex.Ref, jsonRaw(ex.Detail))
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO reconciliation_exceptions (school_id, provider, kind, ref, detail, status, created_at, updated_at)
+			 VALUES ($1, 'bank', $2, $3, $4, 'open', now(), now())
+			 ON CONFLICT (school_id, provider, kind, ref) DO UPDATE SET detail = EXCLUDED.detail, updated_at = now()
+			  WHERE reconciliation_exceptions.status = 'open'`,
+			schoolID, string(ex.Kind), ex.Ref, jsonRaw(ex.Detail)); err != nil {
+			return res, err
+		}
 	}
-
-	common.WriteSuccess(w, map[string]any{
-		"matched_count": len(res.MatchedLines),
-		"unmatched":     len(res.Exceptions),
-	}, nil)
+	return res, tx.Commit()
 }
