@@ -7,6 +7,7 @@ use App\Models\Division;
 use App\Models\Parameter;
 use App\Models\Period;
 use App\Models\ThisHead;
+use App\Support\Ledger;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Livewire\Component;
@@ -143,7 +144,18 @@ class Home extends Component
             ->whereRaw('EXTRACT(YEAR FROM trans_date) = ?', [$trendYear])
             ->first();
 
+        // QA BUG-140: KPIs from the posted ledger, workflow status and failed postings.
+        $kpiPeriod = max(1, min(13, $activePeriod ?: 1));
+        $kpi = Ledger::summary(Ledger::balances($currentYear, $kpiPeriod));
+        $journalStatus = DB::table('trans_head')->selectRaw('status, count(*) as n')->groupBy('status')->pluck('n', 'status');
+        $failedPostings = DB::table('acc_auto_postings')->where('status', 'failed');
+
         return view('livewire.pages.home', [
+            'kpi' => $kpi,
+            'kpiLabel' => Ledger::periodLabel($currentYear, $kpiPeriod),
+            'journalStatus' => $journalStatus,
+            'failedPostingCount' => (clone $failedPostings)->count(),
+            'failedPostings' => $failedPostings->orderByDesc('updated_at')->limit(5)->get(['posting_date', 'kind', 'reference', 'message']),
             'parameter' => $parameter,
             'periodName' => $periodName,
             'totalAccounts' => ChartOfAccount::count(),

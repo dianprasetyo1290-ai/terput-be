@@ -182,7 +182,13 @@ class ReportGeneralLedger extends Component
         [$endSql, $endBindings] = $this->buildSaldoSubquery('se', $tahun, $periodCutoff);
 
         $query = DB::table('mst_account as a')
-            ->leftJoin("{$detailTable} as d", 'd.acc_code', '=', 'a.acc_code')
+            ->leftJoin("{$detailTable} as d", function ($join) use ($detailTable) {
+                $join->on('d.acc_code', '=', 'a.acc_code');
+                // BR-ACC-03: open-period drafts / pending journals are not in the ledger.
+                if ($detailTable === 'trans_detail') {
+                    $join->whereIn('d.trans_no', fn ($q) => $q->select('trans_no')->from('trans_head')->whereIn('status', \App\Support\Ledger::POSTED));
+                }
+            })
             ->leftJoin("{$headTable} as h", function ($join) use ($detailTable) {
                 $join->on('d.trans_code', '=', 'h.trans_code')
                     ->on('d.trans_no', '=', 'h.trans_no');
@@ -253,6 +259,10 @@ class ReportGeneralLedger extends Component
 
     public function mount()
     {
+        // Drilldown from the trial balance (?acc=<code>).
+        if ($acc = request()->query('acc')) {
+            $this->acc_code = $this->acc_code2 = (string) $acc;
+        }
         $this->tahun = MstSaldoNew::selectRaw('tahun')
             ->groupBy(DB::raw('tahun'))
             ->orderBy('tahun', 'DESC')

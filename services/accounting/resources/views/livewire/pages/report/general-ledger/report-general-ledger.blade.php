@@ -414,7 +414,7 @@
                                                     <td>{{ $detail['trans_date'] }}</td>
                                                 @endif
                                                 <td><span class="px-2 py-1 rounded" style="background-color: #f1f5f9; font-size: 11px; font-weight: 500;">{{ $detail['trans_code'] }}</span></td>
-                                                <td style="font-size: 12px;">{{ $detail['trans_no'] }}</td>
+                                                <td style="font-size: 12px;"><a href="{{ url('journal/'.rawurlencode($detail['trans_no'])) }}?date={{ substr((string) $detail['trans_date'], 0, 10) }}" title="Lihat jurnal">{{ $detail['trans_no'] }}</a></td>
                                                 <td>{{ $detail['div_code'] }}</td>
                                                 <td>{{ $detail['description'] }}</td>
                                                 <td class="num">{{ cek_min($detail['debet']) }}</td>
