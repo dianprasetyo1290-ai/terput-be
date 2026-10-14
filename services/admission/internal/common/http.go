@@ -43,7 +43,7 @@ func WriteError(w http.ResponseWriter, status int, msg string) {
 func Decode(w http.ResponseWriter, r *http.Request, dst any) bool {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err := dec.Decode(dst); err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid request body")
+		WriteError(w, http.StatusBadRequest, "format permintaan tidak valid")
 		return false
 	}
 	return true
@@ -77,6 +77,7 @@ func Offset(page, perPage int) int {
 // tokens carry an empty SchoolID and select a school via ?school_id=.
 type AdminClaims struct {
 	UserID     string   `json:"sub"`
+	Name       string   `json:"name,omitempty"`
 	SchoolID   string   `json:"school_id"`
 	ActiveRole string   `json:"active_role"`
 	Roles      []string `json:"roles"`
@@ -121,6 +122,35 @@ func guardianToken(r *http.Request) string {
 
 // AdminAuth verifies the identity JWT and requires an admin/superadmin role.
 func AdminAuth(secret string) func(http.Handler) http.Handler {
+	return roleAuth(secret, adminRoles)
+}
+
+// adminRoles may operate PPDB; viewerRoles may additionally read the PPDB
+// dashboard (Yayasan / kepala sekolah, BUG-030).
+var (
+	adminRoles  = map[string]bool{"admin": true, "superadmin": true}
+	viewerRoles = map[string]bool{"admin": true, "superadmin": true, "kepala_yayasan": true, "kepala_sekolah": true}
+)
+
+// DashboardAuth admits PPDB admins plus read-only foundation/school leaders.
+func DashboardAuth(secret string) func(http.Handler) http.Handler {
+	return roleAuth(secret, viewerRoles)
+}
+
+// ParentAuth admits a SEKOCI identity session whose active role is orang_tua
+// (BUG-108: parents already logged in to SEKOCI enter the PPDB portal without
+// a second OTP).
+func ParentAuth(secret string) func(http.Handler) http.Handler {
+	return roleAuth(secret, map[string]bool{"orang_tua": true})
+}
+
+// CanViewDashboard reports whether the request may read the PPDB dashboard.
+func CanViewDashboard(r *http.Request) bool {
+	c := Admin(r)
+	return c != nil && viewerRoles[c.ActiveRole]
+}
+
+func roleAuth(secret string, allowed map[string]bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims := new(AdminClaims)
@@ -128,11 +158,11 @@ func AdminAuth(secret string) func(http.Handler) http.Handler {
 				return []byte(secret), nil
 			}, jwt.WithValidMethods([]string{"HS256"}))
 			if err != nil || !token.Valid {
-				WriteError(w, http.StatusUnauthorized, "invalid admin token")
+				WriteError(w, http.StatusUnauthorized, "sesi tidak valid, silakan masuk kembali")
 				return
 			}
-			if claims.ActiveRole != "admin" && claims.ActiveRole != "superadmin" {
-				WriteError(w, http.StatusForbidden, "admin role required")
+			if !allowed[claims.ActiveRole] {
+				WriteError(w, http.StatusForbidden, "peran Anda tidak diizinkan untuk aksi ini")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), adminKey, claims)))
@@ -149,7 +179,7 @@ func GuardianAuth(secret string) func(http.Handler) http.Handler {
 				return []byte(secret), nil
 			}, jwt.WithValidMethods([]string{"HS256"}))
 			if err != nil || !token.Valid || claims.Scope != GuardianScope || claims.GuardianID == "" {
-				WriteError(w, http.StatusUnauthorized, "invalid guardian token")
+				WriteError(w, http.StatusUnauthorized, "sesi orang tua tidak valid, silakan masuk kembali")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), guardianKey, claims)))
@@ -163,7 +193,7 @@ func InternalAuth(key string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			got := r.Header.Get("X-Internal-Key")
 			if got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(key)) != 1 {
-				WriteError(w, http.StatusUnauthorized, "invalid internal credentials")
+				WriteError(w, http.StatusUnauthorized, "kredensial internal tidak valid")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), internalKey, true)))
@@ -188,7 +218,7 @@ func Guardian(r *http.Request) *GuardianClaims {
 func RequireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	c := Admin(r)
 	if c == nil || (c.ActiveRole != "admin" && c.ActiveRole != "superadmin") {
-		WriteError(w, http.StatusForbidden, "admin role required")
+		WriteError(w, http.StatusForbidden, "hanya admin yang dapat melakukan aksi ini")
 		return false
 	}
 	return true

@@ -14,7 +14,7 @@ import (
 func (a *App) InternalMetricFacts(w http.ResponseWriter, r *http.Request) {
 	schoolID := strings.TrimSpace(r.URL.Query().Get("school_id"))
 	if schoolID == "" {
-		common.WriteError(w, http.StatusUnprocessableEntity, "school_id is required")
+		common.WriteError(w, http.StatusUnprocessableEntity, "sekolah wajib dipilih")
 		return
 	}
 	metric := strings.TrimSpace(r.URL.Query().Get("metric"))
@@ -55,8 +55,8 @@ func (a *App) InternalMetricFacts(w http.ResponseWriter, r *http.Request) {
 
 	for rows.Next() {
 		var (
-			ar        appRow
-			wStart    *time.Time
+			ar     appRow
+			wStart *time.Time
 		)
 		if err := rows.Scan(&ar.ID, &ar.WaveID, &ar.Status, &ar.CreatedAt, &ar.WaveName, &wStart); err != nil {
 			writeErr(w, err)

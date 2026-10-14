@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -32,17 +35,27 @@ func main() {
 	}
 	defer db.Close()
 
+	smtpProvider := otp.SMTPProvider{
+		Host: cfg.SMTPHost, Port: cfg.SMTPPort,
+		User: cfg.SMTPUser, Password: cfg.SMTPPassword,
+		FromName: cfg.SMTPFromName, FromAddr: cfg.SMTPFromAddress,
+		SchoolName: cfg.SchoolName,
+	}
 	var inner otp.Provider = otp.DevProvider{Writer: os.Stdout, Enabled: cfg.OTPProvider == "dev"}
 	if cfg.OTPProvider == "smtp" {
-		inner = otp.SMTPProvider{
-			Host: os.Getenv("SMTP_HOST"), Port: envOr("SMTP_PORT", "587"),
-			User: os.Getenv("SMTP_USER"), Password: os.Getenv("SMTP_PASSWORD"),
-			FromName: os.Getenv("SMTP_FROM_NAME"), FromAddr: os.Getenv("SMTP_FROM_ADDRESS"),
-			SchoolName: cfg.SchoolName,
-		}
+		inner = smtpProvider
 	}
 	provider := otp.SafeProvider{Inner: inner, Production: cfg.Production()}
 	app := handler.New(db, cfg, provider, storage.NewLocal(cfg.StorageRoot, cfg.MaxUploadBytes))
+	if cfg.SMTPHost != "" && cfg.SMTPFromAddress != "" {
+		app.Mailer = smtpProvider
+	}
+
+	// Background PPDB jobs: deadline drops (BR-PPDB-07/08), scheduled
+	// announcements, waitlist expiry and the notification email outbox.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go app.RunJobs(ctx, cfg.JobInterval)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.RealIP, middleware.Logger, middleware.Recoverer)
@@ -66,6 +79,7 @@ func main() {
 	r.Post("/public/otp/request", app.RequestOTP)
 	r.Post("/public/otp/verify", app.VerifyOTP)
 	r.Post("/public/otp/resend", app.ResendOTP)
+	r.With(common.ParentAuth(cfg.JWTSecret)).Post("/public/session/sekoci", app.SekociSession)
 
 	// ---------------------------------------------------------------------
 	// Guardian portal (admission guardian session token).
@@ -74,6 +88,8 @@ func main() {
 		g.Use(common.GuardianAuth(cfg.GuardianJWTSecret))
 
 		g.Get("/guardian/dashboard", app.GuardianDashboard)
+		g.Get("/guardian/notifications", app.ListGuardianNotifications)
+		g.Post("/guardian/notifications/{id}/read", app.MarkGuardianNotificationRead)
 
 		g.Get("/guardian/applicants", app.ListApplicants)
 		g.Post("/guardian/applicants", app.CreateApplicant)
@@ -99,6 +115,8 @@ func main() {
 		g.Get("/guardian/applications/{id}/cbt", app.GetCBT)
 		g.Post("/guardian/applications/{id}/cbt/enter", app.EnterCBT)
 
+		g.Get("/guardian/applications/{id}/schedules", app.GuardianSchedules)
+		g.Get("/guardian/applications/{id}/proof.pdf", app.GuardianRegistrationProof)
 		g.Get("/guardian/applications/{id}/decision", app.GetDecision)
 		g.Post("/guardian/applications/{id}/decision/respond", app.RespondDecision)
 
@@ -108,16 +126,22 @@ func main() {
 	// ---------------------------------------------------------------------
 	// Admin PPDB (identity JWT, admin or superadmin).
 	// ---------------------------------------------------------------------
+	// The PPDB dashboard is also readable by Yayasan / kepala sekolah (BUG-030).
+	r.With(common.DashboardAuth(cfg.JWTSecret)).Get("/admin/dashboard", app.AdminDashboard)
+
 	r.Group(func(ad chi.Router) {
 		ad.Use(common.AdminAuth(cfg.JWTSecret))
-
-		ad.Get("/admin/dashboard", app.AdminDashboard)
 
 		ad.Get("/admin/applications", app.ListApplications)
 		ad.Get("/admin/applications/{id}", app.AdminApplicationDetail)
 		ad.Post("/admin/applications/{id}/request_correction", app.RequestCorrection)
 		ad.Post("/admin/applications/{id}/mark_eligible", app.MarkEligible)
 		ad.Post("/admin/applications/{id}/reject", app.RejectApplication)
+		ad.Get("/admin/applications/{id}/special-discounts", app.ListSpecialDiscounts)
+		ad.Post("/admin/applications/{id}/special-discounts", app.CreateSpecialDiscount)
+		ad.Get("/admin/applications/{id}/schedules", app.ListSchedules)
+		ad.Get("/admin/applications/{id}/proof.pdf", app.AdminRegistrationProof)
+		ad.Post("/admin/applications/{id}/schedules", app.UpsertSchedule)
 
 		ad.Get("/admin/config/periods", app.ListPeriods)
 		ad.Post("/admin/config/periods", app.CreatePeriod)
@@ -131,6 +155,10 @@ func main() {
 		ad.Post("/admin/config/tracks", app.CreateTrack)
 		ad.Put("/admin/config/tracks/{id}", app.UpdateTrack)
 
+		ad.Get("/admin/config/form-fields", app.ListFormFields)
+		ad.Post("/admin/config/form-fields", app.CreateFormField)
+		ad.Put("/admin/config/form-fields/{id}", app.UpdateFormField)
+
 		ad.Get("/admin/config/document-requirements", app.ListRequirements)
 		ad.Post("/admin/config/document-requirements", app.CreateRequirement)
 		ad.Put("/admin/config/document-requirements/{id}", app.UpdateRequirement)
@@ -138,6 +166,7 @@ func main() {
 		ad.Get("/admin/documents", app.DocumentQueue)
 		ad.Post("/admin/documents/{id}/review", app.ReviewDocument)
 		ad.Get("/admin/documents/{id}/download", app.AdminDownloadDocument)
+		ad.Get("/admin/documents/{id}/versions", app.AdminDocumentVersions)
 
 		ad.Get("/admin/finance/fee-schemes", app.ListFeeSchemes)
 		ad.Post("/admin/finance/fee-schemes", app.CreateFeeScheme)
@@ -152,8 +181,12 @@ func main() {
 		ad.Put("/admin/finance/vouchers/{id}", app.UpdateVoucher)
 
 		ad.Get("/admin/payments", app.PaymentQueue)
+		ad.Get("/admin/payments/{id}/proof", app.AdminPaymentProof)
 		ad.Post("/admin/payments/{id}/review", app.ReviewPayment)
 		ad.Post("/admin/payments/{id}/reversal", app.ReversePayment)
+		ad.Get("/admin/refunds", app.ListRefunds)
+		ad.Post("/admin/refunds/{id}/process", app.ProcessRefund)
+		ad.Post("/admin/refunds/{id}/waive", app.WaiveRefund)
 
 		ad.Get("/admin/selection/formulas", app.ListFormulas)
 		ad.Post("/admin/selection/formulas", app.CreateFormula)
@@ -161,8 +194,16 @@ func main() {
 		ad.Get("/admin/selection/scores", app.ListScores)
 		ad.Put("/admin/selection/scores/{applicationId}", app.UpsertScore)
 		ad.Post("/admin/selection/rankings/preview", app.RankingPreview)
+		ad.Get("/admin/selection/rankings", app.LatestRanking)
 		ad.Post("/admin/selection/rankings", app.RunRanking)
 		ad.Post("/admin/selection/decisions/{applicationId}", app.FinalizeDecision)
+		ad.Get("/admin/selection/approvals", app.ListSelectionApprovals)
+		ad.Post("/admin/selection/approvals", app.SubmitSelectionApproval)
+		ad.Get("/admin/selection/announcements", app.ListAnnouncements)
+		ad.Post("/admin/selection/announcements", app.CreateAnnouncement)
+		ad.Post("/admin/selection/announcements/{id}/cancel", app.CancelAnnouncement)
+		ad.Get("/admin/selection/waitlist", app.ListWaitlist)
+		ad.Post("/admin/selection/waitlist/promote", app.PromoteWaitlist)
 
 		ad.Get("/admin/conversions", app.ListConversions)
 		ad.Post("/admin/conversions", app.StartConversion)
@@ -175,17 +216,11 @@ func main() {
 	r.Group(func(in chi.Router) {
 		in.Use(common.InternalAuth(cfg.InternalKey))
 		in.Get("/internal/metric-facts", app.InternalMetricFacts)
+		in.Post("/internal/approval-callbacks", app.ApprovalCallback)
 	})
 
 	log.Printf("admission-service listening on :%s (%s)", cfg.Port, cfg.AppEnv)
 	if err := http.ListenAndServe(":"+cfg.Port, r); err != nil {
 		log.Fatal(err)
 	}
-}
-
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
 }

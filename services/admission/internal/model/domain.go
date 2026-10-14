@@ -34,6 +34,9 @@ const (
 	StatusReregistration  ApplicationStatus = "reregistration"
 	StatusConverted       ApplicationStatus = "converted"
 	StatusWithdrawn       ApplicationStatus = "withdrawn"
+	// StatusDropped is "gugur": the form fee (BR-PPDB-07) or the minimum
+	// re-registration payment (BR-PPDB-08) was not met by its deadline.
+	StatusDropped ApplicationStatus = "dropped"
 )
 
 // applicationTransitions is the single source of truth for allowed status
@@ -41,14 +44,14 @@ const (
 // rejected applications stay in history and are corrected with a new event.
 var applicationTransitions = map[ApplicationStatus]map[ApplicationStatus]bool{
 	StatusDraft:           {StatusSubmitted: true, StatusWithdrawn: true},
-	StatusSubmitted:       {StatusDocumentReview: true, StatusRejected: true, StatusWithdrawn: true},
+	StatusSubmitted:       {StatusDocumentReview: true, StatusRejected: true, StatusWithdrawn: true, StatusDropped: true},
 	StatusDocumentReview:  {StatusEligibleForTest: true, StatusRejected: true, StatusWithdrawn: true},
 	StatusEligibleForTest: {StatusTested: true, StatusRejected: true, StatusWithdrawn: true},
 	StatusTested:          {StatusRanked: true, StatusRejected: true, StatusWithdrawn: true},
 	StatusRanked:          {StatusOffered: true, StatusWaitlisted: true, StatusRejected: true},
-	StatusOffered:         {StatusReregistration: true, StatusWithdrawn: true},
+	StatusOffered:         {StatusReregistration: true, StatusWithdrawn: true, StatusDropped: true},
 	StatusWaitlisted:      {StatusOffered: true, StatusRejected: true, StatusWithdrawn: true},
-	StatusReregistration:  {StatusConverted: true, StatusWithdrawn: true},
+	StatusReregistration:  {StatusConverted: true, StatusWithdrawn: true, StatusDropped: true},
 }
 
 // CanTransition reports whether from -> to is a legal application transition.
@@ -60,7 +63,7 @@ func CanTransition(from, to ApplicationStatus) bool {
 // operator supplied reason (corrective/terminal actions).
 func ReasonRequired(to ApplicationStatus) bool {
 	switch to {
-	case StatusRejected, StatusWithdrawn:
+	case StatusRejected, StatusWithdrawn, StatusDropped:
 		return true
 	default:
 		return false
@@ -217,6 +220,8 @@ type DiscountCandidate struct {
 	Cap       int64 // 0 means "no per-rule cap"
 	Priority  int
 	CreatedAt time.Time
+	// Exclusive marks a non-stackable promo: it is only ever applied alone.
+	Exclusive bool
 }
 
 // DiscountStep is the immutable audit snapshot for one applied discount.
@@ -292,32 +297,52 @@ func ApplyDiscounts(base int64, in []DiscountCandidate) (int64, []DiscountStep, 
 	return out, steps, nil
 }
 
-// ApplyDiscountPolicy applies BR-PPDB-02 on top of ApplyDiscounts: mode "max"
-// keeps only the single largest candidate (evaluated alone against base), mode
-// "stack" applies all of them; maxTotal > 0 caps the summed discount per
-// applicant by trimming the latest steps.
+// ApplyDiscountPolicy applies BR-PPDB-02 on top of ApplyDiscounts.
+//
+//   - mode "max" keeps only the single candidate with the largest discount.
+//   - mode "stack" stacks every stackable candidate; an exclusive
+//     (non-stackable) candidate is only ever applied alone, so the option with
+//     the larger total wins (ties keep the stacked set).
+//
+// maxTotal > 0 caps the summed discount per applicant by trimming the latest
+// steps.
 func ApplyDiscountPolicy(base int64, in []DiscountCandidate, mode string, maxTotal int64) (int64, []DiscountStep, error) {
-	if mode == "max" && len(in) > 1 {
-		best, bestApplied := -1, int64(-1)
-		for i, c := range in {
-			net, _, err := ApplyDiscounts(base, []DiscountCandidate{c})
-			if err != nil {
-				return 0, nil, err
-			}
-			if base-net > bestApplied {
-				best, bestApplied = i, base-net
+	if base < 0 {
+		return 0, nil, errors.New("base amount must not be negative")
+	}
+	var options [][]DiscountCandidate
+	if mode == "max" {
+		for _, c := range in {
+			options = append(options, []DiscountCandidate{c})
+		}
+	} else {
+		var stack []DiscountCandidate
+		for _, c := range in {
+			if c.Exclusive {
+				options = append(options, []DiscountCandidate{c})
+			} else {
+				stack = append(stack, c)
 			}
 		}
-		in = []DiscountCandidate{in[best]}
+		options = append([][]DiscountCandidate{stack}, options...)
 	}
-	net, steps, err := ApplyDiscounts(base, in)
-	if err != nil || maxTotal <= 0 || base-net <= maxTotal {
-		return net, steps, err
+	bestNet, bestSteps := base, []DiscountStep{}
+	for _, option := range options {
+		net, steps, err := ApplyDiscounts(base, option)
+		if err != nil {
+			return 0, nil, err
+		}
+		if net < bestNet {
+			bestNet, bestSteps = net, steps
+		}
+	}
+	if maxTotal <= 0 || base-bestNet <= maxTotal {
+		return bestNet, bestSteps, nil
 	}
 	remaining := maxTotal
 	running := base
-	kept := steps[:0]
-	for _, s := range steps {
+	kept := make([]DiscountStep, 0, len(bestSteps))
+	for _, s := range bestSteps {
 		if remaining <= 0 {
 			break
 		}

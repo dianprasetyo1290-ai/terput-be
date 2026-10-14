@@ -120,3 +120,76 @@ func (c *Client) do(ctx context.Context, method, path, idempotencyKey string, bo
 	}
 	return json.Unmarshal(env.Data, out)
 }
+
+// Message extracts the envelope "message" from a downstream error body.
+func (e *HTTPError) Message() string {
+	var env struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal([]byte(e.Body), &env) == nil && env.Message != "" {
+		return env.Message
+	}
+	return e.Body
+}
+
+// Approval request types admission sends to core (core model.KnownRequestTypes).
+const (
+	ReqTypeDiscountSpecial = "discount_special"
+	ReqTypeSelectionResult = "selection_result"
+)
+
+// ApprovalRequest is core's POST /internal/approvals body.
+type ApprovalRequest struct {
+	SchoolID       string         `json:"school_id"`
+	RequestType    string         `json:"request_type"`
+	SourceService  string         `json:"source_service"`
+	SourceID       string         `json:"source_id"`
+	Title          string         `json:"title"`
+	Summary        map[string]any `json:"summary"`
+	AmountIDR      *int64         `json:"amount_idr,omitempty"`
+	MakerUserID    string         `json:"maker_user_id"`
+	CallbackURL    string         `json:"callback_url"`
+	CorrelationID  string         `json:"correlation_id"`
+	IdempotencyKey string         `json:"idempotency_key"`
+}
+
+// CreateApproval opens a maker-checker approval in core and returns its id.
+// Core never auto-approves; a missing flow is a 422 from core.
+func (c *Client) CreateApproval(ctx context.Context, req ApprovalRequest) (string, error) {
+	req.SourceService = "admission"
+	if req.IdempotencyKey == "" {
+		req.IdempotencyKey = req.RequestType + ":" + req.SourceID
+	}
+	if req.CorrelationID == "" {
+		req.CorrelationID = req.IdempotencyKey
+	}
+	if req.Summary == nil {
+		req.Summary = map[string]any{}
+	}
+	var res struct {
+		ID string `json:"id"`
+	}
+	if err := c.Post(ctx, "/internal/approvals", req.IdempotencyKey, req, &res); err != nil {
+		return "", err
+	}
+	if res.ID == "" {
+		return "", errors.New("core tidak mengembalikan id approval")
+	}
+	return res.ID, nil
+}
+
+// CancelApproval withdraws a pending approval in core.
+func (c *Client) CancelApproval(ctx context.Context, approvalID, actorUserID, reason string) error {
+	return c.Post(ctx, "/internal/approvals/"+approvalID+"/cancel", "",
+		map[string]string{"actor_user_id": actorUserID, "reason": reason}, nil)
+}
+
+// ApprovalErrorMessage maps a CreateApproval failure to the status and
+// Indonesian message the source endpoint answers with.
+func ApprovalErrorMessage(err error) (int, string) {
+	var he *HTTPError
+	if errors.As(err, &he) && he.Status >= 400 && he.Status < 500 {
+		return http.StatusUnprocessableEntity, "Approval Center menolak pengajuan: " + he.Message()
+	}
+	return http.StatusBadGateway, "Approval Center tidak dapat dihubungi, pengajuan belum tersimpan"
+}

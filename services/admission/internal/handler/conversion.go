@@ -10,6 +10,7 @@ import (
 	"skci/admission/internal/client"
 	"skci/admission/internal/common"
 	"skci/admission/internal/conversion"
+	"skci/admission/internal/model"
 )
 
 // ---------------------------------------------------------------------------
@@ -115,7 +116,7 @@ func (a *App) StartConversion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.ApplicationID == "" {
-		common.WriteError(w, http.StatusBadRequest, "application_id is required")
+		common.WriteError(w, http.StatusBadRequest, "pendaftaran wajib dipilih")
 		return
 	}
 	idempotencyKey := r.Header.Get("Idempotency-Key")
@@ -139,7 +140,7 @@ func (a *App) RetryConversion(w http.ResponseWriter, r *http.Request) {
 	err := a.DB.QueryRowContext(r.Context(),
 		`SELECT application_id FROM student_conversions WHERE id=$1 AND school_id=$2`, conversionID, schoolID).Scan(&applicationID)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "conversion not found")
+		common.WriteError(w, http.StatusNotFound, "data konversi tidak ditemukan")
 		return
 	}
 	if err != nil {
@@ -224,7 +225,7 @@ func (a *App) runConversion(r *http.Request, schoolID, applicationID, idempotenc
 	if err != nil {
 		// The failed state is already persisted by the saga; surface a 502 so the
 		// admin UI shows the conversion as retryable.
-		return record, &httpError{http.StatusBadGateway, "conversion paused and can be retried: " + err.Error()}
+		return record, &httpError{http.StatusBadGateway, "konversi tertunda dan dapat dicoba ulang: " + err.Error()}
 	}
 	if record.Status == conversion.StatusCompleted {
 		if _, err = a.DB.ExecContext(r.Context(),
@@ -232,8 +233,9 @@ func (a *App) runConversion(r *http.Request, schoolID, applicationID, idempotenc
 			 WHERE id=$1 AND school_id=$2 AND status='reregistration'`, applicationID, schoolID); err != nil {
 			return record, err
 		}
-		a.audit(r.Context(), schoolID, "conversion", record.ID, "conversion_completed", "admin", "", "", "", nil,
-			map[string]any{"status": record.Status, "student_user_id": record.StudentID})
+		claims := common.Admin(r)
+		a.audit(r.Context(), schoolID, "application", applicationID, "conversion_completed", "admin", claims.UserID, claims.Name, "", nil,
+			map[string]any{"conversion_id": record.ID, "status": record.Status, "student_user_id": record.StudentID})
 	}
 	return record, nil
 }
@@ -245,6 +247,25 @@ func (a *App) loadConversionRecord(r *http.Request, schoolID, applicationID, ide
 	var (
 		guardianStep, studentStep, linkStep, enrollmentStep []byte
 	)
+	// BR-PPDB-04: an applicant becomes a student only after the
+	// re-registration minimum is paid.
+	var status string
+	if err := a.DB.QueryRowContext(r.Context(),
+		`SELECT status FROM applications WHERE id=$1 AND school_id=$2`, applicationID, schoolID).Scan(&status); err != nil {
+		if err == sql.ErrNoRows {
+			return record, &httpError{http.StatusNotFound, "pendaftaran tidak ditemukan"}
+		}
+		return record, err
+	}
+	if status == string(model.StatusReregistration) {
+		settled, charge, _, err := stageSettled(r.Context(), a.DB, schoolID, applicationID, stageReregistration)
+		if err != nil {
+			return record, err
+		}
+		if charge == nil || !settled {
+			return record, &httpError{http.StatusUnprocessableEntity, "pembayaran minimum daftar ulang belum terpenuhi"}
+		}
+	}
 	err := a.DB.QueryRowContext(r.Context(),
 		`INSERT INTO student_conversions(school_id,application_id,idempotency_key)
 		 SELECT $1,a.id,$2 FROM applications a
@@ -262,7 +283,7 @@ func (a *App) loadConversionRecord(r *http.Request, schoolID, applicationID, ide
 		&record.GuardianID, &record.StudentID, &record.LinkID, &record.EnrollmentID,
 		&guardianStep, &studentStep, &linkStep, &enrollmentStep, new(int))
 	if err == sql.ErrNoRows {
-		return record, &httpError{http.StatusUnprocessableEntity, "application is not conversion-ready"}
+		return record, &httpError{http.StatusUnprocessableEntity, "pendaftaran belum siap dikonversi menjadi siswa"}
 	}
 	if err != nil {
 		return record, err

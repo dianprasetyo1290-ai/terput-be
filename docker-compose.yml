@@ -268,6 +268,16 @@ services:
       IDENTITY_URL: http://identity:${IDENTITY_PORT}
       ACADEMIC_URL: http://academic:${ACADEMIC_PORT}
       EXAM_URL: http://exam:${EXAM_PORT}
+      # Approval Center (diskon khusus, hasil seleksi, naik cadangan) + callback.
+      CORE_URL: http://core:${CORE_PORT:-8091}
+      ADMISSION_INTERNAL_URL: http://admission:${ADMISSION_PORT}
+      # Email notifikasi calon orang tua (opsional; kosong = hanya kotak masuk portal).
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-}
+      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
     volumes: ["admission_files:/data/private"]
     ports: ["8098:${ADMISSION_PORT}"]
 

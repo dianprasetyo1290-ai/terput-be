@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -14,91 +15,6 @@ import (
 // ---------------------------------------------------------------------------
 // Admin dashboard
 // ---------------------------------------------------------------------------
-
-// AdminDashboard is GET /admin/dashboard.
-func (a *App) AdminDashboard(w http.ResponseWriter, r *http.Request) {
-	if !common.RequireAdmin(w, r) {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-
-	summary := map[string]any{
-		"totals":              map[string]int{},
-		"recent_applications": []map[string]any{},
-		"tasks":               []map[string]any{},
-	}
-
-	var (
-		periodID, periodName, periodStatus, periodYear string
-		open, close                                    sql.NullTime
-	)
-	err := a.DB.QueryRowContext(r.Context(),
-		`SELECT id,name,status,academic_year,
-		        COALESCE(registration_open_at,(SELECT min(registration_start) FROM admission_waves w WHERE w.period_id=admission_periods.id AND w.deleted_at IS NULL)),
-		        COALESCE(registration_close_at,(SELECT max(registration_end) FROM admission_waves w WHERE w.period_id=admission_periods.id AND w.deleted_at IS NULL))
-		 FROM admission_periods WHERE school_id=$1 AND deleted_at IS NULL AND status='open' ORDER BY created_at DESC LIMIT 1`,
-		schoolID).Scan(&periodID, &periodName, &periodStatus, &periodYear, &open, &close)
-	switch {
-	case err == nil:
-		period := map[string]any{
-			"id":            periodID,
-			"name":          periodName,
-			"status":        periodStatus,
-			"academic_year": periodYear,
-		}
-		if open.Valid {
-			period["registration_open_at"] = open.Time
-		}
-		if close.Valid {
-			period["registration_close_at"] = close.Time
-		}
-		summary["active_period"] = period
-	case err != sql.ErrNoRows:
-		writeErr(w, err)
-		return
-	}
-
-	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT status,count(*) FROM applications WHERE school_id=$1 GROUP BY status`, schoolID)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	totals := map[string]int{}
-	total := 0
-	for rows.Next() {
-		var (
-			status string
-			count  int
-		)
-		if err := rows.Scan(&status, &count); err != nil {
-			rows.Close()
-			writeErr(w, err)
-			return
-		}
-		totals[status] = count
-		total += count
-	}
-	rows.Close()
-	totals["total"] = total
-	summary["totals"] = totals
-
-	recent, err := a.recentApplications(r, schoolID)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	summary["recent_applications"] = recent
-
-	tasks, err := a.dashboardTasks(r, schoolID)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	summary["tasks"] = tasks
-
-	common.WriteJSON(w, http.StatusOK, summary, nil)
-}
 
 func (a *App) recentApplications(r *http.Request, schoolID string) ([]map[string]any, error) {
 	rows, err := a.DB.QueryContext(r.Context(),
@@ -182,19 +98,23 @@ func (a *App) ListApplications(w http.ResponseWriter, r *http.Request) {
 		AND ($3='' OR ap.full_name ILIKE '%'||$3||'%' OR COALESCE(ap.nisn,'') ILIKE '%'||$3||'%' OR a.registration_number ILIKE '%'||$3||'%')
 		AND ($4='' OR a.period_id::text=$4)
 		AND ($5='' OR a.wave_id::text=$5)
-		AND ($6='' OR a.track_id::text=$6)`
+		AND ($6='' OR a.track_id::text=$6)
+		AND ($7='' OR $7=CASE WHEN COALESCE(bill.billed,0)<=0 THEN 'unbilled'
+		                      WHEN COALESCE(bill.outstanding,0)<=0 THEN 'paid'
+		                      WHEN bill.outstanding>=bill.billed THEN 'unpaid' ELSE 'partial' END)`
+	paymentStatus := q.Get("payment_status")
 
 	var total int
 	if err := a.DB.QueryRowContext(r.Context(),
-		`SELECT count(*) FROM applications a JOIN applicants ap ON ap.id=a.applicant_id WHERE `+where,
-		schoolID, status, search, periodID, waveID, trackID).Scan(&total); err != nil {
+		`SELECT count(*) `+listApplicationsFrom+` WHERE `+where,
+		schoolID, status, search, periodID, waveID, trackID, paymentStatus).Scan(&total); err != nil {
 		writeErr(w, err)
 		return
 	}
 
 	rows, err := a.DB.QueryContext(r.Context(),
-		listApplicationsSQL+` WHERE `+where+` ORDER BY a.created_at DESC LIMIT $7 OFFSET $8`,
-		schoolID, status, search, periodID, waveID, trackID, perPage, common.Offset(page, perPage))
+		listApplicationsSQL+` WHERE `+where+` ORDER BY a.created_at DESC LIMIT $8 OFFSET $9`,
+		schoolID, status, search, periodID, waveID, trackID, paymentStatus, perPage, common.Offset(page, perPage))
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -217,18 +137,26 @@ const listApplicationsSQL = `SELECT a.id,a.applicant_id,a.period_id,a.wave_id,a.
 	       (SELECT count(*) FROM application_documents d WHERE d.application_id=a.id),
 	       (SELECT count(*) FROM application_documents d WHERE d.application_id=a.id AND EXISTS
 	           (SELECT 1 FROM document_reviews rv WHERE rv.document_id=d.id AND rv.status='accepted')),
-	       COALESCE((SELECT net_idr FROM charges c WHERE c.application_id=a.id ORDER BY revision DESC LIMIT 1),0)
-	       - COALESCE((SELECT sum(pa.amount_idr) FROM payment_allocations pa
-	                    JOIN payment_submissions ps ON ps.id=pa.payment_id
-	                    WHERE ps.application_id=a.id AND ps.status='verified'),0)
-	       + COALESCE((SELECT sum(pr.amount_idr) FROM payment_reversals pr
-	                    JOIN payment_submissions ps ON ps.id=pr.payment_id
-	                    WHERE ps.application_id=a.id),0),
+	       COALESCE(bill.billed,0),COALESCE(bill.outstanding,0),
 	       COALESCE(w.name,''),COALESCE(t.name,'')
-	FROM applications a
+	` + listApplicationsFrom
+
+const listApplicationsFrom = `FROM applications a
 	JOIN applicants ap ON ap.id=a.applicant_id
 	LEFT JOIN admission_waves w ON w.id=a.wave_id
-	LEFT JOIN admission_tracks t ON t.id=a.track_id`
+	LEFT JOIN admission_tracks t ON t.id=a.track_id
+	LEFT JOIN LATERAL (
+	    -- Per stage: the latest non-cancelled charge minus that stage's
+	    -- verified payments. Reversed payments are no longer 'verified'.
+	    SELECT sum(c.net_idr) AS billed,
+	           sum(GREATEST(c.net_idr-COALESCE((SELECT sum(pa.amount_idr) FROM payment_allocations pa
+	                 JOIN payment_submissions ps ON ps.id=pa.payment_id
+	                 JOIN charges c2 ON c2.id=ps.charge_id
+	                 WHERE ps.application_id=a.id AND ps.status='verified' AND c2.stage=c.stage),0),0)) AS outstanding
+	    FROM (SELECT DISTINCT ON (stage) stage,net_idr,cancelled_at FROM charges
+	          WHERE application_id=a.id ORDER BY stage,revision DESC) c
+	    WHERE c.cancelled_at IS NULL
+	) bill ON true`
 
 func scanAdminApplication(row rowScanner) (map[string]any, error) {
 	var (
@@ -237,11 +165,11 @@ func scanAdminApplication(row rowScanner) (map[string]any, error) {
 		submittedAt                                                            sql.NullTime
 		applicantName, nisn                                                    string
 		documentsCount, documentsVerified                                      int
-		outstanding                                                            int64
+		billed, outstanding                                                    int64
 		waveName, trackName                                                    string
 	)
 	if err := row.Scan(&id, &applicantID, &periodID, &waveID, &trackID, &registrationNumber, &status, &version,
-		&submittedAt, &applicantName, &nisn, &documentsCount, &documentsVerified, &outstanding, &waveName, &trackName); err != nil {
+		&submittedAt, &applicantName, &nisn, &documentsCount, &documentsVerified, &billed, &outstanding, &waveName, &trackName); err != nil {
 		return nil, err
 	}
 	item := map[string]any{
@@ -256,6 +184,8 @@ func scanAdminApplication(row rowScanner) (map[string]any, error) {
 		"documents_count":     documentsCount,
 		"documents_verified":  documentsVerified,
 		"outstanding":         outstanding,
+		"billed":              billed,
+		"payment_status":      model.PaymentStatusOf(billed, outstanding),
 		"applicant": map[string]any{
 			"id":        applicantID,
 			"full_name": applicantName,
@@ -287,7 +217,7 @@ func (a *App) writeAdminApplication(w http.ResponseWriter, r *http.Request, scho
 	row := a.DB.QueryRowContext(r.Context(), listApplicationsSQL+` WHERE a.id=$1 AND a.school_id=$2`, applicationID, schoolID)
 	application, err := scanAdminApplication(row)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "application not found")
+		common.WriteError(w, http.StatusNotFound, "pendaftaran tidak ditemukan")
 		return
 	}
 	if err != nil {
@@ -308,8 +238,9 @@ func (a *App) writeAdminApplication(w http.ResponseWriter, r *http.Request, scho
 		return
 	}
 	result := map[string]any{
-		"application": application,
-		"documents":   documents,
+		"application":  application,
+		"documents":    documents,
+		"form_answers": detail["form_answers"],
 	}
 	var chargeID string
 	if err := a.DB.QueryRowContext(r.Context(),
@@ -328,7 +259,92 @@ func (a *App) writeAdminApplication(w http.ResponseWriter, r *http.Request, scho
 		return
 	}
 	result["payments"] = payments
+	guardian, err := a.applicationGuardian(r.Context(), schoolID, applicationID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	result["guardian"] = guardian
+	activity, err := a.applicationActivity(r.Context(), schoolID, applicationID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	result["activity"] = activity
+	discounts, err := a.specialDiscounts(r.Context(), schoolID, applicationID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	result["special_discounts"] = discounts
+	schedules, err := a.selectionSchedules(r.Context(), a.DB, schoolID, applicationID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	result["schedules"] = schedules
 	common.WriteJSON(w, http.StatusOK, result, nil)
+}
+
+// applicationGuardian returns the parent/guardian with verified contacts
+// (BUG-103).
+func (a *App) applicationGuardian(ctx context.Context, schoolID, applicationID string) (map[string]any, error) {
+	var id, name string
+	if err := a.DB.QueryRowContext(ctx,
+		`SELECT g.id,g.name FROM applications a JOIN applicants ap ON ap.id=a.applicant_id JOIN guardians g ON g.id=ap.guardian_id
+		 WHERE a.id=$1 AND a.school_id=$2`, applicationID, schoolID).Scan(&id, &name); err != nil {
+		return nil, err
+	}
+	rows, err := a.DB.QueryContext(ctx,
+		`SELECT kind,normalized_value FROM guardian_contacts WHERE guardian_id=$1 AND school_id=$2 ORDER BY kind,created_at`, id, schoolID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]any{"id": id, "name": name, "email": "", "phone": ""}
+	for rows.Next() {
+		var kind, value string
+		if err := rows.Scan(&kind, &value); err != nil {
+			return nil, err
+		}
+		if out[kind] == "" {
+			out[kind] = value
+		}
+	}
+	return out, rows.Err()
+}
+
+// applicationActivity is the application's audit trail: every review,
+// payment, decision and status change with actor and time (BUG-102).
+func (a *App) applicationActivity(ctx context.Context, schoolID, applicationID string) ([]map[string]any, error) {
+	rows, err := a.DB.QueryContext(ctx,
+		`SELECT action,actor_type,COALESCE(actor_name,''),COALESCE(reason,''),created_at,after_data FROM audit_events
+		 WHERE school_id=$1 AND aggregate_type='application' AND aggregate_id=$2 ORDER BY created_at DESC,id DESC LIMIT 200`,
+		schoolID, applicationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var (
+			action, actorType, actorName, reason string
+			at                                   time.Time
+			after                                []byte
+		)
+		if err := rows.Scan(&action, &actorType, &actorName, &reason, &at, &after); err != nil {
+			return nil, err
+		}
+		item := map[string]any{"action": action, "actor_type": actorType, "actor_name": model.ActorLabel(actorType, actorName), "created_at": at}
+		if reason != "" {
+			item["reason"] = reason
+		}
+		if len(after) > 0 {
+			item["detail"] = json.RawMessage(after)
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
 }
 
 func (a *App) paymentsList(r *http.Request, schoolID, applicationID string) ([]map[string]any, error) {
@@ -382,6 +398,40 @@ type periodInput struct {
 	Timezone            string `json:"timezone"`
 	RegistrationOpenAt  string `json:"registration_open_at"`
 	RegistrationCloseAt string `json:"registration_close_at"`
+	// Promo policy (BR-PPDB-02) and the form-payment grace bound.
+	DiscountMode        string `json:"discount_mode"`
+	MaxDiscountIDR      *int64 `json:"max_discount_idr"`
+	MaxPaymentGraceDays *int   `json:"max_payment_grace_days"`
+	// Refund policy for dropped applicants (BUG-040): share of the paid
+	// amount returned, in basis points, minus a flat administration fee.
+	RefundPolicyBP    *int   `json:"refund_policy_bp"`
+	RefundAdminFeeIDR *int64 `json:"refund_admin_fee_idr"`
+}
+
+func (in periodInput) validatePolicy() error {
+	if in.DiscountMode != "" && in.DiscountMode != "stack" && in.DiscountMode != "max" {
+		return &httpError{http.StatusUnprocessableEntity, "mode promo harus stack (bertumpuk) atau max (ambil terbesar)"}
+	}
+	if in.MaxDiscountIDR != nil && *in.MaxDiscountIDR < 0 {
+		return &httpError{http.StatusUnprocessableEntity, "batas potongan tidak boleh negatif"}
+	}
+	if in.MaxPaymentGraceDays != nil && *in.MaxPaymentGraceDays < 0 {
+		return &httpError{http.StatusUnprocessableEntity, "batas hari bayar formulir tidak boleh negatif"}
+	}
+	if in.RefundPolicyBP != nil && (*in.RefundPolicyBP < 0 || *in.RefundPolicyBP > 10000) {
+		return &httpError{http.StatusUnprocessableEntity, "persentase pengembalian dana harus 0-100%"}
+	}
+	if in.RefundAdminFeeIDR != nil && *in.RefundAdminFeeIDR < 0 {
+		return &httpError{http.StatusUnprocessableEntity, "biaya administrasi pengembalian tidak boleh negatif"}
+	}
+	return nil
+}
+
+func intOrNil[T int | int64](v *T) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 // ListPeriods is GET /admin/config/periods.
@@ -393,7 +443,8 @@ func (a *App) ListPeriods(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.DB.QueryContext(r.Context(),
 		`SELECT id,name,academic_year,status,timezone,
 		        COALESCE(registration_open_at,(SELECT min(registration_start) FROM admission_waves w WHERE w.period_id=admission_periods.id AND w.deleted_at IS NULL)),
-		        COALESCE(registration_close_at,(SELECT max(registration_end) FROM admission_waves w WHERE w.period_id=admission_periods.id AND w.deleted_at IS NULL))
+		        COALESCE(registration_close_at,(SELECT max(registration_end) FROM admission_waves w WHERE w.period_id=admission_periods.id AND w.deleted_at IS NULL)),
+		        discount_mode,max_discount_idr,max_payment_grace_days,refund_policy_bp,refund_admin_fee_idr
 		 FROM admission_periods WHERE school_id=$1 AND deleted_at IS NULL ORDER BY created_at DESC`, schoolID)
 	if err != nil {
 		writeErr(w, err)
@@ -405,12 +456,19 @@ func (a *App) ListPeriods(w http.ResponseWriter, r *http.Request) {
 		var (
 			id, name, year, status, timezone string
 			open, close                      sql.NullTime
+			discountMode                     string
+			maxDiscount                      int64
+			graceDays, refundBP              int
+			refundFee                        int64
 		)
-		if err := rows.Scan(&id, &name, &year, &status, &timezone, &open, &close); err != nil {
+		if err := rows.Scan(&id, &name, &year, &status, &timezone, &open, &close, &discountMode, &maxDiscount, &graceDays,
+			&refundBP, &refundFee); err != nil {
 			writeErr(w, err)
 			return
 		}
-		item := map[string]any{"id": id, "name": name, "academic_year": year, "status": status, "timezone": timezone}
+		item := map[string]any{"id": id, "name": name, "academic_year": year, "status": status, "timezone": timezone,
+			"discount_mode": discountMode, "max_discount_idr": maxDiscount, "max_payment_grace_days": graceDays,
+			"refund_policy_bp": refundBP, "refund_admin_fee_idr": refundFee}
 		if open.Valid {
 			item["registration_open_at"] = open.Time
 		}
@@ -433,34 +491,45 @@ func (a *App) CreatePeriod(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Name == "" || in.AcademicYear == "" {
-		common.WriteError(w, http.StatusBadRequest, "name and academic_year are required")
+		common.WriteError(w, http.StatusUnprocessableEntity, "nama periode dan tahun ajaran wajib diisi")
 		return
 	}
 	if in.Timezone == "" {
 		in.Timezone = "Asia/Jakarta"
 	}
+	if err := in.validatePolicy(); err != nil {
+		writeErr(w, err)
+		return
+	}
 	open, err := parseTime(in.RegistrationOpenAt)
 	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "registration_open_at is invalid")
+		common.WriteError(w, http.StatusUnprocessableEntity, "tanggal buka pendaftaran tidak valid")
 		return
 	}
 	closeAt, err := parseTime(in.RegistrationCloseAt)
 	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "registration_close_at is invalid")
+		common.WriteError(w, http.StatusUnprocessableEntity, "tanggal tutup pendaftaran tidak valid")
 		return
 	}
 	var id string
 	err = a.DB.QueryRowContext(r.Context(),
-		`INSERT INTO admission_periods(school_id,name,academic_year,timezone,status,registration_open_at,registration_close_at)
-		 VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-		schoolID, in.Name, in.AcademicYear, in.Timezone, normalizePeriodStatus(in.Status), nullTime(open), nullTime(closeAt)).Scan(&id)
+		`INSERT INTO admission_periods(school_id,name,academic_year,timezone,status,registration_open_at,registration_close_at,
+		                               discount_mode,max_discount_idr,max_payment_grace_days,refund_policy_bp,refund_admin_fee_idr)
+		 VALUES($1,$2,$3,$4,$5,$6,$7,COALESCE(NULLIF($8,''),'stack'),COALESCE($9::bigint,0),COALESCE($10::int,30),
+		        COALESCE($11::int,10000),COALESCE($12::bigint,0)) RETURNING id`,
+		schoolID, in.Name, in.AcademicYear, in.Timezone, normalizePeriodStatus(in.Status), nullTime(open), nullTime(closeAt),
+		in.DiscountMode, intOrNil(in.MaxDiscountIDR), intOrNil(in.MaxPaymentGraceDays),
+		intOrNil(in.RefundPolicyBP), intOrNil(in.RefundAdminFeeIDR)).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
-			common.WriteError(w, http.StatusConflict, "a period with this name and academic year already exists")
+			common.WriteError(w, http.StatusConflict, "periode dengan nama dan tahun ajaran ini sudah ada")
 			return
 		}
 		writeErr(w, err)
 		return
+	}
+	if c := common.Admin(r); c != nil {
+		a.audit(r.Context(), schoolID, "period", id, "period_created", "admin", c.UserID, c.Name, "", nil, in)
 	}
 	common.WriteJSON(w, http.StatusCreated, map[string]any{"id": id}, nil)
 }
@@ -477,289 +546,40 @@ func (a *App) UpdatePeriod(w http.ResponseWriter, r *http.Request) {
 	}
 	open, err := parseTime(in.RegistrationOpenAt)
 	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "registration_open_at is invalid")
+		common.WriteError(w, http.StatusUnprocessableEntity, "tanggal buka pendaftaran tidak valid")
 		return
 	}
 	closeAt, err := parseTime(in.RegistrationCloseAt)
 	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "registration_close_at is invalid")
+		common.WriteError(w, http.StatusUnprocessableEntity, "tanggal tutup pendaftaran tidak valid")
+		return
+	}
+	if err := in.validatePolicy(); err != nil {
+		writeErr(w, err)
 		return
 	}
 	res, err := a.DB.ExecContext(r.Context(),
 		`UPDATE admission_periods SET name=COALESCE(NULLIF($1,''),name),academic_year=COALESCE(NULLIF($2,''),academic_year),
 		        status=$3,timezone=COALESCE(NULLIF($4,''),timezone),
-		        registration_open_at=COALESCE($5,registration_open_at),registration_close_at=COALESCE($6,registration_close_at),updated_at=now()
+		        registration_open_at=COALESCE($5,registration_open_at),registration_close_at=COALESCE($6,registration_close_at),
+		        discount_mode=COALESCE(NULLIF($9,''),discount_mode),max_discount_idr=COALESCE($10::bigint,max_discount_idr),
+		        max_payment_grace_days=COALESCE($11::int,max_payment_grace_days),
+		        refund_policy_bp=COALESCE($12::int,refund_policy_bp),refund_admin_fee_idr=COALESCE($13::bigint,refund_admin_fee_idr),
+		        updated_at=now()
 		 WHERE id=$7 AND school_id=$8`,
-		in.Name, in.AcademicYear, normalizePeriodStatus(in.Status), in.Timezone, nullTime(open), nullTime(closeAt), param(r, "id"), schoolID)
+		in.Name, in.AcademicYear, normalizePeriodStatus(in.Status), in.Timezone, nullTime(open), nullTime(closeAt), param(r, "id"), schoolID,
+		in.DiscountMode, intOrNil(in.MaxDiscountIDR), intOrNil(in.MaxPaymentGraceDays),
+		intOrNil(in.RefundPolicyBP), intOrNil(in.RefundAdminFeeIDR))
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "period not found")
+		common.WriteError(w, http.StatusNotFound, "periode tidak ditemukan")
 		return
 	}
-	common.WriteJSON(w, http.StatusOK, map[string]any{"id": param(r, "id")}, nil)
-}
-
-type waveInput struct {
-	PeriodID            string `json:"period_id"`
-	Name                string `json:"name"`
-	RegistrationOpenAt  string `json:"registration_open_at"`
-	RegistrationCloseAt string `json:"registration_close_at"`
-	TestAt              string `json:"test_at"`
-	AnnouncementAt      string `json:"announcement_at"`
-}
-
-// ListWaves is GET /admin/config/waves.
-func (a *App) ListWaves(w http.ResponseWriter, r *http.Request) {
-	if !common.RequireAdmin(w, r) {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	periodID := r.URL.Query().Get("period_id")
-	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT id,period_id,name,registration_start,registration_end,test_start,announcement_at
-		 FROM admission_waves WHERE school_id=$1 AND deleted_at IS NULL AND ($2='' OR period_id::text=$2)
-		 ORDER BY registration_start`, schoolID, periodID)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	defer rows.Close()
-	out := []map[string]any{}
-	for rows.Next() {
-		var (
-			id, period, name   string
-			start, end         time.Time
-			testAt, announceAt sql.NullTime
-		)
-		if err := rows.Scan(&id, &period, &name, &start, &end, &testAt, &announceAt); err != nil {
-			writeErr(w, err)
-			return
-		}
-		item := map[string]any{
-			"id":                    id,
-			"period_id":             period,
-			"name":                  name,
-			"registration_open_at":  start,
-			"registration_close_at": end,
-			"status":                waveStatus(time.Now(), start, end),
-		}
-		if testAt.Valid {
-			item["test_at"] = testAt.Time
-		}
-		if announceAt.Valid {
-			item["announcement_at"] = announceAt.Time
-		}
-		out = append(out, item)
-	}
-	common.WriteJSON(w, http.StatusOK, out, nil)
-}
-
-// CreateWave is POST /admin/config/waves.
-func (a *App) CreateWave(w http.ResponseWriter, r *http.Request) {
-	if !common.RequireAdmin(w, r) {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	var in waveInput
-	if !common.Decode(w, r, &in) {
-		return
-	}
-	if in.Name == "" {
-		common.WriteError(w, http.StatusBadRequest, "name is required")
-		return
-	}
-	periodID, err := a.resolvePeriodID(r, schoolID, in.PeriodID)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	start, err := parseTime(in.RegistrationOpenAt)
-	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "registration_open_at is invalid")
-		return
-	}
-	end, err := parseTime(in.RegistrationCloseAt)
-	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "registration_close_at is invalid")
-		return
-	}
-	if start.IsZero() || end.IsZero() || !end.After(start) {
-		common.WriteError(w, http.StatusUnprocessableEntity, "registration window is invalid")
-		return
-	}
-	testAt, _ := parseTime(in.TestAt)
-	announceAt, _ := parseTime(in.AnnouncementAt)
-	var id string
-	err = a.DB.QueryRowContext(r.Context(),
-		`INSERT INTO admission_waves(school_id,period_id,name,registration_start,registration_end,test_start,announcement_at)
-		 SELECT $1,p.id,$2,$3,$4,$5,$6 FROM admission_periods p WHERE p.id=$7 AND p.school_id=$1 RETURNING id`,
-		schoolID, in.Name, start, end, nullTime(testAt), nullTime(announceAt), periodID).Scan(&id)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	common.WriteJSON(w, http.StatusCreated, map[string]any{"id": id}, nil)
-}
-
-// UpdateWave is PUT /admin/config/waves/{id}.
-func (a *App) UpdateWave(w http.ResponseWriter, r *http.Request) {
-	if !common.RequireAdmin(w, r) {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	var in waveInput
-	if !common.Decode(w, r, &in) {
-		return
-	}
-	start, err := parseTime(in.RegistrationOpenAt)
-	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "registration_open_at is invalid")
-		return
-	}
-	end, err := parseTime(in.RegistrationCloseAt)
-	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "registration_close_at is invalid")
-		return
-	}
-	testAt, _ := parseTime(in.TestAt)
-	announceAt, _ := parseTime(in.AnnouncementAt)
-	res, err := a.DB.ExecContext(r.Context(),
-		`UPDATE admission_waves SET name=COALESCE(NULLIF($1,''),name),
-		        registration_start=COALESCE($2,registration_start),registration_end=COALESCE($3,registration_end),
-		        test_start=COALESCE($4,test_start),announcement_at=COALESCE($5,announcement_at),updated_at=now()
-		 WHERE id=$6 AND school_id=$7`,
-		in.Name, nullTime(start), nullTime(end), nullTime(testAt), nullTime(announceAt), param(r, "id"), schoolID)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "wave not found")
-		return
-	}
-	common.WriteJSON(w, http.StatusOK, map[string]any{"id": param(r, "id")}, nil)
-}
-
-type trackInput struct {
-	PeriodID    string `json:"period_id"`
-	Code        string `json:"code"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Quota       int    `json:"quota"`
-	IsActive    *bool  `json:"is_active"`
-}
-
-// ListTracks is GET /admin/config/tracks.
-func (a *App) ListTracks(w http.ResponseWriter, r *http.Request) {
-	if !common.RequireAdmin(w, r) {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	periodID := r.URL.Query().Get("period_id")
-	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT t.id,t.period_id,t.name,COALESCE(t.description,''),t.quota,t.is_active,
-		        (SELECT count(*) FROM applications a WHERE a.track_id=t.id)
-		 FROM admission_tracks t WHERE t.school_id=$1 AND t.deleted_at IS NULL AND ($2='' OR t.period_id::text=$2)
-		 ORDER BY t.name`, schoolID, periodID)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	defer rows.Close()
-	out := []map[string]any{}
-	for rows.Next() {
-		var (
-			id, period, name, description string
-			quota, applicants             int
-			isActive                      bool
-		)
-		if err := rows.Scan(&id, &period, &name, &description, &quota, &isActive, &applicants); err != nil {
-			writeErr(w, err)
-			return
-		}
-		out = append(out, map[string]any{
-			"id":              id,
-			"period_id":       period,
-			"name":            name,
-			"description":     description,
-			"quota":           quota,
-			"applicant_count": applicants,
-			"is_active":       isActive,
-			"requirements":    []string{},
-		})
-	}
-	common.WriteJSON(w, http.StatusOK, out, nil)
-}
-
-// CreateTrack is POST /admin/config/tracks.
-func (a *App) CreateTrack(w http.ResponseWriter, r *http.Request) {
-	if !common.RequireAdmin(w, r) {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	var in trackInput
-	if !common.Decode(w, r, &in) {
-		return
-	}
-	if in.Name == "" {
-		common.WriteError(w, http.StatusBadRequest, "name is required")
-		return
-	}
-	periodID, err := a.resolvePeriodID(r, schoolID, in.PeriodID)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	code := in.Code
-	if code == "" {
-		code = strings.ToUpper(truncateSlug(in.Name))
-	}
-	if code == "" {
-		code = "TRACK"
-	}
-	isActive := in.IsActive == nil || *in.IsActive
-	var id string
-	err = a.DB.QueryRowContext(r.Context(),
-		`INSERT INTO admission_tracks(school_id,period_id,code,name,description,quota,is_active)
-		 SELECT $1,p.id,$2,$3,NULLIF($4,''),$5,$6 FROM admission_periods p WHERE p.id=$7 AND p.school_id=$1 RETURNING id`,
-		schoolID, code, in.Name, in.Description, in.Quota, isActive, periodID).Scan(&id)
-	if err != nil {
-		if isUniqueViolation(err) {
-			common.WriteError(w, http.StatusConflict, "a track with this code already exists for the period")
-			return
-		}
-		writeErr(w, err)
-		return
-	}
-	common.WriteJSON(w, http.StatusCreated, map[string]any{"id": id}, nil)
-}
-
-// UpdateTrack is PUT /admin/config/tracks/{id}.
-func (a *App) UpdateTrack(w http.ResponseWriter, r *http.Request) {
-	if !common.RequireAdmin(w, r) {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	var in trackInput
-	if !common.Decode(w, r, &in) {
-		return
-	}
-	isActive := in.IsActive == nil || *in.IsActive
-	res, err := a.DB.ExecContext(r.Context(),
-		`UPDATE admission_tracks SET name=COALESCE(NULLIF($1,''),name),description=NULLIF($2,''),
-		        quota=$3,is_active=$4,updated_at=now()
-		 WHERE id=$5 AND school_id=$6`,
-		in.Name, in.Description, in.Quota, isActive, param(r, "id"), schoolID)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "track not found")
-		return
+	if c := common.Admin(r); c != nil {
+		a.audit(r.Context(), schoolID, "period", param(r, "id"), "period_updated", "admin", c.UserID, c.Name, "", nil, in)
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]any{"id": param(r, "id")}, nil)
 }
@@ -771,6 +591,32 @@ type requirementInput struct {
 	AcceptedTypes []string `json:"accepted_types"`
 	MaxSizeMB     int      `json:"max_size_mb"`
 	Required      *bool    `json:"required"`
+	TrackID       string   `json:"track_id"`
+	Stage         string   `json:"stage"`
+}
+
+// normalize validates the requirement: only PDF/JPG/PNG may be allowed
+// (BUG-100), the stage is registration or reregistration, the size 1..20 MB.
+func (in *requirementInput) normalize() error {
+	if len(in.AcceptedTypes) == 0 {
+		in.AcceptedTypes = defaultMIMEs(nil)
+	}
+	if err := model.ValidateAllowedMIMEs(in.AcceptedTypes); err != nil {
+		return &httpError{http.StatusUnprocessableEntity, err.Error()}
+	}
+	if in.Stage == "" {
+		in.Stage = stageRegistration
+	}
+	if in.Stage != stageRegistration && in.Stage != stageReregistration {
+		return &httpError{http.StatusUnprocessableEntity, "tahap dokumen harus registration atau reregistration"}
+	}
+	if in.MaxSizeMB == 0 {
+		in.MaxSizeMB = 5
+	}
+	if in.MaxSizeMB < 1 || in.MaxSizeMB > 20 {
+		return &httpError{http.StatusUnprocessableEntity, "ukuran maksimal berkas harus 1 sampai 20 MB"}
+	}
+	return nil
 }
 
 // ListRequirements is GET /admin/config/document-requirements.
@@ -780,7 +626,7 @@ func (a *App) ListRequirements(w http.ResponseWriter, r *http.Request) {
 	}
 	schoolID := common.EffectiveSchoolID(r)
 	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT id,name,COALESCE(description,''),allowed_mimes,max_bytes,required
+		`SELECT id,name,COALESCE(description,''),allowed_mimes,max_bytes,required,COALESCE(track_id::text,''),stage
 		 FROM document_requirements WHERE school_id=$1 AND deleted_at IS NULL ORDER BY name`, schoolID)
 	if err != nil {
 		writeErr(w, err)
@@ -790,23 +636,28 @@ func (a *App) ListRequirements(w http.ResponseWriter, r *http.Request) {
 	out := []map[string]any{}
 	for rows.Next() {
 		var (
-			id, name, description string
-			allowed               textArray
-			maxBytes              int64
-			required              bool
+			id, name, description, trackID, stage string
+			allowed                               textArray
+			maxBytes                              int64
+			required                              bool
 		)
-		if err := rows.Scan(&id, &name, &description, &allowed, &maxBytes, &required); err != nil {
+		if err := rows.Scan(&id, &name, &description, &allowed, &maxBytes, &required, &trackID, &stage); err != nil {
 			writeErr(w, err)
 			return
 		}
-		out = append(out, map[string]any{
+		item := map[string]any{
 			"id":             id,
 			"name":           name,
 			"description":    description,
 			"accepted_types": allowed,
 			"max_size_mb":    int(maxBytes / (1 << 20)),
 			"required":       required,
-		})
+			"stage":          stage,
+		}
+		if trackID != "" {
+			item["track_id"] = trackID
+		}
+		out = append(out, item)
 	}
 	common.WriteJSON(w, http.StatusOK, out, nil)
 }
@@ -821,8 +672,12 @@ func (a *App) CreateRequirement(w http.ResponseWriter, r *http.Request) {
 	if !common.Decode(w, r, &in) {
 		return
 	}
-	if in.Name == "" {
-		common.WriteError(w, http.StatusBadRequest, "name is required")
+	if strings.TrimSpace(in.Name) == "" {
+		common.WriteError(w, http.StatusUnprocessableEntity, "nama dokumen wajib diisi")
+		return
+	}
+	if err := in.normalize(); err != nil {
+		writeErr(w, err)
 		return
 	}
 	periodID, err := a.resolvePeriodID(r, schoolID, in.PeriodID)
@@ -830,8 +685,8 @@ func (a *App) CreateRequirement(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	allowed := defaultMIMEs(in.AcceptedTypes)
-	maxBytes := int64(maxInt(in.MaxSizeMB, 5)) * (1 << 20)
+	allowed := in.AcceptedTypes
+	maxBytes := int64(in.MaxSizeMB) * (1 << 20)
 	required := in.Required == nil || *in.Required
 	code := strings.ToUpper(truncateSlug(in.Name))
 	if code == "" {
@@ -839,12 +694,14 @@ func (a *App) CreateRequirement(w http.ResponseWriter, r *http.Request) {
 	}
 	var id string
 	err = a.DB.QueryRowContext(r.Context(),
-		`INSERT INTO document_requirements(school_id,period_id,code,name,description,required,allowed_mimes,max_bytes)
-		 SELECT $1,p.id,$2,$3,NULLIF($4,''),$5,$6,$7 FROM admission_periods p WHERE p.id=$8 AND p.school_id=$1 RETURNING id`,
-		schoolID, code, in.Name, in.Description, required, allowed, maxBytes, periodID).Scan(&id)
+		`INSERT INTO document_requirements(school_id,period_id,code,name,description,required,allowed_mimes,max_bytes,track_id,stage)
+		 SELECT $1,p.id,$2,$3,NULLIF($4,''),$5,$6,$7,
+		        (SELECT t.id FROM admission_tracks t WHERE t.id::text=NULLIF($9,'') AND t.period_id=p.id),$10
+		 FROM admission_periods p WHERE p.id=$8 AND p.school_id=$1 RETURNING id`,
+		schoolID, code, in.Name, in.Description, required, allowed, maxBytes, periodID, in.TrackID, in.Stage).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
-			common.WriteError(w, http.StatusConflict, "a requirement with this name already exists for the period")
+			common.WriteError(w, http.StatusConflict, "dokumen dengan nama ini sudah ada pada periode tersebut")
 			return
 		}
 		writeErr(w, err)
@@ -863,20 +720,24 @@ func (a *App) UpdateRequirement(w http.ResponseWriter, r *http.Request) {
 	if !common.Decode(w, r, &in) {
 		return
 	}
-	allowed := defaultMIMEs(in.AcceptedTypes)
-	maxBytes := int64(maxInt(in.MaxSizeMB, 5)) * (1 << 20)
+	if err := in.normalize(); err != nil {
+		writeErr(w, err)
+		return
+	}
+	maxBytes := int64(in.MaxSizeMB) * (1 << 20)
 	required := in.Required == nil || *in.Required
 	res, err := a.DB.ExecContext(r.Context(),
-		`UPDATE document_requirements SET name=COALESCE(NULLIF($1,''),name),description=NULLIF($2,''),
-		        allowed_mimes=$3,max_bytes=$4,required=$5
+		`UPDATE document_requirements dr SET name=COALESCE(NULLIF($1,''),name),description=NULLIF($2,''),
+		        allowed_mimes=$3,max_bytes=$4,required=$5,stage=$8,
+		        track_id=(SELECT t.id FROM admission_tracks t WHERE t.id::text=NULLIF($9,'') AND t.period_id=dr.period_id)
 		 WHERE id=$6 AND school_id=$7 AND deleted_at IS NULL`,
-		in.Name, in.Description, allowed, maxBytes, required, param(r, "id"), schoolID)
+		in.Name, in.Description, in.AcceptedTypes, maxBytes, required, param(r, "id"), schoolID, in.Stage, in.TrackID)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "requirement not found")
+		common.WriteError(w, http.StatusNotFound, "persyaratan dokumen tidak ditemukan")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]any{"id": param(r, "id")}, nil)
@@ -898,6 +759,7 @@ func (a *App) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
 	from := q.Get("from")
 	to := q.Get("to")
 	search := strings.TrimSpace(q.Get("search"))
+	applicationID := q.Get("application_id")
 	page, perPage := common.Page(r)
 
 	rows, err := a.DB.QueryContext(r.Context(),
@@ -909,8 +771,9 @@ func (a *App) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
 		   AND ($4='' OR created_at >= $4::date)
 		   AND ($5='' OR created_at < ($5::date + interval '1 day'))
 		   AND ($6='' OR action ILIKE '%'||$6||'%' OR aggregate_id ILIKE '%'||$6||'%')
+		   AND ($9='' OR (aggregate_type='application' AND aggregate_id=$9))
 		 ORDER BY created_at DESC LIMIT $7 OFFSET $8`,
-		schoolID, entityType, actor, from, to, search, perPage, common.Offset(page, perPage))
+		schoolID, entityType, actor, from, to, search, perPage, common.Offset(page, perPage), applicationID)
 	if err != nil {
 		writeErr(w, err)
 		return

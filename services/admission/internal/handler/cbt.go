@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"net/url"
 	"time"
 
 	"skci/admission/internal/common"
@@ -29,7 +30,7 @@ func (a *App) cbtScope(r *http.Request, schoolID, applicationID string) (cbtScop
 		 WHERE a.id=$1 AND a.school_id=$2`, applicationID, schoolID).
 		Scan(&scope.ApplicantID, &scope.RegistrationNumber, &scope.ApplicantName, &start, &end)
 	if err == sql.ErrNoRows {
-		return scope, &httpError{http.StatusNotFound, "application not found"}
+		return scope, &httpError{http.StatusNotFound, "pendaftaran tidak ditemukan"}
 	}
 	if err != nil {
 		return scope, err
@@ -47,7 +48,7 @@ func (a *App) GetCBT(w http.ResponseWriter, r *http.Request) {
 	c := common.Guardian(r)
 	applicationID := param(r, "id")
 	if !a.guardianOwnsApplication(r, c.SchoolID, c.GuardianID, applicationID) {
-		common.WriteError(w, http.StatusNotFound, "application not found")
+		common.WriteError(w, http.StatusNotFound, "pendaftaran tidak ditemukan")
 		return
 	}
 	scope, err := a.cbtScope(r, c.SchoolID, applicationID)
@@ -70,7 +71,7 @@ func (a *App) GetCBT(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !hasParticipant && !scope.HasWindow {
-		common.WriteError(w, http.StatusNotFound, "no CBT schedule configured for this application")
+		common.WriteError(w, http.StatusNotFound, "jadwal CBT belum tersedia untuk pendaftaran ini")
 		return
 	}
 
@@ -86,6 +87,7 @@ func (a *App) GetCBT(w http.ResponseWriter, r *http.Request) {
 		"end_at":         end,
 		"location":       "Online",
 		"status":         cbtStatus(hasParticipant, status, start, end),
+		"configured":     a.cbtConfigured(),
 	}
 	if !hasParticipant {
 		view["id"] = applicationID
@@ -94,6 +96,12 @@ func (a *App) GetCBT(w http.ResponseWriter, r *http.Request) {
 		view["score"] = score.Int64
 	}
 	common.WriteJSON(w, http.StatusOK, view, nil)
+}
+
+// cbtConfigured reports whether applicants can be sent to the exam service:
+// both the internal API and the public entry URL must be set.
+func (a *App) cbtConfigured() bool {
+	return a.Exam.Configured() && a.Config.ExamPublicURL != ""
 }
 
 func cbtStatus(hasParticipant bool, status string, start, end time.Time) string {
@@ -117,11 +125,11 @@ func (a *App) EnterCBT(w http.ResponseWriter, r *http.Request) {
 	c := common.Guardian(r)
 	applicationID := param(r, "id")
 	if !a.guardianOwnsApplication(r, c.SchoolID, c.GuardianID, applicationID) {
-		common.WriteError(w, http.StatusNotFound, "application not found")
+		common.WriteError(w, http.StatusNotFound, "pendaftaran tidak ditemukan")
 		return
 	}
-	if !a.Exam.Configured() {
-		common.WriteError(w, http.StatusServiceUnavailable, "exam service is not configured")
+	if !a.cbtConfigured() {
+		common.WriteError(w, http.StatusServiceUnavailable, "layanan ujian CBT belum dikonfigurasi; hubungi panitia PPDB")
 		return
 	}
 	scope, err := a.cbtScope(r, c.SchoolID, applicationID)
@@ -148,7 +156,7 @@ func (a *App) EnterCBT(w http.ResponseWriter, r *http.Request) {
 		"admission_context":  map[string]any{"application_id": applicationID},
 	}, &exam)
 	if err != nil {
-		common.WriteError(w, http.StatusBadGateway, "failed to provision the CBT exam: "+err.Error())
+		common.WriteError(w, http.StatusBadGateway, "ujian CBT gagal disiapkan, coba lagi beberapa saat")
 		return
 	}
 
@@ -159,7 +167,7 @@ func (a *App) EnterCBT(w http.ResponseWriter, r *http.Request) {
 		"display_name":       scope.ApplicantName,
 	}
 	if err = a.Exam.Post(r.Context(), "/internal/admission/exams/"+exam.ID+"/participants", "admission-participant:"+applicationID, participantPayload, nil); err != nil {
-		common.WriteError(w, http.StatusBadGateway, "failed to provision the applicant participant: "+err.Error())
+		common.WriteError(w, http.StatusBadGateway, "peserta CBT gagal didaftarkan, coba lagi beberapa saat")
 		return
 	}
 
@@ -172,7 +180,7 @@ func (a *App) EnterCBT(w http.ResponseWriter, r *http.Request) {
 		"applicant_id": scope.ApplicantID,
 		"ttl_seconds":  3600,
 	}, &access); err != nil {
-		common.WriteError(w, http.StatusBadGateway, "failed to issue the CBT access token: "+err.Error())
+		common.WriteError(w, http.StatusBadGateway, "akses CBT gagal diterbitkan, coba lagi beberapa saat")
 		return
 	}
 
@@ -181,10 +189,7 @@ func (a *App) EnterCBT(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entryURL := ""
-	if a.Config.ExamPublicURL != "" {
-		entryURL = a.Config.ExamPublicURL + "?token=" + access.AccessToken
-	}
+	entryURL := a.Config.ExamPublicURL + "?token=" + url.QueryEscape(access.AccessToken)
 	a.audit(r.Context(), c.SchoolID, "cbt", applicationID, "cbt_entered", "guardian", c.GuardianID, "", "", nil,
 		map[string]any{"exam_id": exam.ID})
 	common.WriteJSON(w, http.StatusOK, map[string]any{

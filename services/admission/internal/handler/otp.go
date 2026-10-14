@@ -39,13 +39,13 @@ func (a *App) ResendOTP(w http.ResponseWriter, r *http.Request) {
 func (a *App) issueOTP(w http.ResponseWriter, r *http.Request, req otpRequestBody) {
 	schoolID, err := a.resolveSchoolID(r)
 	if err != nil || schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+		common.WriteError(w, http.StatusBadRequest, "sekolah wajib dipilih")
 		return
 	}
 	kind := channelKind(req.Channel, req.Contact)
 	contact, ok := normalizeContact(kind, req.Contact)
 	if !ok {
-		common.WriteError(w, http.StatusBadRequest, "a valid email or phone contact is required")
+		common.WriteError(w, http.StatusBadRequest, "email atau nomor telepon yang valid wajib diisi")
 		return
 	}
 	const purpose = "guardian_login"
@@ -56,17 +56,17 @@ func (a *App) issueOTP(w http.ResponseWriter, r *http.Request, req otpRequestBod
 		 WHERE school_id=$1 AND contact_kind=$2 AND contact_value=$3 AND purpose=$4 AND used_at IS NULL
 		 ORDER BY created_at DESC LIMIT 1`, schoolID, kind, contact, purpose).Scan(&resendAfter)
 	if err != nil && err != sql.ErrNoRows {
-		common.WriteError(w, http.StatusInternalServerError, "failed to request OTP")
+		common.WriteError(w, http.StatusInternalServerError, "kode OTP gagal dikirim")
 		return
 	}
 	if err == nil && !time.Now().After(resendAfter) {
-		common.WriteError(w, http.StatusTooManyRequests, "OTP resend cooldown is active")
+		common.WriteError(w, http.StatusTooManyRequests, "kode OTP baru dapat diminta kembali setelah jeda waktu berakhir")
 		return
 	}
 
 	code, err := a.OTP.Generate()
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to generate OTP")
+		common.WriteError(w, http.StatusInternalServerError, "kode OTP gagal dibuat")
 		return
 	}
 	expires := time.Now().Add(a.Config.OTPTTL)
@@ -78,11 +78,11 @@ func (a *App) issueOTP(w http.ResponseWriter, r *http.Request, req otpRequestBod
 		 VALUES($1,$2,$3,$4,'pending',$5,$6,$7,$8) RETURNING id`,
 		schoolID, kind, contact, purpose, a.Config.OTPMaxAttempts, expires, resend, ipHash(r)).Scan(&challengeID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to request OTP")
+		common.WriteError(w, http.StatusInternalServerError, "kode OTP gagal dikirim")
 		return
 	}
 	if _, err = a.DB.ExecContext(r.Context(), `UPDATE otp_challenges SET code_hash=$1 WHERE id=$2`, a.OTP.Hash(challengeID, code), challengeID); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to request OTP")
+		common.WriteError(w, http.StatusInternalServerError, "kode OTP gagal dikirim")
 		return
 	}
 	if err := a.Provider.Send(r.Context(), contact, code); err != nil {
@@ -115,19 +115,19 @@ func (a *App) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	}
 	schoolID, err := a.resolveSchoolID(r)
 	if err != nil || schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+		common.WriteError(w, http.StatusBadRequest, "sekolah wajib dipilih")
 		return
 	}
 	kind := channelKind("", req.Contact)
 	contact, ok := normalizeContact(kind, req.Contact)
 	if !ok {
-		common.WriteError(w, http.StatusBadRequest, "a valid email or phone contact is required")
+		common.WriteError(w, http.StatusBadRequest, "email atau nomor telepon yang valid wajib diisi")
 		return
 	}
 
 	tx, err := a.DB.BeginTx(r.Context(), nil)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "verification failed")
+		common.WriteError(w, http.StatusInternalServerError, "verifikasi gagal")
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -145,7 +145,7 @@ func (a *App) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 		 ORDER BY created_at DESC LIMIT 1 FOR UPDATE`, schoolID, kind, contact).Scan(
 		&challengeID, &hash, &expires, &resend, &attempts, &max, &used)
 	if err != nil {
-		common.WriteError(w, http.StatusUnauthorized, "no active OTP challenge for this contact")
+		common.WriteError(w, http.StatusUnauthorized, "tidak ada kode OTP aktif untuk kontak ini, minta kode baru")
 		return
 	}
 
@@ -157,12 +157,12 @@ func (a *App) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	if _, err = tx.ExecContext(r.Context(),
 		`UPDATE otp_challenges SET attempts=$1,used_at=$2 WHERE id=$3`,
 		challenge.Attempts, challenge.UsedAt, challengeID); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "verification failed")
+		common.WriteError(w, http.StatusInternalServerError, "verifikasi gagal")
 		return
 	}
 	if verifyErr != nil {
 		if commitErr := tx.Commit(); commitErr != nil {
-			common.WriteError(w, http.StatusInternalServerError, "verification failed")
+			common.WriteError(w, http.StatusInternalServerError, "verifikasi gagal")
 			return
 		}
 		common.WriteError(w, http.StatusUnauthorized, verifyErr.Error())
@@ -190,11 +190,11 @@ func (a *App) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = tx.ExecContext(r.Context(), `UPDATE guardians SET name=$1, updated_at=now() WHERE id=$2`, guardianName, guardianID)
 	}
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "verification failed")
+		common.WriteError(w, http.StatusInternalServerError, "verifikasi gagal")
 		return
 	}
 	if err = tx.Commit(); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "verification failed")
+		common.WriteError(w, http.StatusInternalServerError, "verifikasi gagal")
 		return
 	}
 
@@ -224,7 +224,7 @@ func (a *App) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 
 	token, expiresAt, err := a.guardianToken(guardianID, schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "session issue failed")
+		common.WriteError(w, http.StatusInternalServerError, "sesi gagal dibuat")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]any{

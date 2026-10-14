@@ -24,6 +24,16 @@ type SMTPProvider struct {
 
 // Send delivers the code over SMTP with STARTTLS (port 587 style).
 func (p SMTPProvider) Send(ctx context.Context, destination, code string) error {
+	school := p.SchoolName
+	if school == "" {
+		school = "PPDB"
+	}
+	return p.SendMail(ctx, destination, fmt.Sprintf("Kode verifikasi PPDB %s: %s", school, code), otpBody(school, code))
+}
+
+// SendMail delivers one plain-text email over SMTP with STARTTLS. It is shared
+// by the OTP sender and the guardian notification outbox.
+func (p SMTPProvider) SendMail(ctx context.Context, destination, subject, body string) error {
 	to, err := mail.ParseAddress(destination)
 	if err != nil || !strings.Contains(destination, "@") {
 		return errors.New("smtp provider only delivers to email addresses")
@@ -62,7 +72,7 @@ func (p SMTPProvider) Send(ctx context.Context, destination, code string) error 
 	if err != nil {
 		return err
 	}
-	if _, err := w.Write(p.message(to.Address, code)); err != nil {
+	if _, err := w.Write(p.message(to.Address, subject, body)); err != nil {
 		return err
 	}
 	if err := w.Close(); err != nil {
@@ -71,20 +81,18 @@ func (p SMTPProvider) Send(ctx context.Context, destination, code string) error 
 	return c.Quit()
 }
 
-func (p SMTPProvider) message(to, code string) []byte {
-	school := p.SchoolName
-	if school == "" {
-		school = "PPDB"
-	}
-	from := (&mail.Address{Name: p.FromName, Address: p.FromAddr}).String()
-	subject := mime.QEncoding.Encode("utf-8", fmt.Sprintf("Kode verifikasi PPDB %s: %s", school, code))
-	body := fmt.Sprintf("Kode verifikasi PPDB %s Anda:\r\n\r\n    %s\r\n\r\n"+
+func otpBody(school, code string) string {
+	return fmt.Sprintf("Kode verifikasi PPDB %s Anda:\r\n\r\n    %s\r\n\r\n"+
 		"Kode berlaku 5 menit dan hanya bisa dipakai sekali.\r\n"+
 		"Jangan berikan kode ini kepada siapa pun, termasuk pihak sekolah.\r\n"+
 		"Abaikan email ini jika Anda tidak sedang mendaftar.\r\n", school, code)
+}
+
+func (p SMTPProvider) message(to, subject, body string) []byte {
+	from := (&mail.Address{Name: p.FromName, Address: p.FromAddr}).String()
 	return []byte("From: " + from + "\r\n" +
 		"To: " + to + "\r\n" +
-		"Subject: " + subject + "\r\n" +
+		"Subject: " + mime.QEncoding.Encode("utf-8", subject) + "\r\n" +
 		"Date: " + time.Now().Format(time.RFC1123Z) + "\r\n" +
 		"MIME-Version: 1.0\r\n" +
 		"Content-Type: text/plain; charset=utf-8\r\n" +
