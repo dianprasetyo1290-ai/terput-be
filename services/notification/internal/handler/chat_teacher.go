@@ -219,7 +219,7 @@ func (h *Handler) CreateTeacherParentThread(w http.ResponseWriter, r *http.Reque
 	}
 	if !errors.Is(err, store.ErrNotFound) {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to load thread")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat percakapan")
 		return
 	}
 	subject := strings.TrimSpace(p.Subject)
@@ -245,7 +245,7 @@ func (h *Handler) CreateTeacherParentThread(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to create thread")
+		common.WriteError(w, http.StatusInternalServerError, "gagal membuat percakapan")
 		return
 	}
 	common.WriteJSONMsg(w, http.StatusCreated, thread, nil, "Percakapan dimulai")
@@ -369,7 +369,7 @@ func (h *Handler) postMessage(w http.ResponseWriter, r *http.Request, thread *mo
 	settings, err := h.Store.GetChatSettings(ctx, thread.SchoolID)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to load chat settings")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat pengaturan chat")
 		return
 	}
 	outside, notice := chat.ServiceWindow(&chat.Settings{Start: settings.ServiceStart, End: settings.ServiceEnd, Days: settings.ServiceDays}, h.now(), h.loc())
@@ -377,7 +377,7 @@ func (h *Handler) postMessage(w http.ResponseWriter, r *http.Request, thread *mo
 	msg, err := h.Store.CreateChatMessage(ctx, in)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to post message")
+		common.WriteError(w, http.StatusInternalServerError, "gagal mengirim pesan")
 		return
 	}
 	h.notifyParticipants(ctx, thread, msg)
@@ -422,7 +422,7 @@ func (h *Handler) UploadAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if thread.Closed() {
-		common.WriteError(w, http.StatusConflict, "thread is closed")
+		common.WriteError(w, http.StatusConflict, "percakapan sudah ditutup")
 		return
 	}
 	if h.Attachments == nil {
@@ -432,7 +432,7 @@ func (h *Handler) UploadAttachment(w http.ResponseWriter, r *http.Request) {
 	settings, err := h.Store.GetChatSettings(r.Context(), thread.SchoolID)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to load chat settings")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat pengaturan chat")
 		return
 	}
 	max := settings.MaxAttachmentBytes
@@ -495,12 +495,12 @@ func (h *Handler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 	msg, err := h.Store.GetChatMessage(r.Context(), param(r, "id"), schoolID)
 	if errors.Is(err, store.ErrNotFound) {
-		common.WriteError(w, http.StatusNotFound, "message not found")
+		common.WriteError(w, http.StatusNotFound, "pesan tidak ditemukan")
 		return
 	}
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to load message")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat pesan")
 		return
 	}
 	if _, ok := h.authorizeThread(w, r, claims, msg.ThreadID); !ok {
@@ -511,12 +511,12 @@ func (h *Handler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) streamAttachment(w http.ResponseWriter, r *http.Request, msg *model.ChatMessage) {
 	if msg.AttachmentKey == nil || h.Attachments == nil {
-		common.WriteError(w, http.StatusNotFound, "attachment not found")
+		common.WriteError(w, http.StatusNotFound, "lampiran tidak ditemukan")
 		return
 	}
 	f, err := h.Attachments.Open(r.Context(), *msg.AttachmentKey)
 	if err != nil {
-		common.WriteError(w, http.StatusNotFound, "attachment not found")
+		common.WriteError(w, http.StatusNotFound, "lampiran tidak ditemukan")
 		return
 	}
 	defer f.Close()
@@ -542,7 +542,7 @@ func (h *Handler) ArchiveThread(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.Store.ArchiveChatThread(r.Context(), thread.ID); err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to archive thread")
+		common.WriteError(w, http.StatusInternalServerError, "gagal mengarsipkan percakapan")
 		return
 	}
 	common.WriteJSONMsg(w, http.StatusOK, map[string]string{"id": thread.ID}, nil, "Percakapan diarsipkan; pesan tetap tersimpan")
@@ -568,12 +568,12 @@ func (h *Handler) ReportMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	msg, err := h.Store.GetChatMessage(r.Context(), param(r, "id"), schoolID)
 	if errors.Is(err, store.ErrNotFound) {
-		common.WriteError(w, http.StatusNotFound, "message not found")
+		common.WriteError(w, http.StatusNotFound, "pesan tidak ditemukan")
 		return
 	}
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to load message")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat pesan")
 		return
 	}
 	if _, ok := h.authorizeThread(w, r, claims, msg.ThreadID); !ok {
@@ -586,7 +586,7 @@ func (h *Handler) ReportMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to report message")
+		common.WriteError(w, http.StatusInternalServerError, "gagal melaporkan pesan")
 		return
 	}
 	h.notifyModerators(r.Context(), schoolID, report)
@@ -640,7 +640,7 @@ func (h *Handler) ListReports(w http.ResponseWriter, r *http.Request) {
 	list, total, err := h.Store.ListChatReports(r.Context(), schoolID, r.URL.Query().Get("status"), page, perPage)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to list reports")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat laporan")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, common.NewPageMeta(page, perPage, total))
@@ -665,19 +665,19 @@ func (h *Handler) GetReport(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to load report")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat laporan")
 		return
 	}
 	thread, err := h.Store.GetChatThread(r.Context(), report.ThreadID, schoolID)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to load thread")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat percakapan")
 		return
 	}
 	messages, _, err := h.Store.ListChatMessages(r.Context(), thread.ID, 1, 200)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to load messages")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat pesan")
 		return
 	}
 	h.audit(r.Context(), client.AuditEvent{
@@ -715,7 +715,7 @@ func (h *Handler) ReviewReport(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to review report")
+		common.WriteError(w, http.StatusInternalServerError, "gagal meninjau laporan")
 		return
 	}
 	h.audit(r.Context(), client.AuditEvent{
@@ -736,7 +736,7 @@ func (h *Handler) GetChatSettings(w http.ResponseWriter, r *http.Request) {
 	s, err := h.Store.GetChatSettings(r.Context(), schoolID)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to load chat settings")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat pengaturan chat")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, s, nil)
@@ -782,7 +782,7 @@ func (h *Handler) PutChatSettings(w http.ResponseWriter, r *http.Request) {
 	before, _ := h.Store.GetChatSettings(r.Context(), schoolID)
 	if err := h.Store.UpsertChatSettings(r.Context(), p); err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to save chat settings")
+		common.WriteError(w, http.StatusInternalServerError, "gagal menyimpan pengaturan chat")
 		return
 	}
 	h.audit(r.Context(), client.AuditEvent{

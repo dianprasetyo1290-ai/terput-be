@@ -426,24 +426,3 @@ func (r Relations) StudentTeachers(ctx context.Context, schoolID, studentID stri
 func (r Relations) UsersByRole(ctx context.Context, schoolID, role string) ([]UserProfile, error) {
 	return r.Identity.UsersByRole(ctx, schoolID, role)
 }
-
-// ExceptionReport is core's POST /internal/exceptions contract (FR-80-001).
-type ExceptionReport struct {
-	SchoolID       string         `json:"school_id"`
-	SourceService  string         `json:"source_service"`
-	Kind           string         `json:"kind"`
-	Severity       string         `json:"severity"`
-	CorrelationID  string         `json:"correlation_id"`
-	ErrorMessage   string         `json:"error_message"`
-	PayloadSummary map[string]any `json:"payload_summary"`
-	RetryURL       *string        `json:"retry_url,omitempty"`
-	MaxAttempts    int            `json:"max_attempts"`
-	IdempotencyKey string         `json:"idempotency_key"`
-}
-
-// ReportException puts a failed delivery in core's integration exception
-// queue (BUG-113). The same idempotency key bumps the existing item.
-func (c *Client) ReportException(ctx context.Context, e ExceptionReport) error {
-	e.SourceService = "notification"
-	return c.PostJSON(ctx, "/internal/exceptions", e.IdempotencyKey, e, nil)
-}

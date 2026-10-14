@@ -118,3 +118,28 @@ func TestMakerOnlyApprover(t *testing.T) {
 		}
 	})
 }
+
+// ApprovalTimeline on source pages: GET /approvals/by-source returns the
+// request (with steps) to people who may see it, 404 to others.
+func TestGetApprovalBySource(t *testing.T) {
+	fs, router, h, _ := newWiredServer(t, map[string][]string{
+		testUserFinance:  {"finance_manager"},
+		testUserFinance2: {"finance_manager"},
+	})
+	seedEscalatingFlow(t, fs, nil)
+	res := createRefund(router, testUserFinance, "src-1")
+	h.Wait()
+	path := "/approvals/by-source?source_service=billing&source_id=src-1"
+	rec := do(router, http.MethodGet, path, token(t, testUserFinance, testSchoolA, "finance_manager"), nil, "")
+	var resp struct{ Data model.ApprovalRequest }
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if rec.Code != http.StatusOK || resp.Data.ID != res.id || len(resp.Data.Steps) == 0 {
+		t.Fatalf("maker: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(router, http.MethodGet, path, token(t, testUserKepala, testSchoolA, "guru"), nil, ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("unrelated user: want 404, got %d", rec.Code)
+	}
+	if rec := do(router, http.MethodGet, "/approvals/by-source?source_service=billing", token(t, testUserFinance, testSchoolA, "finance_manager"), nil, ""); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing source_id: want 400, got %d", rec.Code)
+	}
+}

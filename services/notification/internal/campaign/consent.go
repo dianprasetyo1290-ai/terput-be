@@ -111,16 +111,16 @@ func (h *Handler) InternalSetConsent(w http.ResponseWriter, r *http.Request) {
 	validSubject := strings.HasPrefix(p.SubjectKey, "user:") || strings.HasPrefix(p.SubjectKey, "phone:") || strings.HasPrefix(p.SubjectKey, "email:")
 	switch {
 	case p.SchoolID == "" || !validSubject:
-		common.WriteError(w, http.StatusBadRequest, "school_id and subject_key (user:|phone:|email:) are required")
+		common.WriteError(w, http.StatusBadRequest, "school_id dan subject_key (user:|phone:|email:) wajib diisi")
 		return
 	case !ValidChannels[p.Channel]:
-		common.WriteError(w, http.StatusBadRequest, "unknown channel")
+		common.WriteError(w, http.StatusBadRequest, "kanal tidak dikenal")
 		return
 	case p.Status != ConsentOptedIn && p.Status != ConsentOptedOut:
-		common.WriteError(w, http.StatusBadRequest, "status must be opted_in|opted_out")
+		common.WriteError(w, http.StatusBadRequest, "status harus opted_in atau opted_out")
 		return
 	case !ValidConsentSources[p.Source] || p.Source == SourcePreferences:
-		common.WriteError(w, http.StatusBadRequest, "unknown source")
+		common.WriteError(w, http.StatusBadRequest, "sumber tidak dikenal")
 		return
 	}
 	if err := h.Svc.Store.SetConsent(r.Context(), p.SchoolID, p.SubjectKey, p.UserID, p.Channel, p.Status, p.Source, ""); err != nil {
@@ -154,12 +154,12 @@ func (h *Handler) PublicUnsubscribe(w http.ResponseWriter, r *http.Request) {
 // statuses and stop keywords. 404 while WhatsApp is disabled.
 func (h *Handler) WhatsAppWebhook(w http.ResponseWriter, r *http.Request) {
 	if h.Svc.WhatsApp == nil {
-		common.WriteError(w, http.StatusNotFound, "not found")
+		common.WriteError(w, http.StatusNotFound, "data tidak ditemukan")
 		return
 	}
 	events, err := h.Svc.WhatsApp.ParseStatusWebhook(r)
 	if err != nil {
-		common.WriteError(w, http.StatusUnauthorized, "invalid webhook")
+		common.WriteError(w, http.StatusUnauthorized, "webhook tidak valid")
 		return
 	}
 	applied := 0

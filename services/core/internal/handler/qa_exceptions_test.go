@@ -164,3 +164,42 @@ func TestCriticalException_NotifiesResponsibleRoles(t *testing.T) {
 		t.Fatalf("assignee not notified: %v", got)
 	}
 }
+
+// BUG-113: reports in the dialects other services already send (ops
+// dead-letter: severity "warning", no payload_summary; studentlife: "low";
+// correlation only in the header) land in the queue instead of a 422.
+func TestInternalException_AcceptsReporterDialects(t *testing.T) {
+	fs, router, _ := newTestServer(t)
+	cases := []struct {
+		name, body, header, wantSeverity, wantCorr string
+	}{
+		{"ops dead letter", `{"school_id":"` + testSchoolA + `","source_service":"ops","kind":"dead_letter","severity":"warning",
+			"correlation_id":"vendor-1","error_message":"sinkron vendor gagal","max_attempts":5,"idempotency_key":"vendor_sync_ex:1"}`, "", model.SeverityNormal, "vendor-1"},
+		{"studentlife low", `{"school_id":"` + testSchoolA + `","source_service":"studentlife","kind":"callback","severity":"low",
+			"correlation_id":"o-1","error_message":"stok obat gagal","payload_summary":{},"idempotency_key":"uks:1"}`, "", model.SeverityNormal, "o-1"},
+		{"import, correlation dari header", `{"school_id":"` + testSchoolA + `","source_service":"identity","kind":"import","severity":"high",
+			"error_message":"baris 4: NISN ganda","payload_summary":{"job":"j1"},"idempotency_key":"import:j1"}`, "corr-hdr-1", model.SeverityCritical, "corr-hdr-1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hdr := map[string]string{"X-Internal-Key": testInternalKey}
+			if tc.header != "" {
+				hdr["X-Correlation-ID"] = tc.header
+			}
+			rec := do(router, http.MethodPost, "/internal/exceptions", "", hdr, tc.body)
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("want 201, got %d %s", rec.Code, rec.Body.String())
+			}
+			var resp struct{ Data model.IntegrationException }
+			_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+			got, _ := fs.GetExceptionByID(context.Background(), testSchoolA, resp.Data.ID)
+			if got.Severity != tc.wantSeverity || got.CorrelationID != tc.wantCorr {
+				t.Fatalf("stored severity/correlation = %s/%s", got.Severity, got.CorrelationID)
+			}
+		})
+	}
+	bad := `{"school_id":"` + testSchoolA + `","source_service":"ops","kind":"dead_letter","severity":"panic","correlation_id":"x","error_message":"e","idempotency_key":"k"}`
+	if rec := do(router, http.MethodPost, "/internal/exceptions", "", map[string]string{"X-Internal-Key": testInternalKey}, bad); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("unknown severity: want 422, got %d", rec.Code)
+	}
+}

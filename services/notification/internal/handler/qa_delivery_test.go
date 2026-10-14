@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"skci/notification/internal/client"
+	"skci/notification/internal/common"
 	"skci/notification/internal/model"
 	"skci/notification/internal/provider"
 	"skci/notification/internal/store"
@@ -35,10 +36,10 @@ func (p *recordingProvider) Send(_ context.Context, m provider.Message) (string,
 
 type exceptionSink struct {
 	mu   sync.Mutex
-	reps []client.ExceptionReport
+	reps []common.ExceptionReport
 }
 
-func (s *exceptionSink) report(_ context.Context, e client.ExceptionReport) error {
+func (s *exceptionSink) report(_ context.Context, e common.ExceptionReport) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reps = append(s.reps, e)

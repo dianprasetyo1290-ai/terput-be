@@ -52,11 +52,11 @@ func (h *Handler) InternalSendNotification(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if strings.TrimSpace(payload.UserID) == "" {
-		common.WriteError(w, http.StatusBadRequest, "user_id is required")
+		common.WriteError(w, http.StatusBadRequest, "user_id wajib diisi")
 		return
 	}
 	if strings.TrimSpace(payload.Type) == "" {
-		common.WriteError(w, http.StatusBadRequest, "type is required")
+		common.WriteError(w, http.StatusBadRequest, "type wajib diisi")
 		return
 	}
 
@@ -73,7 +73,7 @@ func (h *Handler) InternalSendNotification(w http.ResponseWriter, r *http.Reques
 		title, body = t, b
 	}
 	if strings.TrimSpace(title) == "" {
-		common.WriteError(w, http.StatusBadRequest, "title (or template_key with a subject) is required")
+		common.WriteError(w, http.StatusBadRequest, "judul (atau template_key dengan subjek) wajib diisi")
 		return
 	}
 
@@ -94,7 +94,7 @@ func (h *Handler) InternalSendNotification(w http.ResponseWriter, r *http.Reques
 	})
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to create notification")
+		common.WriteError(w, http.StatusInternalServerError, "gagal membuat notifikasi")
 		return
 	}
 
@@ -117,7 +117,7 @@ func (h *Handler) InternalSendNotification(w http.ResponseWriter, r *http.Reques
 	deliveries, err := h.Store.ListDeliveries(r.Context(), n.ID)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to load deliveries")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat status pengiriman")
 		return
 	}
 	n.Deliveries = deliveries
@@ -138,19 +138,19 @@ func (h *Handler) InternalRetryDelivery(w http.ResponseWriter, r *http.Request) 
 	}
 	n, err := h.Store.GetNotificationByID(r.Context(), param(r, "id"), schoolID)
 	if errors.Is(err, store.ErrNotFound) {
-		common.WriteError(w, http.StatusNotFound, "notification not found")
+		common.WriteError(w, http.StatusNotFound, "notifikasi tidak ditemukan")
 		return
 	}
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to load notification")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat notifikasi")
 		return
 	}
 
 	deliveries, err := h.Store.ListDeliveries(r.Context(), n.ID)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to load deliveries")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat status pengiriman")
 		return
 	}
 	retried := 0
@@ -165,7 +165,7 @@ func (h *Handler) InternalRetryDelivery(w http.ResponseWriter, r *http.Request) 
 	deliveries, err = h.Store.ListDeliveries(r.Context(), n.ID)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to reload deliveries")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat ulang status pengiriman")
 		return
 	}
 	n.Deliveries = deliveries

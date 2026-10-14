@@ -338,8 +338,6 @@ func (in internalExceptionRequest) validate() string {
 		return fmt.Sprintf("severity %q tidak dikenal", in.Severity)
 	case strings.TrimSpace(in.CorrelationID) == "" || strings.TrimSpace(in.ErrorMessage) == "":
 		return "correlation_id dan error_message wajib diisi"
-	case in.PayloadSummary == nil:
-		return "payload_summary wajib diisi"
 	case in.MaxAttempts <= 0:
 		return "max_attempts wajib lebih dari 0"
 	case strings.TrimSpace(in.IdempotencyKey) == "":
@@ -359,6 +357,18 @@ func (h *Handler) InternalCreateException(w http.ResponseWriter, r *http.Request
 	}
 	if in.MaxAttempts <= 0 {
 		in.MaxAttempts = 3
+	}
+	// BUG-113: accept the dialects existing reporters already send instead of
+	// dropping their failures with 422 (severity aliases, no payload summary,
+	// correlation id carried only in the X-Correlation-ID header).
+	if sev, ok := model.NormalizeSeverity(in.Severity); ok {
+		in.Severity = sev
+	}
+	if in.PayloadSummary == nil {
+		in.PayloadSummary = map[string]any{}
+	}
+	if strings.TrimSpace(in.CorrelationID) == "" {
+		in.CorrelationID = common.CorrelationID(r.Context())
 	}
 	if msg := in.validate(); msg != "" {
 		common.WriteError(w, http.StatusUnprocessableEntity, msg)

@@ -156,3 +156,33 @@ func TestSMTPProvider_RefusesPlaintextAuth(t *testing.T) {
 		t.Fatal("auth without STARTTLS must fail")
 	}
 }
+
+func TestDescribeChannel(t *testing.T) {
+	tests := []struct {
+		name, provider, wantState, wantProvider string
+		wantConfigured                          bool
+	}{
+		{"empty", "", ChannelStateUnconfigured, "unconfigured", false},
+		{"unconfigured", "unconfigured", ChannelStateUnconfigured, "unconfigured", false},
+		{"disabled", "disabled", ChannelStateUnconfigured, "unconfigured", false},
+		{"dev noop", "dev-noop", ChannelStateSimulated, "dev-noop", false},
+		{"noop", "noop", ChannelStateSimulated, "noop", false},
+		{"smtp", "smtp", ChannelStateActive, "smtp", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DescribeChannel("email", tt.provider)
+			if got.State != tt.wantState || got.Provider != tt.wantProvider || got.Configured != tt.wantConfigured || got.Channel != "email" {
+				t.Errorf("DescribeChannel(%q) = %+v", tt.provider, got)
+			}
+		})
+	}
+}
+
+func TestChannelRouter_For(t *testing.T) {
+	smtp := NoopProvider{}
+	r := ChannelRouter{Default: UnconfiguredProvider{}, Email: smtp}
+	if r.For("email") != Provider(smtp) || r.For("whatsapp") != Provider(UnconfiguredProvider{}) {
+		t.Fatal("For must pick the channel provider, else the default")
+	}
+}

@@ -112,9 +112,12 @@ type Handler struct {
 
 	// BUG-113: failed external deliveries go to core's exception queue.
 	// InternalURL (this service as core reaches it) builds the retry_url.
-	Exceptions  func(ctx context.Context, e client.ExceptionReport) error
+	Exceptions  func(ctx context.Context, e common.ExceptionReport) error
 	InternalURL string
-	wg          sync.WaitGroup
+	// CampaignWhatsApp is the marketing WA adapter (nil = disabled); only
+	// its configured state is reported.
+	CampaignWhatsApp provider.TemplateSender
+	wg               sync.WaitGroup
 }
 
 // New wires the handler.
@@ -141,7 +144,7 @@ func effectiveSchoolID(r *http.Request, claims *common.Claims) string {
 // resolved (e.g. a superadmin calling a tenant route without ?school_id=).
 func requireSchool(w http.ResponseWriter, schoolID string) bool {
 	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school scope is required (superadmin must pass ?school_id=)")
+		common.WriteError(w, http.StatusBadRequest, "sekolah wajib dipilih (superadmin harus memilih sekolah aktif)")
 		return false
 	}
 	return true

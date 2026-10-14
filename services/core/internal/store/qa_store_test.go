@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -121,4 +122,65 @@ func TestPGStore_AuditFilters(t *testing.T) {
 	if total != 1 {
 		t.Fatalf("by correlation+service: %d", total)
 	}
+	_, total, err = st.ListAudit(ctx, AuditFilter{SchoolID: &school, CorrelationID: corr, Actions: []string{"posted", "data_exported"}}, 1, 50)
+	if err != nil || total != 2 {
+		t.Fatalf("by action list: total=%d err=%v", total, err)
+	}
+	facets, err := st.AuditFacets(ctx, &school, time.Now().Add(-time.Hour))
+	if err != nil || !slices.Contains(facets.Services, "accounting") || !slices.Contains(facets.Actions, "posted") {
+		t.Fatalf("facets = %+v err=%v", facets, err)
+	}
+	if _, err := st.AuditFacets(ctx, nil, time.Now().Add(-time.Hour)); err != nil {
+		t.Fatalf("facets all tenants: %v", err)
+	}
+}
+
+// BUG-165: defaults are seeded by migration 0005; a school replaces one once.
+func TestPGStore_HelpArticles(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+	school := "22222222-2222-2222-2222-" + time.Now().Format("150405000000")[:12]
+	rows, err := st.ListHelpArticles(ctx, school, model.HelpAudienceParent)
+	if err != nil || len(rows) < 3 {
+		t.Fatalf("seeded defaults: %d err=%v", len(rows), err)
+	}
+	def := rows[0]
+	repl := model.HelpArticle{SchoolID: &school, Audience: def.Audience, Kind: def.Kind, Title: "Versi sekolah",
+		Body: "isi", Published: true, ReplacesID: &def.ID}
+	created, err := st.CreateHelpArticle(ctx, repl, "")
+	if err != nil {
+		t.Fatalf("create replacement: %v", err)
+	}
+	if _, err := st.CreateHelpArticle(ctx, repl, ""); !errors.Is(err, ErrConflict) {
+		t.Fatalf("second replacement: want ErrConflict, got %v", err)
+	}
+	if _, err := st.UpdateHelpArticle(ctx, school, def.ID, repl, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("updating a default must be refused, got %v", err)
+	}
+	upd := *created
+	upd.Title = "Versi sekolah 2"
+	if got, err := st.UpdateHelpArticle(ctx, school, created.ID, upd, ""); err != nil || got.Title != "Versi sekolah 2" {
+		t.Fatalf("update: %v", err)
+	}
+	merged := model.MergeHelpArticles(mustList(t, st, school), true)
+	for _, a := range merged {
+		if a.ID == def.ID {
+			t.Fatal("replaced default still visible")
+		}
+	}
+	if err := st.DeleteHelpArticle(ctx, school, created.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if err := st.DeleteHelpArticle(ctx, school, def.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleting a default must be refused, got %v", err)
+	}
+}
+
+func mustList(t *testing.T, st *PGStore, school string) []model.HelpArticle {
+	t.Helper()
+	rows, err := st.ListHelpArticles(context.Background(), school, model.HelpAudienceParent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rows
 }

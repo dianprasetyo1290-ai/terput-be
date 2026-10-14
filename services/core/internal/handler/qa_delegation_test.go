@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 )
@@ -54,5 +55,35 @@ func TestCreateDelegation_IdentityUnavailable(t *testing.T) {
 		`{"to_user_id":"`+testUserKepala2+`","valid_from":"2026-10-15T00:00:00Z","valid_to":"2026-10-20T00:00:00Z"}`)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("want 503, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+// Round 2 button audit: only the delegator can revoke; others get a readable
+// 404 instead of a 500.
+func TestRevokeDelegation_OnlyDelegator(t *testing.T) {
+	_, router, _, _ := newWiredServer(t, map[string][]string{
+		testUserKepala:  {"kepala_sekolah"},
+		testUserKepala2: {"kepala_sekolah"},
+	})
+	owner := token(t, testUserKepala, testSchoolA, "kepala_sekolah")
+	rec := do(router, http.MethodPost, "/approval-delegations", owner, nil,
+		`{"to_user_id":"`+testUserKepala2+`","valid_from":"2026-10-15T00:00:00Z","valid_to":"2026-10-20T00:00:00Z"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	var created struct{ Data struct{ ID string } }
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil || created.Data.ID == "" {
+		t.Fatalf("no id: %s", rec.Body.String())
+	}
+	id := created.Data.ID
+	other := token(t, testUserKepala2, testSchoolA, "kepala_sekolah")
+	if rec := do(router, http.MethodDelete, "/approval-delegations/"+id, other, nil, ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("delegate revoking: want 404, got %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(router, http.MethodDelete, "/approval-delegations/"+id, owner, nil, ""); rec.Code != http.StatusOK {
+		t.Fatalf("owner revoking: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(router, http.MethodDelete, "/approval-delegations/"+id, owner, nil, ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("second revoke: want 404, got %d", rec.Code)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"skci/notification/internal/client"
+	"skci/notification/internal/common"
 	"skci/notification/internal/model"
 	"skci/notification/internal/provider"
 	"skci/notification/internal/store"
@@ -31,12 +32,15 @@ type InAppCreator interface {
 // Service holds campaign dispatch logic shared by the HTTP handler
 // (send-now) and the periodic job.
 type Service struct {
-	Store             *Store
-	InApp             InAppCreator
-	Source            SegmentSource
-	Email             provider.Provider
-	WhatsApp          provider.TemplateSender // nil = WhatsApp disabled
-	Audit             func(ctx context.Context, e client.AuditEvent)
+	Store    *Store
+	InApp    InAppCreator
+	Source   SegmentSource
+	Email    provider.Provider
+	WhatsApp provider.TemplateSender // nil = WhatsApp disabled
+	Audit    func(ctx context.Context, e client.AuditEvent)
+	// Exceptions reports failed campaigns/recipients to core's exception
+	// queue as dead letters (BUG-113). nil = not reported.
+	Exceptions        func(ctx context.Context, e common.ExceptionReport) error
 	UnsubscribeSecret string
 	PublicURL         string
 	Loc               *time.Location
@@ -124,37 +128,60 @@ func (s *Service) Dispatch(ctx context.Context, campaignID string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.send(ctx, c); err != nil {
+	failed, err := s.send(ctx, c)
+	if err != nil {
 		_ = s.Store.FinishCampaign(ctx, c.ID, StatusFailed, err.Error())
+		s.reportDeadLetter(ctx, c, "kampanye "+c.Name+" gagal dikirim: "+err.Error(), failed)
 		return err
+	}
+	if failed > 0 {
+		s.reportDeadLetter(ctx, c, fmt.Sprintf("kampanye %s: %d penerima gagal dikirim", c.Name, failed), failed)
 	}
 	return s.Store.FinishCampaign(ctx, c.ID, StatusSent, "")
 }
 
-func (s *Service) send(ctx context.Context, c *Campaign) error {
+// reportDeadLetter puts one queue item per campaign in core's exception queue;
+// a re-run of the same campaign bumps that item instead of adding another.
+func (s *Service) reportDeadLetter(ctx context.Context, c *Campaign, msg string, failedRecipients int) {
+	if s.Exceptions == nil {
+		return
+	}
+	rep := common.ExceptionReport{
+		SchoolID: c.SchoolID, Kind: common.ExceptionKindDeadLetter, Severity: common.ExceptionSeverityNormal,
+		ErrorMessage: msg, MaxAttempts: 1,
+		IdempotencyKey: common.DeadLetterKey("notification", "campaign", c.ID),
+		PayloadSummary: map[string]any{"campaign_id": c.ID, "channel": c.Channel, "failed_recipients": failedRecipients},
+	}
+	if err := s.Exceptions(ctx, rep); err != nil {
+		log.Printf("report campaign dead letter %s: %v", c.ID, err)
+	}
+}
+
+// send delivers the campaign and returns how many recipients failed.
+func (s *Service) send(ctx context.Context, c *Campaign) (failed int, err error) {
 	seg, err := s.Store.GetSegment(ctx, c.SchoolID, c.SegmentID)
 	if err != nil {
-		return fmt.Errorf("segment: %w", err)
+		return 0, fmt.Errorf("segment: %w", err)
 	}
 	var tpl *WATemplate
 	if c.Channel == ChannelWhatsApp {
 		if s.WhatsApp == nil {
-			return provider.ErrWhatsAppDisabled
+			return 0, provider.ErrWhatsAppDisabled
 		}
 		if c.TemplateID == nil {
-			return errors.New("template is required for whatsapp")
+			return 0, errors.New("template is required for whatsapp")
 		}
 		if tpl, err = s.Store.GetTemplate(ctx, c.SchoolID, *c.TemplateID); err != nil {
-			return fmt.Errorf("template: %w", err)
+			return 0, fmt.Errorf("template: %w", err)
 		}
 		if _, err := RenderTemplate(Template{ApprovalStatus: tpl.ApprovalStatus, Variables: tpl.Variables, Body: tpl.BodyPreview}, c.TemplateVars); err != nil {
-			return err
+			return 0, err
 		}
 	}
 
 	send, excluded, err := s.plan(ctx, c.SchoolID, *seg, c.Channel)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	kind := ContactKind(c.Channel)
 	rows := make([]RecipientInput, 0, len(send)+len(excluded))
@@ -167,12 +194,12 @@ func (s *Service) send(ctx context.Context, c *Campaign) error {
 		rows = append(rows, recipientRow(e.Candidate, kind, RecipientExcluded, e.Reason))
 	}
 	if err := s.Store.InsertRecipients(ctx, c.SchoolID, c.ID, rows); err != nil {
-		return err
+		return 0, err
 	}
 
 	queued, err := s.Store.QueuedRecipients(ctx, c.ID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	for _, r := range queued {
 		cand, ok := bySubject[r.SubjectKey]
@@ -180,18 +207,20 @@ func (s *Service) send(ctx context.Context, c *Campaign) error {
 			// Re-run after the segment changed: the member left or lost
 			// consent since the row was queued. Never send without a fresh check.
 			_ = s.Store.MarkRecipientFailed(ctx, r.ID, "penerima tidak lagi memenuhi syarat segmen/persetujuan")
+			failed++
 			continue
 		}
 		msgID, notifID, err := s.deliver(ctx, c, tpl, cand)
 		if err != nil {
 			_ = s.Store.MarkRecipientFailed(ctx, r.ID, err.Error())
+			failed++
 			continue
 		}
 		if err := s.Store.MarkRecipientSent(ctx, r.ID, msgID, notifID); err != nil {
-			return err
+			return failed, err
 		}
 	}
-	return nil
+	return failed, nil
 }
 
 func recipientRow(c Candidate, kind, status, reason string) RecipientInput {

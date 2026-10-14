@@ -151,7 +151,8 @@ func (h *Handler) RevokeDelegation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.Store.RevokeDelegation(r.Context(), schoolID, id, claims.GetUserID()); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal mencabut delegasi: "+err.Error())
+		// Only the delegator can revoke an active delegation; anything else is 404.
+		writeStoreErr(w, err, "delegasi aktif milik Anda tidak ditemukan")
 		return
 	}
 

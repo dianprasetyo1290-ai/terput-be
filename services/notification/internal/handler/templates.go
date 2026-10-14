@@ -38,7 +38,7 @@ func (h *Handler) InternalListTemplates(w http.ResponseWriter, r *http.Request) 
 	items, err := h.Store.ListNotificationTemplates(r.Context(), schoolID, r.URL.Query().Get("key"))
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to list templates")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat template")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, items, nil)
@@ -52,12 +52,12 @@ func (h *Handler) InternalGetTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	t, err := h.Store.GetNotificationTemplate(r.Context(), param(r, "id"), schoolID)
 	if errors.Is(err, store.ErrNotFound) {
-		common.WriteError(w, http.StatusNotFound, "template not found")
+		common.WriteError(w, http.StatusNotFound, "template tidak ditemukan")
 		return
 	}
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to load template")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat template")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, t, nil)
@@ -86,12 +86,12 @@ func (h *Handler) InternalCreateTemplate(w http.ResponseWriter, r *http.Request)
 		Body:     payload.Body,
 	})
 	if errors.Is(err, store.ErrConflict) {
-		common.WriteError(w, http.StatusConflict, "template version already exists for this key and channel")
+		common.WriteError(w, http.StatusConflict, "versi template untuk key dan kanal ini sudah ada")
 		return
 	}
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to create template")
+		common.WriteError(w, http.StatusInternalServerError, "gagal membuat template")
 		return
 	}
 	common.WriteJSONMsg(w, http.StatusCreated, t, nil, "Template notifikasi dibuat")
@@ -108,7 +108,7 @@ func (h *Handler) InternalUpdateTemplate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if strings.TrimSpace(payload.Body) == "" {
-		common.WriteError(w, http.StatusBadRequest, "body is required")
+		common.WriteError(w, http.StatusBadRequest, "isi pesan wajib diisi")
 		return
 	}
 	t, err := h.Store.UpdateNotificationTemplate(r.Context(), param(r, "id"), schoolID, store.TemplateInput{
@@ -116,12 +116,12 @@ func (h *Handler) InternalUpdateTemplate(w http.ResponseWriter, r *http.Request)
 		Body:    payload.Body,
 	})
 	if errors.Is(err, store.ErrNotFound) {
-		common.WriteError(w, http.StatusNotFound, "template not found")
+		common.WriteError(w, http.StatusNotFound, "template tidak ditemukan")
 		return
 	}
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to update template")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memperbarui template")
 		return
 	}
 	common.WriteJSONMsg(w, http.StatusOK, t, nil, "Template notifikasi diperbarui")
@@ -135,12 +135,12 @@ func (h *Handler) InternalDeleteTemplate(w http.ResponseWriter, r *http.Request)
 	}
 	err := h.Store.DeleteNotificationTemplate(r.Context(), param(r, "id"), schoolID)
 	if errors.Is(err, store.ErrNotFound) {
-		common.WriteError(w, http.StatusNotFound, "template not found")
+		common.WriteError(w, http.StatusNotFound, "template tidak ditemukan")
 		return
 	}
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to delete template")
+		common.WriteError(w, http.StatusInternalServerError, "gagal menghapus template")
 		return
 	}
 	common.WriteJSONMsg(w, http.StatusOK, map[string]string{"id": param(r, "id")}, nil, "Template notifikasi dihapus")
@@ -148,19 +148,19 @@ func (h *Handler) InternalDeleteTemplate(w http.ResponseWriter, r *http.Request)
 
 func validTemplatePayload(w http.ResponseWriter, p templatePayload) bool {
 	if strings.TrimSpace(p.Key) == "" {
-		common.WriteError(w, http.StatusBadRequest, "key is required")
+		common.WriteError(w, http.StatusBadRequest, "key wajib diisi")
 		return false
 	}
 	if p.Channel == "" {
-		common.WriteError(w, http.StatusBadRequest, "channel is required")
+		common.WriteError(w, http.StatusBadRequest, "kanal wajib diisi")
 		return false
 	}
 	if !model.ValidChannels[p.Channel] {
-		common.WriteError(w, http.StatusBadRequest, "unknown channel "+p.Channel+" (want in_app|email|whatsapp)")
+		common.WriteError(w, http.StatusBadRequest, "kanal tidak dikenal: "+p.Channel+" (pilih in_app, email, atau whatsapp)")
 		return false
 	}
 	if strings.TrimSpace(p.Body) == "" {
-		common.WriteError(w, http.StatusBadRequest, "body is required")
+		common.WriteError(w, http.StatusBadRequest, "isi pesan wajib diisi")
 		return false
 	}
 	return true

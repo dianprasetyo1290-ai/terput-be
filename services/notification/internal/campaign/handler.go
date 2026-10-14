@@ -75,7 +75,7 @@ func requireRoles(roles ...string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			c := common.FromCtx(r)
 			if c == nil {
-				common.WriteError(w, http.StatusUnauthorized, "missing token")
+				common.WriteError(w, http.StatusUnauthorized, "sesi tidak valid, silakan masuk kembali")
 				return
 			}
 			if !allowed[c.ActiveRole] {
@@ -97,7 +97,7 @@ func schoolOf(w http.ResponseWriter, r *http.Request) (string, *common.Claims, b
 		}
 	}
 	if school == "" {
-		common.WriteError(w, http.StatusBadRequest, "school scope is required (superadmin must pass ?school_id=)")
+		common.WriteError(w, http.StatusBadRequest, "sekolah wajib dipilih (superadmin harus memilih sekolah aktif)")
 		return "", nil, false
 	}
 	return school, c, true
