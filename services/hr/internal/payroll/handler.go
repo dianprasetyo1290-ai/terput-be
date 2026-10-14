@@ -30,7 +30,7 @@ func (h *Handler) ListComponents(w http.ResponseWriter, r *http.Request) {
 	schoolID := common.EffectiveSchoolID(r)
 	list, err := h.Store.ListComponents(r.Context(), schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat komponen gaji: "+err.Error())
+		common.InternalError(w, "gagal memuat komponen gaji", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -47,7 +47,7 @@ func (h *Handler) CreateComponent(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.Store.CreateComponent(r.Context(), c)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal membuat komponen: "+err.Error())
+		common.InternalError(w, "gagal membuat komponen", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, created, nil)
@@ -87,7 +87,7 @@ func (h *Handler) SubmitComponentApproval(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := h.Store.SubmitComponentApproval(r.Context(), schoolID, id, appID); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal mengajukan approval: "+err.Error())
+		common.InternalError(w, "gagal mengajukan approval", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{
@@ -110,7 +110,7 @@ func (h *Handler) ListInputs(w http.ResponseWriter, r *http.Request) {
 
 	list, err := h.Store.ListInputs(r.Context(), schoolID, period)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat input payroll: "+err.Error())
+		common.InternalError(w, "gagal memuat input payroll", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -144,7 +144,7 @@ func (h *Handler) SaveInput(w http.ResponseWriter, r *http.Request) {
 		r.Context(), schoolID, body.Period, body.EmployeeID, body.ComponentID, body.AmountIDR, body.Reason,
 	)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal menyimpan input payroll: "+err.Error())
+		common.InternalError(w, "gagal menyimpan input payroll", err)
 		return
 	}
 
@@ -198,7 +198,7 @@ func (h *Handler) PullAttendance(w http.ResponseWriter, r *http.Request) {
 
 	count, err := h.Store.PullAttendance(r.Context(), schoolID, period)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal menarik data absensi: "+err.Error())
+		common.InternalError(w, "gagal menarik data absensi", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]any{
@@ -215,7 +215,7 @@ func (h *Handler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	schoolID := common.EffectiveSchoolID(r)
 	list, err := h.Store.ListRuns(r.Context(), schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat payroll run: "+err.Error())
+		common.InternalError(w, "gagal memuat payroll run", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -244,7 +244,7 @@ func (h *Handler) CreateRun(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.Store.CreateRun(r.Context(), run)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal membuat payroll run: "+err.Error())
+		common.InternalError(w, "gagal membuat payroll run", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, created, nil)
@@ -255,7 +255,7 @@ func (h *Handler) CalculateRun(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	if err := h.Store.CalculateRun(r.Context(), schoolID, id); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal menghitung payroll: "+err.Error())
+		common.InternalError(w, "gagal menghitung payroll", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "payroll berhasil dihitung"}, nil)
@@ -306,7 +306,7 @@ func (h *Handler) SubmitRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.Store.SubmitRun(r.Context(), schoolID, id, appID); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal mengajukan approval: "+err.Error())
+		common.InternalError(w, "gagal mengajukan approval", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "payroll diajukan untuk persetujuan", "approval_id": appID}, nil)
@@ -327,7 +327,7 @@ func (h *Handler) FinalizeRun(w http.ResponseWriter, r *http.Request) {
 			common.WriteError(w, http.StatusConflict, "payroll belum disetujui di Approval Center")
 			return
 		}
-		common.WriteError(w, http.StatusInternalServerError, "gagal finalisasi payroll: "+err.Error())
+		common.InternalError(w, "gagal finalisasi payroll", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "payroll telah difinalisasi, slip dibuat dan jurnal dibukukan"}, nil)
@@ -344,7 +344,7 @@ func (h *Handler) ListLines(w http.ResponseWriter, r *http.Request) {
 
 	lines, err := h.Store.ListLines(r.Context(), schoolID, id, flagged)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat rincian payroll: "+err.Error())
+		common.InternalError(w, "gagal memuat rincian payroll", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, lines, nil)
@@ -360,7 +360,7 @@ func (h *Handler) MyPayslips(w http.ResponseWriter, r *http.Request) {
 
 	list, err := h.Store.ListPayslips(r.Context(), schoolID, claims.UserID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat slip gaji: "+err.Error())
+		common.InternalError(w, "gagal memuat slip gaji", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -372,7 +372,7 @@ func (h *Handler) ListPayslips(w http.ResponseWriter, r *http.Request) {
 
 	list, err := h.Store.ListPayslips(r.Context(), schoolID, empID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat slip gaji: "+err.Error())
+		common.InternalError(w, "gagal memuat slip gaji", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -382,7 +382,7 @@ func (h *Handler) ListJournals(w http.ResponseWriter, r *http.Request) {
 	schoolID := common.EffectiveSchoolID(r)
 	list, err := h.Store.ListJournals(r.Context(), schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat jurnal payroll: "+err.Error())
+		common.InternalError(w, "gagal memuat jurnal payroll", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)

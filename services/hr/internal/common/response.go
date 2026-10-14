@@ -5,6 +5,7 @@ package common
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 )
 
@@ -54,4 +55,13 @@ func WriteEnvelope(w http.ResponseWriter, status int, env Envelope) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(env)
+}
+
+// InternalError logs the underlying error server-side (and reports it to
+// Sentry) but writes only the user-facing msg. Raw driver/SQL messages such
+// as `invalid input syntax for type uuid` must never reach the client.
+func InternalError(w http.ResponseWriter, msg string, err error) {
+	log.Printf("internal error: %s: %v", msg, err)
+	CaptureError(err)
+	WriteError(w, http.StatusInternalServerError, msg)
 }

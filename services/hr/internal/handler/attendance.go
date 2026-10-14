@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -44,7 +45,7 @@ func (a *App) CreateWorkSchedule(w http.ResponseWriter, r *http.Request) {
 	ws.SchoolID = schoolID
 
 	if err := store.CreateWorkSchedule(r.Context(), a.DB, &ws); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal membuat jadwal kerja: "+err.Error())
+		common.InternalError(w, "Gagal membuat jadwal kerja", err)
 		return
 	}
 	common.JSON(w, http.StatusCreated, ws)
@@ -116,7 +117,7 @@ func (a *App) CreateHoliday(w http.ResponseWriter, r *http.Request) {
 	h.SchoolID = schoolID
 
 	if err := store.CreateHoliday(r.Context(), a.DB, &h); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan hari libur: "+err.Error())
+		common.InternalError(w, "Gagal menyimpan hari libur", err)
 		return
 	}
 	common.JSON(w, http.StatusCreated, h)
@@ -349,7 +350,8 @@ func (a *App) ImportAttendance(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := store.RecordAttendance(r.Context(), a.DB, &att); err != nil {
-			rowErrors = append(rowErrors, RowError{Row: rowNum, Error: err.Error()})
+			log.Printf("attendance import row %d: %v", rowNum, err)
+			rowErrors = append(rowErrors, RowError{Row: rowNum, Error: "gagal menyimpan baris presensi"})
 			continue
 		}
 		successCount++
@@ -398,7 +400,7 @@ func (a *App) SendAttendancePeriod(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := store.SendAttendancePeriod(r.Context(), a.DB, schoolID, period, actorID); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal mengunci periode presensi: "+err.Error())
+		common.InternalError(w, "Gagal mengunci periode presensi", err)
 		return
 	}
 

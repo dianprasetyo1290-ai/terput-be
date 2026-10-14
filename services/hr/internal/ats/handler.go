@@ -29,7 +29,7 @@ func (h *Handler) ListRequisitions(w http.ResponseWriter, r *http.Request) {
 	schoolID := common.EffectiveSchoolID(r)
 	list, err := h.Store.ListRequisitions(r.Context(), schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat permintaan rekrutmen: "+err.Error())
+		common.InternalError(w, "gagal memuat permintaan rekrutmen", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -53,7 +53,7 @@ func (h *Handler) CreateRequisition(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.Store.CreateRequisition(r.Context(), req)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal membuat permintaan rekrutmen: "+err.Error())
+		common.InternalError(w, "gagal membuat permintaan rekrutmen", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, created, nil)
@@ -102,7 +102,7 @@ func (h *Handler) SubmitRequisition(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.Store.SubmitRequisition(r.Context(), schoolID, id, appID); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal mengajukan persetujuan: "+err.Error())
+		common.InternalError(w, "gagal mengajukan persetujuan", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "permintaan diajukan untuk persetujuan", "approval_id": appID}, nil)
@@ -118,7 +118,7 @@ func (h *Handler) ListPostings(w http.ResponseWriter, r *http.Request) {
 
 	list, err := h.Store.ListPostings(r.Context(), schoolID, status)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat lowongan kerja: "+err.Error())
+		common.InternalError(w, "gagal memuat lowongan kerja", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -147,7 +147,7 @@ func (h *Handler) CreatePosting(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.Store.CreatePosting(r.Context(), p)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal membuat lowongan: "+err.Error())
+		common.InternalError(w, "gagal membuat lowongan", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, created, nil)
@@ -158,7 +158,7 @@ func (h *Handler) PublishPosting(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	if err := h.Store.PublishPosting(r.Context(), schoolID, id); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal mempublikasikan lowongan: "+err.Error())
+		common.InternalError(w, "gagal mempublikasikan lowongan", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "lowongan berhasil dipublikasikan"}, nil)
@@ -173,7 +173,7 @@ func (h *Handler) ClosePosting(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&body)
 
 	if err := h.Store.ClosePosting(r.Context(), schoolID, id, body.Reason); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal menutup lowongan: "+err.Error())
+		common.InternalError(w, "gagal menutup lowongan", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "lowongan berhasil ditutup"}, nil)
@@ -238,7 +238,7 @@ func (h *Handler) PublicApply(w http.ResponseWriter, r *http.Request) {
 			common.WriteError(w, http.StatusConflict, "Anda sudah melamar pada lowongan ini sebelumnya")
 			return
 		}
-		common.WriteError(w, http.StatusInternalServerError, "gagal mengirimkan lamaran: "+err.Error())
+		common.InternalError(w, "gagal mengirimkan lamaran", err)
 		return
 	}
 
@@ -273,7 +273,7 @@ func (h *Handler) ListApplications(w http.ResponseWriter, r *http.Request) {
 
 	list, err := h.Store.ListApplications(r.Context(), schoolID, postingID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat data pelamar: "+err.Error())
+		common.InternalError(w, "gagal memuat data pelamar", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -299,7 +299,7 @@ func (h *Handler) MoveApplication(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.Store.MoveApplication(r.Context(), schoolID, appID, body.ToStageID, body.Note, actorID); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memindahkan tahap: "+err.Error())
+		common.InternalError(w, "gagal memindahkan tahap", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "tahap berhasil diperbarui"}, nil)
@@ -309,7 +309,7 @@ func (h *Handler) ListStages(w http.ResponseWriter, r *http.Request) {
 	schoolID := common.EffectiveSchoolID(r)
 	stages, err := h.Store.EnsureDefaultStages(r.Context(), schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat tahapan seleksi: "+err.Error())
+		common.InternalError(w, "gagal memuat tahapan seleksi", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, stages, nil)
@@ -323,7 +323,7 @@ func (h *Handler) ListScorecardTemplates(w http.ResponseWriter, r *http.Request)
 	schoolID := common.EffectiveSchoolID(r)
 	list, err := h.Store.ListScorecardTemplates(r.Context(), schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat template asesmen: "+err.Error())
+		common.InternalError(w, "gagal memuat template asesmen", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -340,7 +340,7 @@ func (h *Handler) CreateScorecardTemplate(w http.ResponseWriter, r *http.Request
 
 	created, err := h.Store.CreateScorecardTemplate(r.Context(), t)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal membuat template asesmen: "+err.Error())
+		common.InternalError(w, "gagal membuat template asesmen", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, created, nil)
@@ -360,7 +360,7 @@ func (h *Handler) ScheduleInterview(w http.ResponseWriter, r *http.Request) {
 
 	inv, err := h.Store.ScheduleInterview(r.Context(), body.Interview, body.PanelUserIDs)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal menjadwalkan wawancara: "+err.Error())
+		common.InternalError(w, "gagal menjadwalkan wawancara", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, inv, nil)
@@ -376,7 +376,7 @@ func (h *Handler) MyInterviews(w http.ResponseWriter, r *http.Request) {
 
 	list, err := h.Store.MyInterviews(r.Context(), schoolID, claims.UserID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat jadwal wawancara: "+err.Error())
+		common.InternalError(w, "gagal memuat jadwal wawancara", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -391,7 +391,7 @@ func (h *Handler) ListOffers(w http.ResponseWriter, r *http.Request) {
 	appID := r.URL.Query().Get("application_id")
 	list, err := h.Store.ListOffers(r.Context(), schoolID, appID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat daftar penawaran: "+err.Error())
+		common.InternalError(w, "gagal memuat daftar penawaran", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)
@@ -408,7 +408,7 @@ func (h *Handler) CreateOffer(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.Store.CreateOffer(r.Context(), o)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal membuat penawaran: "+err.Error())
+		common.InternalError(w, "gagal membuat penawaran", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, created, nil)
@@ -463,7 +463,7 @@ func (h *Handler) SubmitOffer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.Store.SubmitOffer(r.Context(), schoolID, id, appID); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal mengajukan approval penawaran: "+err.Error())
+		common.InternalError(w, "gagal mengajukan approval penawaran", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{
@@ -487,7 +487,7 @@ func (h *Handler) SendOffer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.Store.SendOffer(r.Context(), schoolID, id); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal mengirim penawaran: "+err.Error())
+		common.InternalError(w, "gagal mengirim penawaran", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{
@@ -498,7 +498,7 @@ func (h *Handler) SendOffer(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) PublicAcceptOffer(w http.ResponseWriter, r *http.Request) {
 	offerID := chi.URLParam(r, "offerId")
 	if err := h.Store.AcceptOffer(r.Context(), offerID); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal menerima penawaran: "+err.Error())
+		common.InternalError(w, "gagal menerima penawaran", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "penawaran kerja berhasil diterima"}, nil)
@@ -512,7 +512,7 @@ func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	schoolID := common.EffectiveSchoolID(r)
 	st, err := h.Store.GetSettings(r.Context(), schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat pengaturan: "+err.Error())
+		common.InternalError(w, "gagal memuat pengaturan", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, st, nil)
@@ -522,7 +522,7 @@ func (h *Handler) ListTalentPool(w http.ResponseWriter, r *http.Request) {
 	schoolID := common.EffectiveSchoolID(r)
 	list, err := h.Store.ListTalentPool(r.Context(), schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "gagal memuat talent pool: "+err.Error())
+		common.InternalError(w, "gagal memuat talent pool", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, list, nil)

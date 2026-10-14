@@ -11,14 +11,17 @@ import (
 
 // Roles issued by identity-service that the hr service cares about.
 const (
-	RoleSuperadmin    = "superadmin"
-	RoleAdmin         = "admin"
-	RoleHRAdmin       = "hr_admin"
-	RoleHRManager     = "hr_manager"
-	RolePayroll       = "payroll_officer"
-	RoleKepalaSekolah = "kepala_sekolah"
-	RolePegawai       = "pegawai"
-	RoleGuru          = "guru"
+	RoleSuperadmin     = "superadmin"
+	RoleAdmin          = "admin"
+	RoleHRAdmin        = "hr_admin"
+	RoleHRManager      = "hr_manager"
+	RolePayroll        = "payroll_officer"
+	RoleKepalaSekolah  = "kepala_sekolah"
+	RolePegawai        = "pegawai"
+	RoleGuru           = "guru"
+	RoleRecruiter      = "recruiter"
+	RoleTrainingAdmin  = "training_admin"
+	RoleFinanceManager = "finance_manager"
 )
 
 // Role groups used by the router (spec §7).
@@ -124,13 +127,45 @@ func GetClaims(ctx context.Context) *Claims {
 	return c
 }
 
-// EffectiveSchoolID is the JWT school_id. hr never honours a ?school_id=
-// override unless superadmin.
+// EffectiveSchoolID is the JWT school_id. Superadmin tokens carry no
+// school_id (cross-school role), so for superadmin only the ?school_id=
+// query parameter selects the school. The result is "" unless it is a
+// well-formed UUID, so callers never pass an empty/garbage id to Postgres.
 func EffectiveSchoolID(r *http.Request) string {
-	if c := FromCtx(r); c != nil {
-		return c.SchoolID
+	c := FromCtx(r)
+	if c == nil {
+		return ""
 	}
-	return ""
+	id := c.SchoolID
+	if c.ActiveRole == RoleSuperadmin || c.Role == RoleSuperadmin {
+		if q := strings.TrimSpace(r.URL.Query().Get("school_id")); q != "" {
+			id = q
+		}
+	}
+	if !IsUUID(id) {
+		return ""
+	}
+	return id
+}
+
+// IsUUID reports whether s is a canonical 8-4-4-4-12 hex UUID.
+func IsUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, ch := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if ch != '-' {
+				return false
+			}
+		default:
+			if !(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'f' || ch >= 'A' && ch <= 'F') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // RequireRole admits the request only when the active role is one of roles.

@@ -38,7 +38,7 @@ func (a *App) CreateDepartment(w http.ResponseWriter, r *http.Request) {
 	dept.SchoolID = schoolID
 
 	if err := store.CreateDepartment(r.Context(), a.DB, &dept); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal membuat departemen: "+err.Error())
+		common.InternalError(w, "Gagal membuat departemen", err)
 		return
 	}
 	common.JSON(w, http.StatusCreated, dept)
@@ -102,7 +102,7 @@ func (a *App) CreatePosition(w http.ResponseWriter, r *http.Request) {
 	pos.SchoolID = schoolID
 
 	if err := store.CreatePosition(r.Context(), a.DB, &pos); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal membuat jabatan: "+err.Error())
+		common.InternalError(w, "Gagal membuat jabatan", err)
 		return
 	}
 	common.JSON(w, http.StatusCreated, pos)
@@ -183,7 +183,7 @@ func (a *App) CreateHeadcountPlan(w http.ResponseWriter, r *http.Request) {
 	hp.SchoolID = schoolID
 
 	if err := store.CreateHeadcountPlan(r.Context(), a.DB, &hp); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan rencana formasi: "+err.Error())
+		common.InternalError(w, "Gagal menyimpan rencana formasi", err)
 		return
 	}
 	common.JSON(w, http.StatusCreated, hp)

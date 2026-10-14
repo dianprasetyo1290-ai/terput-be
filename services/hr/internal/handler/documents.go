@@ -42,7 +42,7 @@ func (a *App) CreateDocumentType(w http.ResponseWriter, r *http.Request) {
 	dt.SchoolID = schoolID
 
 	if err := store.CreateDocumentType(r.Context(), a.DB, &dt); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal membuat jenis dokumen: "+err.Error())
+		common.InternalError(w, "Gagal membuat jenis dokumen", err)
 		return
 	}
 	common.JSON(w, http.StatusCreated, dt)
@@ -105,7 +105,7 @@ func (a *App) CreateRequiredDocument(w http.ResponseWriter, r *http.Request) {
 	rd.SchoolID = schoolID
 
 	if err := store.CreateRequiredDocument(r.Context(), a.DB, &rd); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan dokumen wajib: "+err.Error())
+		common.InternalError(w, "Gagal menyimpan dokumen wajib", err)
 		return
 	}
 	common.JSON(w, http.StatusCreated, rd)
@@ -367,7 +367,7 @@ func (a *App) CreateDocumentRequest(w http.ResponseWriter, r *http.Request) {
 	dr.SchoolID = schoolID
 
 	if err := store.CreateDocumentRequest(r.Context(), a.DB, &dr); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal membuat permintaan dokumen: "+err.Error())
+		common.InternalError(w, "Gagal membuat permintaan dokumen", err)
 		return
 	}
 	common.JSON(w, http.StatusCreated, dr)

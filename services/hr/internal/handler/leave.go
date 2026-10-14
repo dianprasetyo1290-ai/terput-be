@@ -39,7 +39,7 @@ func (a *App) CreateLeaveType(w http.ResponseWriter, r *http.Request) {
 	lt.SchoolID = schoolID
 
 	if err := store.CreateLeaveType(r.Context(), a.DB, &lt); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal membuat jenis cuti: "+err.Error())
+		common.InternalError(w, "Gagal membuat jenis cuti", err)
 		return
 	}
 	common.JSON(w, http.StatusCreated, lt)
@@ -127,7 +127,7 @@ func (a *App) AdminApproveLeaveRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Apply approval decision (BR-HR-04, AC-86-02)
 	if err := store.ApplyLeaveDecisionTx(r.Context(), a.DB, id, "approved"); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal menyetujui permohonan cuti: "+err.Error())
+		common.InternalError(w, "Gagal menyetujui permohonan cuti", err)
 		return
 	}
 
@@ -146,7 +146,7 @@ func (a *App) AdminRejectLeaveRequest(w http.ResponseWriter, r *http.Request) {
 	claims := common.GetClaims(r.Context())
 
 	if err := store.ApplyLeaveDecisionTx(r.Context(), a.DB, id, "rejected"); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal menolak permohonan cuti: "+err.Error())
+		common.InternalError(w, "Gagal menolak permohonan cuti", err)
 		return
 	}
 
@@ -188,7 +188,7 @@ func (a *App) AdminApproveOvertimeRequest(w http.ResponseWriter, r *http.Request
 	claims := common.GetClaims(r.Context())
 
 	if err := store.ApplyOvertimeDecisionTx(r.Context(), a.DB, id, "approved"); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal menyetujui lembur: "+err.Error())
+		common.InternalError(w, "Gagal menyetujui lembur", err)
 		return
 	}
 
@@ -207,7 +207,7 @@ func (a *App) AdminRejectOvertimeRequest(w http.ResponseWriter, r *http.Request)
 	claims := common.GetClaims(r.Context())
 
 	if err := store.ApplyOvertimeDecisionTx(r.Context(), a.DB, id, "rejected"); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal menolak lembur: "+err.Error())
+		common.InternalError(w, "Gagal menolak lembur", err)
 		return
 	}
 

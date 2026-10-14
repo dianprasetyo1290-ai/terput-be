@@ -44,7 +44,7 @@ func (a *App) InternalDapodikPTK(w http.ResponseWriter, r *http.Request) {
 	`
 	rows, err := a.DB.QueryContext(r.Context(), query, schoolID)
 	if err != nil {
-		common.Error(w, http.StatusInternalServerError, "failed to query employees: "+err.Error())
+		common.InternalError(w, "failed to query employees", err)
 		return
 	}
 	defer rows.Close()
@@ -134,7 +134,7 @@ func (a *App) InternalDapodikPTKMatch(w http.ResponseWriter, r *http.Request) {
 	`
 	rows, err := a.DB.QueryContext(r.Context(), query, req.SchoolID, bidxList)
 	if err != nil {
-		common.Error(w, http.StatusInternalServerError, "failed to query matched employees: "+err.Error())
+		common.InternalError(w, "failed to query matched employees", err)
 		return
 	}
 	defer rows.Close()

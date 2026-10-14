@@ -227,7 +227,7 @@ func (a *App) CreateEmployee(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := store.CreateEmployee(r.Context(), a.DB, &emp, &initialAssignment); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal menyimpan data pegawai: "+err.Error())
+		common.InternalError(w, "Gagal menyimpan data pegawai", err)
 		return
 	}
 
@@ -414,7 +414,7 @@ func (a *App) CreateAssignment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := store.CreateAssignment(r.Context(), a.DB, &assign); err != nil {
-		common.Error(w, http.StatusInternalServerError, "Gagal membuat penugasan/jabatan baru: "+err.Error())
+		common.InternalError(w, "Gagal membuat penugasan/jabatan baru", err)
 		return
 	}
 

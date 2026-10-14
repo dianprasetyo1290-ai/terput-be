@@ -32,18 +32,10 @@ func (a *App) requireHrisFeature(next http.Handler) http.Handler {
 	})
 }
 
-// effectiveSchoolID returns the school ID from claims or query param if superadmin.
+// effectiveSchoolID returns the school ID from claims, or ?school_id= for
+// superadmin; "" when missing or not a UUID.
 func (a *App) effectiveSchoolID(r *http.Request) string {
-	claims := common.GetClaims(r.Context())
-	if claims == nil {
-		return ""
-	}
-	if claims.Role == common.RoleSuperadmin {
-		if q := r.URL.Query().Get("school_id"); q != "" {
-			return q
-		}
-	}
-	return claims.SchoolID
+	return common.EffectiveSchoolID(r)
 }
 
 // parsePagination extracts page and per_page from query params with safe defaults.

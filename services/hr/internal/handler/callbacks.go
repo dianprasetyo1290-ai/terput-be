@@ -72,7 +72,7 @@ func (a *App) InternalApprovalCallback(w http.ResponseWriter, r *http.Request) {
 		common.Error(w, http.StatusNotFound, "Data sumber approval tidak ditemukan")
 		return
 	case err != nil:
-		common.Error(w, http.StatusInternalServerError, "Gagal memproses hasil persetujuan: "+err.Error())
+		common.InternalError(w, "Gagal memproses hasil persetujuan", err)
 		return
 	}
 
