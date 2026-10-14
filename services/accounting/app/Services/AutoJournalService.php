@@ -134,6 +134,23 @@ class AutoJournalService
             }
         }
 
+        // QA BUG-143: header (induk) accounts only sum their children.
+        $parentAccounts = [];
+        foreach ($lines as $line) {
+            $accCode = (string) ($line['acc_code'] ?? '');
+            if ($accCode !== '' && ! in_array($accCode, $invalidAccounts, true) && \App\Support\Accounts::isParent($accCode)) {
+                $parentAccounts[] = $accCode;
+            }
+        }
+        if (! empty($parentAccounts)) {
+            return $this->fail($source, $reference, $transDate, $totalDebit, [
+                'status' => 422,
+                'trans_no' => '',
+                'message' => 'Akun induk tidak dapat diposting (posting hanya ke akun detail): '.implode(', ', array_unique($parentAccounts)),
+                'invalid_accounts' => array_values(array_unique($parentAccounts)),
+            ]);
+        }
+
         if (! empty($invalidAccounts)) {
             return $this->fail($source, $reference, $transDate, $totalDebit, [
                 'status' => 422,

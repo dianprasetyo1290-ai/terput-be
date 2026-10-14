@@ -69,15 +69,32 @@ trait WithTransactionDetail
 
     public function saveDetail()
     {
+        $this->authorize('editjournal_transaction');
+        // QA BUG-145/146/143: every line needs an account that can take a
+        // manual posting (active, detail, not a control account), a unit, a
+        // description and exactly one positive amount.
+        foreach (['debetnew', 'creditnew'] as $k) {
+            if (($this->jtdetail[$k] ?? '') === '' || ($this->jtdetail[$k] ?? null) === null) {
+                $this->jtdetail[$k] = 0;
+            }
+        }
         $valid = [
             'jtdetail.acc_code' => 'required',
-            'jtdetail.div_code' => 'required',
-            'jtdetail.debetnew' => 'numeric',
-            'jtdetail.creditnew' => 'numeric',
+            'jtdetail.div_code' => 'required|exists:mst_division,div_code',
+            'jtdetail.description' => 'required|string|max:250',
+            'jtdetail.debetnew' => 'numeric|min:0',
+            'jtdetail.creditnew' => 'numeric|min:0',
         ];
+        $this->validate($valid, [
+            'jtdetail.description.required' => 'Keterangan baris jurnal wajib diisi.',
+            'jtdetail.debetnew.min' => 'Nilai debit tidak boleh negatif.',
+            'jtdetail.creditnew.min' => 'Nilai kredit tidak boleh negatif.',
+            'jtdetail.debetnew.numeric' => 'Nilai debit harus berupa angka.',
+            'jtdetail.creditnew.numeric' => 'Nilai kredit harus berupa angka.',
+        ]);
 
-        $debet = (float) ($this->jtdetail['debetnew'] ?? 0);
-        $credit = (float) ($this->jtdetail['creditnew'] ?? 0);
+        $debet = (float) $this->jtdetail['debetnew'];
+        $credit = (float) $this->jtdetail['creditnew'];
 
         if ($debet == 0 && $credit == 0) {
             $this->addError('jtdetail.debetnew', 'Debet atau Credit harus diisi');
@@ -89,10 +106,14 @@ trait WithTransactionDetail
             return;
         }
 
-        if (!empty($this->jteditdetail)) {
-            // Bug 3 fix: validate on edit too
-            $this->validate($valid);
+        if ($problems = \App\Support\Accounts::postingProblems((string) $this->jtdetail['acc_code'])) {
+            foreach ($problems as $m) {
+                $this->addError('jtdetail.acc_code', $m);
+            }
+            return;
+        }
 
+        if (!empty($this->jteditdetail)) {
             $td = TransDetail::where('id', $this->idEdit)->first();
             $td->update([
                 'acc_code' => $this->jtdetail['acc_code'],
@@ -112,10 +133,15 @@ trait WithTransactionDetail
             ]);
             $this->jteditdetail = [];
         } else {
-            $this->validate($valid);
             // Bug 7 fix: single query with eager load, reuse $al->trans_account
             $al = TransactionType::with('akunLawan')->where('trans_code', $this->jtdetail['trans_code'])->first();
             if ($al->akunLawan) {
+                if ($problems = \App\Support\Accounts::postingProblems((string) $al->trans_account)) {
+                    foreach ($problems as $m) {
+                        $this->addError('jtdetail.acc_code', "Akun lawan tipe transaksi: $m");
+                    }
+                    return;
+                }
                 // Bug 6 fix: use extracted helper to avoid DRY violation
                 $this->createTransDetail();
 
@@ -158,6 +184,7 @@ trait WithTransactionDetail
 
     public function deleteD()
     {
+        $this->authorize('editjournal_transaction');
         $user = TransDetail::where('id', $this->countDetail)->first();
         $user->delete();
         $this->jtdetail = [];

@@ -28,7 +28,7 @@
                             <label class="col-form-label col-lg-2">{{ __('Account Code') }}</label>
                             <div class="col-lg-10">
                                 <input type="text" class="form-control @error('coa.acc_code') is-invalid  @enderror"
-                                    wire:model="coa.acc_code">
+                                    wire:model="coa.acc_code" @if ($idNya) readonly @endif>
                                 @error('coa.acc_code')
                                     <div class="invalid-feedback">
                                         {{ $errors->first('coa.acc_code') }}
@@ -120,6 +120,49 @@
                             </div>
                         </div>
 
+                        <div class="form-group row">
+                            <label class="col-form-label col-lg-2">{{ __('Akun Induk') }}</label>
+                            <div class="col-lg-10">
+                                <select class="form-control @error('coa.parent_code') is-invalid @enderror" wire:model="coa.parent_code">
+                                    <option value="">{{ __('— Tanpa induk (akun tingkat atas) —') }}</option>
+                                    @foreach ($parents as $p)
+                                        <option value="{{ $p->acc_code }}">{{ $p->acc_code }} — {{ $p->acc_name }}</option>
+                                    @endforeach
+                                </select>
+                                <small class="form-text text-muted">Induk harus satu kelompok. Akun yang menjadi induk tidak dapat menerima posting jurnal.</small>
+                                @error('coa.parent_code')
+                                    @foreach ($errors->get('coa.parent_code') as $m)<div class="text-danger small">{{ $m }}</div>@endforeach
+                                @enderror
+                            </div>
+                        </div>
+
+                        <div class="form-group row">
+                            <label class="col-form-label col-lg-2">{{ __('Saldo Normal') }}</label>
+                            <div class="col-lg-10">
+                                <select class="form-control @error('coa.normal_balance') is-invalid @enderror" wire:model="coa.normal_balance">
+                                    <option value="">{{ __('Pilih') }}</option>
+                                    <option value="D">Debit</option>
+                                    <option value="K">Kredit</option>
+                                </select>
+                                @error('coa.normal_balance')
+                                    @foreach ($errors->get('coa.normal_balance') as $m)<div class="text-danger small">{{ $m }}</div>@endforeach
+                                @enderror
+                            </div>
+                        </div>
+
+                        <div class="form-group row">
+                            <label class="col-form-label col-lg-2">{{ __('Status & Tanda') }}</label>
+                            <div class="col-lg-10">
+                                <label class="mr-3"><input type="checkbox" wire:model="coa.is_active"> Aktif</label>
+                                <label class="mr-3"><input type="checkbox" wire:model="coa.is_cash"> Kas/Bank</label>
+                                <label class="mr-3"><input type="checkbox" wire:model="coa.is_interunit"> Antar-unit (dieliminasi saat konsolidasi)</label>
+                                <label class="mr-3"><input type="checkbox" wire:model="coa.is_control"> Akun kontrol (hanya posting otomatis)</label>
+                                @foreach (['coa.is_active', 'coa.is_control', 'coa.acc_group'] as $f)
+                                    @foreach ($errors->get($f) as $m)<div class="text-danger small">{{ $m }}</div>@endforeach
+                                @endforeach
+                            </div>
+                        </div>
+
                     </fieldset>
 
                     <div class="py-2 bg-white card-footer d-flex justify-content-between align-items-center">
@@ -162,6 +205,16 @@
                     </div>
                 @endcan
             @endif
+            @if (!empty($blockers))
+                <div class="alert alert-danger mt-3">
+                    <strong>Akun {{ $blockedCode }} tidak dapat dinonaktifkan:</strong>
+                    <ul class="mb-0">
+                        @foreach ($blockers as $b)
+                            <li>{{ $b }}</li>
+                        @endforeach
+                    </ul>
+                </div>
+            @endif
             <div class="card-header">
                 <div class="col-12 row">
                     <div class="search-set">
@@ -191,6 +244,14 @@
                                     added</a>
                             </div>
                         </div>
+                    </div>
+                    <label class="col-form-label col-md-1">Status</label>
+                    <div class="col-md-2">
+                        <select class="form-control form-control-sm" wire:model.live="status">
+                            <option value="all">Semua</option>
+                            <option value="active">Aktif</option>
+                            <option value="inactive">Nonaktif</option>
+                        </select>
                     </div>
                     <label class="col-form-label col-md-1">Show</label>
                     <div class="col-md-2">
@@ -224,6 +285,9 @@
                             <th>Account Group</th>
                             <th>Sub Account Group</th>
                             <th>Currency</th>
+                            <th>Induk</th>
+                            <th>Saldo Normal</th>
+                            <th>Status</th>
                             @canany(['editchart_of_account', 'deletechart_of_account'])
                                 <th class="text-center">Actions</th>
                             @endcanany
@@ -238,6 +302,14 @@
                                 <td>{{ $row->group->name ?? '-' }}</td>
                                 <td>{{ $row->sub_group->name ?? '-' }}</td>
                                 <td>{{ $row->acc_currency }}</td>
+                                <td>{{ $row->parent_code ?? '-' }}</td>
+                                <td>{{ ['D' => 'Debit', 'K' => 'Kredit'][$row->normal_balance] ?? '-' }}</td>
+                                <td>
+                                    <span class="badge {{ $row->is_active ? 'badge-success' : 'badge-secondary' }}">{{ $row->is_active ? 'Aktif' : 'Nonaktif' }}</span>
+                                    @if (isset($parentCodes[$row->acc_code]))<span class="badge badge-info">Induk</span>@endif
+                                    @if ($row->is_control)<span class="badge badge-warning">Kontrol</span>@endif
+                                    @if ($row->is_interunit)<span class="badge badge-light">Antar-unit</span>@endif
+                                </td>
                                 @canany(['editchart_of_account', 'deletechart_of_account'])
                                     <td class="text-center">
                                         <div class="list-icons">
@@ -253,9 +325,19 @@
                                                                 class="icon-pencil"></i> Edit</a>
                                                     @endcan
                                                     @can('deletechart_of_account')
-                                                        <a href="#" class="dropdown-item"
-                                                            wire:click='confirmDelete("{{ Crypt::encrypt($row->acc_code) }}")'><i
-                                                                class="icon-trash"></i> Delete</a>
+                                                        @if ($row->is_active)
+                                                            <a href="#" class="dropdown-item"
+                                                                wire:click.prevent='deactivate("{{ Crypt::encrypt($row->acc_code) }}")'
+                                                                wire:confirm="Nonaktifkan akun {{ $row->acc_code }}? Akun nonaktif tidak dapat menerima jurnal baru."><i
+                                                                    class="icon-blocked"></i> Nonaktifkan</a>
+                                                        @endif
+                                                    @endcan
+                                                    @can('editchart_of_account')
+                                                        @if (! $row->is_active)
+                                                            <a href="#" class="dropdown-item"
+                                                                wire:click.prevent='activate("{{ Crypt::encrypt($row->acc_code) }}")'><i
+                                                                    class="icon-checkmark"></i> Aktifkan</a>
+                                                        @endif
                                                     @endcan
                                                 </div>
                                             </div>
