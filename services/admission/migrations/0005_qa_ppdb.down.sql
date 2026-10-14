@@ -1,0 +1,31 @@
+ALTER TABLE component_scores DROP CONSTRAINT IF EXISTS component_scores_score_check;
+DROP TABLE IF EXISTS selection_schedules;
+DROP TABLE IF EXISTS guardian_notifications;
+DROP TABLE IF EXISTS approval_callback_events;
+DROP TABLE IF EXISTS waitlist_promotions;
+ALTER TABLE ppdb_announcements DROP COLUMN IF EXISTS cancelled_reason, DROP COLUMN IF EXISTS selection_approval_id;
+ALTER TABLE decisions DROP CONSTRAINT IF EXISTS decisions_status_check;
+ALTER TABLE decisions DROP COLUMN IF EXISTS published_at, DROP COLUMN IF EXISTS selection_approval_id, DROP COLUMN IF EXISTS status;
+DROP TABLE IF EXISTS selection_approvals;
+DROP TABLE IF EXISTS application_document_versions;
+ALTER TABLE document_reviews DROP COLUMN IF EXISTS reviewer_name, DROP COLUMN IF EXISTS document_version;
+ALTER TABLE application_documents DROP COLUMN IF EXISTS lock_version, DROP COLUMN IF EXISTS version;
+DROP TABLE IF EXISTS registration_counters;
+ALTER TABLE admission_periods DROP COLUMN IF EXISTS max_payment_grace_days;
+ALTER TABLE admission_waves DROP COLUMN IF EXISTS waitlist_reregistration_days;
+ALTER TABLE applications DROP COLUMN IF EXISTS refund_due_idr, DROP COLUMN IF EXISTS drop_reason,
+    DROP COLUMN IF EXISTS dropped_at, DROP COLUMN IF EXISTS reregistration_due_at;
+ALTER TABLE admission_periods DROP CONSTRAINT IF EXISTS admission_periods_discount_mode_check;
+ALTER TABLE discount_rules DROP CONSTRAINT IF EXISTS discount_rules_quota_check;
+ALTER TABLE discount_rules DROP CONSTRAINT IF EXISTS discount_rules_applies_to_check;
+DROP INDEX IF EXISTS manual_discounts_approval_idx;
+ALTER TABLE manual_discounts DROP CONSTRAINT IF EXISTS manual_discounts_status_check;
+ALTER TABLE manual_discounts DROP COLUMN IF EXISTS approval_id, DROP COLUMN IF EXISTS stage;
+ALTER TABLE voucher_redemptions DROP COLUMN IF EXISTS stage;
+DROP INDEX IF EXISTS discount_applications_source_idx;
+ALTER TABLE discount_applications DROP COLUMN IF EXISTS origin;
+ALTER TABLE payment_allocations DROP COLUMN IF EXISTS charge_installment_id;
+DROP TABLE IF EXISTS charge_installments;
+DROP INDEX IF EXISTS charges_app_stage_idx;
+ALTER TABLE charges DROP COLUMN IF EXISTS due_at, DROP COLUMN IF EXISTS min_payment_idr,
+    DROP COLUMN IF EXISTS cancel_reason, DROP COLUMN IF EXISTS cancelled_at;
