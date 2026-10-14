@@ -440,3 +440,43 @@ func TestInternalStudentRefund_Idempotency(t *testing.T) {
 		t.Errorf("expected idempotent refund ID %q, got %q", res1.Data.ID, res2.Data.ID)
 	}
 }
+
+// Menu 78 financial summary reports the BR-FIN-04 deposit balance instead of
+// a constant 0 (FR-78-002, AC-78-03).
+func TestInternalStudentFinancialSummary_Deposit(t *testing.T) {
+	db := setupBillingTestDB(t)
+	defer db.Close()
+
+	schoolID, studentID, otherID := newUUID(), newUUID(), newUUID()
+	if _, err := db.Exec(`INSERT INTO student_deposits (school_id, student_user_id, balance_idr) VALUES ($1, $2, 200000)`,
+		schoolID, studentID); err != nil {
+		t.Fatalf("seed deposit: %v", err)
+	}
+	app := New(db, config.Config{}, stubIdentity{}, nil)
+	srv := httptest.NewServer(newBillingTestRouter(app))
+	defer srv.Close()
+
+	get := func(id string) int64 {
+		resp, err := http.Get(srv.URL + "/internal/students/" + id + "/financial-summary?school_id=" + schoolID)
+		if err != nil {
+			t.Fatalf("summary: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("summary status %d", resp.StatusCode)
+		}
+		var env struct {
+			Data struct {
+				DepositIDR int64 `json:"deposit_idr"`
+			} `json:"data"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&env)
+		return env.Data.DepositIDR
+	}
+	if got := get(studentID); got != 200000 {
+		t.Fatalf("deposit_idr = %d, want 200000", got)
+	}
+	if got := get(otherID); got != 0 {
+		t.Fatalf("deposit_idr without deposit row = %d, want 0", got)
+	}
+}

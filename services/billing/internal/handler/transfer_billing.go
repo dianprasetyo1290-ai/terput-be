@@ -111,13 +111,24 @@ func (a *App) InternalStudentFinancialSummary(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Overpayment deposit (BR-FIN-04) of this unit. Per BR-STU-03 it stays
+	// recorded at the origin unit on a unit transfer; Menu 78 shows it so
+	// finance can approve a refund (FR-78-002/006, AC-78-03).
+	var depositIDR int64
+	if err := a.DB.QueryRowContext(r.Context(),
+		`SELECT COALESCE(balance_idr,0) FROM student_deposits WHERE school_id=$1 AND student_user_id::text=$2`,
+		schoolID, studentID).Scan(&depositIDR); err != nil && err != sql.ErrNoRows {
+		writeErr(w, err)
+		return
+	}
+
 	common.WriteJSON(w, http.StatusOK, map[string]any{
 		"student_user_id":       studentID,
 		"school_id":             schoolID,
 		"total_outstanding_idr": totalOutstanding,
 		"open_bills_idr":        openBills,
 		"unmatured_bills_idr":   unmaturedBills,
-		"deposit_idr":           0, // No deposit schema in billing yet; returns 0
+		"deposit_idr":           depositIDR,
 		"refundable_idr":        totalRefundable,
 		"bills":                 bills,
 	}, nil)
