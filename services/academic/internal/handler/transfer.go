@@ -187,7 +187,12 @@ func (h *Handler) CreateStudentStatusRequest(w http.ResponseWriter, r *http.Requ
 		snapJSON = json.RawMessage("{}")
 	}
 
-	attachBytes, _ := json.Marshal(in.Attachments)
+	attachList, aErr := normalizeStatusRequestAttachments(in.Attachments, schoolID, claims.UserID)
+	if aErr != nil {
+		common.WriteError(w, http.StatusUnprocessableEntity, aErr.Error())
+		return
+	}
+	attachBytes, _ := json.Marshal(attachList)
 	if len(attachBytes) == 0 {
 		attachBytes = []byte("[]")
 	}
