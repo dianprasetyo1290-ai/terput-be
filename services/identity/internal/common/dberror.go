@@ -63,3 +63,14 @@ func IsUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
+
+// SafeDBMessage is the user-facing text for err when it has to be embedded
+// in a larger message (e.g. a per-row import report). Unexpected errors go
+// to Sentry and are reported as fallback.
+func SafeDBMessage(err error, fallback string) string {
+	status, msg, _ := DBErrorStatus(err, fallback)
+	if status >= 500 {
+		CaptureError(err)
+	}
+	return msg
+}

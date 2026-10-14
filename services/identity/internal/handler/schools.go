@@ -5,13 +5,25 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"skci/identity/internal/common"
 	"skci/identity/internal/model"
+	"skci/identity/internal/rules"
 )
+
+func changed(req, stored *string) bool {
+	if req == nil {
+		return false
+	}
+	if stored == nil {
+		return *req != ""
+	}
+	return *req != *stored
+}
 
 // Data Sekolah (School) CRUD + activate/deactivate/assign-admin/impersonate.
 
@@ -34,15 +46,75 @@ type schoolRequest struct {
 	// GovernmentLogo: SEKOCI V10 item C -- the "Logo Pemerintah" printed at
 	// the rapor letterhead's top-left, beside the school's own logo.
 	GovernmentLogo *string `json:"government_logo"`
+	// QA-IDN (migration 0020). Partial-update semantics: omitted (null)
+	// keeps the stored value, "" clears it -- older forms that do not send
+	// these fields must not wipe them.
+	PrincipalName           *string `json:"principal_name"`
+	PrincipalUserID         *string `json:"principal_user_id"`
+	AccountingEntityCode    *string `json:"accounting_entity_code"`
+	SettlementBankName      *string `json:"settlement_bank_name"`
+	SettlementAccountNumber *string `json:"settlement_account_number"`
+	SettlementAccountName   *string `json:"settlement_account_name"`
+}
+
+func (q *schoolRequest) trim() {
+	for _, p := range []**string{&q.Code, &q.Level, &q.Email, &q.PrincipalName, &q.PrincipalUserID, &q.AccountingEntityCode,
+		&q.SettlementBankName, &q.SettlementAccountNumber, &q.SettlementAccountName} {
+		if *p != nil {
+			v := strings.TrimSpace(**p)
+			*p = &v
+		}
+	}
+	q.Name = strings.TrimSpace(q.Name)
+	if q.Code != nil {
+		v := strings.ToUpper(*q.Code)
+		q.Code = &v
+	}
+}
+
+// validate checks the payload merged with the stored values (update) so a
+// settlement account is judged as a whole.
+func (q schoolRequest) validate(cur *model.School) rules.FieldErrors {
+	pick := func(req, stored *string) *string {
+		if req != nil {
+			return req
+		}
+		return stored
+	}
+	in := rules.School{Name: q.Name, Code: q.Code, Level: q.Level, Email: q.Email,
+		SettlementAccountNumber: q.SettlementAccountNumber, SettlementBankName: q.SettlementBankName, SettlementAccountName: q.SettlementAccountName}
+	if cur != nil {
+		in.SettlementAccountNumber = pick(q.SettlementAccountNumber, cur.SettlementAccountNumber)
+		in.SettlementBankName = pick(q.SettlementBankName, cur.SettlementBankName)
+		in.SettlementAccountName = pick(q.SettlementAccountName, cur.SettlementAccountName)
+	}
+	errs := rules.ValidateSchool(in)
+	if q.PrincipalUserID != nil && *q.PrincipalUserID != "" && !rules.IsUUID(*q.PrincipalUserID) {
+		errs["principal_user_id"] = "Kepala unit tidak valid"
+	}
+	return errs
+}
+
+func writeFieldErrors(w http.ResponseWriter, errs rules.FieldErrors) {
+	msg := "Data belum valid"
+	for _, k := range []string{"name", "code", "level"} {
+		if errs[k] != "" {
+			msg = errs[k]
+			break
+		}
+	}
+	common.WriteValidationError(w, http.StatusBadRequest, msg, errs)
 }
 
 const schoolCols = `id, foundation_id, name, code, level, address, subdistrict, district, city, province,
-	registration_number, year_founded, phone_number, email, website, logo, government_logo, is_active, current_academic_year_id, created_at, updated_at`
+	registration_number, year_founded, phone_number, email, website, logo, government_logo, is_active, current_academic_year_id, created_at, updated_at,
+	principal_name, principal_user_id, accounting_entity_code, settlement_bank_name, settlement_account_number, settlement_account_name`
 
 func scanSchool(row interface{ Scan(...interface{}) error }) (model.School, error) {
 	var s model.School
 	err := row.Scan(&s.ID, &s.FoundationID, &s.Name, &s.Code, &s.Level, &s.Address, &s.Subdistrict, &s.District, &s.City, &s.Province,
-		&s.RegistrationNumber, &s.YearFounded, &s.PhoneNumber, &s.Email, &s.Website, &s.Logo, &s.GovernmentLogo, &s.IsActive, &s.CurrentAcademicYearID, &s.CreatedAt, &s.UpdatedAt)
+		&s.RegistrationNumber, &s.YearFounded, &s.PhoneNumber, &s.Email, &s.Website, &s.Logo, &s.GovernmentLogo, &s.IsActive, &s.CurrentAcademicYearID, &s.CreatedAt, &s.UpdatedAt,
+		&s.PrincipalName, &s.PrincipalUserID, &s.AccountingEntityCode, &s.SettlementBankName, &s.SettlementAccountNumber, &s.SettlementAccountName)
 	return s, err
 }
 
@@ -98,19 +170,27 @@ func (a *App) CreateSchool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req schoolRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-		common.WriteError(w, http.StatusBadRequest, "name is required")
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.WriteError(w, http.StatusBadRequest, "Format data tidak valid")
+		return
+	}
+	req.trim()
+	if errs := req.validate(nil); len(errs) > 0 {
+		writeFieldErrors(w, errs)
 		return
 	}
 	row := a.DB.QueryRow(`INSERT INTO schools (foundation_id, name, code, level, address, subdistrict, district, city, province,
-			registration_number, year_founded, phone_number, email, website, logo, government_logo)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+			registration_number, year_founded, phone_number, email, website, logo, government_logo,
+			principal_name, principal_user_id, accounting_entity_code, settlement_bank_name, settlement_account_number, settlement_account_name)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+			NULLIF($17,''), NULLIF($18,'')::uuid, NULLIF($19,''), NULLIF($20,''), NULLIF($21,''), NULLIF($22,''))
 		RETURNING `+schoolCols,
 		req.FoundationID, req.Name, req.Code, req.Level, req.Address, req.Subdistrict, req.District, req.City, req.Province,
-		req.RegistrationNumber, req.YearFounded, req.PhoneNumber, req.Email, req.Website, req.Logo, req.GovernmentLogo)
+		req.RegistrationNumber, req.YearFounded, req.PhoneNumber, req.Email, req.Website, req.Logo, req.GovernmentLogo,
+		req.PrincipalName, req.PrincipalUserID, req.AccountingEntityCode, req.SettlementBankName, req.SettlementAccountNumber, req.SettlementAccountName)
 	s, err := scanSchool(row)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to create school: "+err.Error())
+		common.WriteDBError(w, err, "failed to create school")
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, s, nil)
@@ -153,22 +233,51 @@ func (a *App) UpdateSchool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req schoolRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-		common.WriteError(w, http.StatusBadRequest, "name is required")
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.WriteError(w, http.StatusBadRequest, "Format data tidak valid")
+		return
+	}
+	req.trim()
+	cur, err := scanSchool(a.DB.QueryRow(`SELECT `+schoolCols+` FROM schools WHERE id=$1 AND deleted_at IS NULL`, id))
+	if err == sql.ErrNoRows {
+		common.WriteError(w, http.StatusNotFound, "school not found")
+		return
+	} else if err != nil {
+		common.WriteDBError(w, err, "failed to update school")
+		return
+	}
+	if errs := req.validate(&cur); len(errs) > 0 {
+		writeFieldErrors(w, errs)
+		return
+	}
+	// Settlement account and accounting entity feed billing/accounting:
+	// only superadmin (yayasan level) may change them.
+	if claims.ActiveRole != common.RoleSuperadmin && (changed(req.AccountingEntityCode, cur.AccountingEntityCode) ||
+		changed(req.SettlementBankName, cur.SettlementBankName) || changed(req.SettlementAccountNumber, cur.SettlementAccountNumber) ||
+		changed(req.SettlementAccountName, cur.SettlementAccountName)) {
+		common.WriteError(w, http.StatusForbidden, "Entitas akuntansi dan rekening settlement hanya dapat diubah superadmin")
 		return
 	}
 	row := a.DB.QueryRow(`UPDATE schools SET foundation_id=$1, name=$2, code=$3, level=$4, address=$5, subdistrict=$6, district=$7,
-			city=$8, province=$9, registration_number=$10, year_founded=$11, phone_number=$12, email=$13, website=$14, logo=$15, government_logo=$16, updated_at=now()
+			city=$8, province=$9, registration_number=$10, year_founded=$11, phone_number=$12, email=$13, website=$14, logo=$15, government_logo=$16,
+			principal_name            = CASE WHEN $18::text IS NULL THEN principal_name ELSE NULLIF($18,'') END,
+			principal_user_id         = CASE WHEN $19::text IS NULL THEN principal_user_id ELSE NULLIF($19,'')::uuid END,
+			accounting_entity_code    = CASE WHEN $20::text IS NULL THEN accounting_entity_code ELSE NULLIF($20,'') END,
+			settlement_bank_name      = CASE WHEN $21::text IS NULL THEN settlement_bank_name ELSE NULLIF($21,'') END,
+			settlement_account_number = CASE WHEN $22::text IS NULL THEN settlement_account_number ELSE NULLIF($22,'') END,
+			settlement_account_name   = CASE WHEN $23::text IS NULL THEN settlement_account_name ELSE NULLIF($23,'') END,
+			updated_at=now()
 		WHERE id=$17 AND deleted_at IS NULL
 		RETURNING `+schoolCols,
 		req.FoundationID, req.Name, req.Code, req.Level, req.Address, req.Subdistrict, req.District, req.City, req.Province,
-		req.RegistrationNumber, req.YearFounded, req.PhoneNumber, req.Email, req.Website, req.Logo, req.GovernmentLogo, id)
+		req.RegistrationNumber, req.YearFounded, req.PhoneNumber, req.Email, req.Website, req.Logo, req.GovernmentLogo, id,
+		req.PrincipalName, req.PrincipalUserID, req.AccountingEntityCode, req.SettlementBankName, req.SettlementAccountNumber, req.SettlementAccountName)
 	s, err := scanSchool(row)
 	if err == sql.ErrNoRows {
 		common.WriteError(w, http.StatusNotFound, "school not found")
 		return
 	} else if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to update school: "+err.Error())
+		common.WriteDBError(w, err, "failed to update school")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, s, nil)
@@ -196,6 +305,32 @@ func (a *App) setSchoolActive(w http.ResponseWriter, r *http.Request, active boo
 		return
 	}
 	id := chi.URLParam(r, "id")
+	claims := common.FromCtx(r)
+	var body struct {
+		Confirm bool   `json:"confirm"`
+		Reason  string `json:"reason"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	var impact schoolImpact
+	if !active {
+		// BUG-014: show what deactivating locks out before doing it. Data is
+		// never deleted (BR-GEN-07); only is_active flips.
+		err := a.DB.QueryRow(`SELECT
+				count(DISTINCT user_id) FILTER (WHERE role='siswa'),
+				count(DISTINCT user_id) FILTER (WHERE role IN ('guru','walikelas')),
+				count(DISTINCT user_id)
+			FROM user_school_roles usr JOIN users u ON u.id = usr.user_id AND u.deleted_at IS NULL
+			WHERE usr.school_id=$1 AND usr.status='active'`, id).Scan(&impact.ActiveStudents, &impact.ActiveTeachers, &impact.ActiveUsers)
+		if err != nil {
+			common.WriteDBError(w, err, "failed to update school status")
+			return
+		}
+		if impact.ActiveUsers > 0 && (!body.Confirm || strings.TrimSpace(body.Reason) == "") {
+			common.WriteJSONMsg(w, http.StatusConflict, map[string]any{"requires_confirmation": true, "impact": impact},
+				nil, "Unit masih memiliki pengguna aktif. Menonaktifkan unit akan memblokir akses mereka (data tetap tersimpan). Kirim confirm=true dan alasan untuk melanjutkan.")
+			return
+		}
+	}
 	res, err := a.DB.Exec(`UPDATE schools SET is_active=$1, updated_at=now() WHERE id=$2 AND deleted_at IS NULL`, active, id)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to update school status")
@@ -205,7 +340,19 @@ func (a *App) setSchoolActive(w http.ResponseWriter, r *http.Request, active boo
 		common.WriteError(w, http.StatusNotFound, "school not found")
 		return
 	}
-	common.WriteJSON(w, http.StatusOK, map[string]interface{}{"id": id, "is_active": active}, nil)
+	action := "school_activated"
+	if !active {
+		action = "school_deactivated"
+	}
+	a.RecordSecurityAudit(&id, action, id, &claims.UserID, &claims.ActiveRole, nil,
+		map[string]any{"is_active": active, "impact": impact}, body.Reason, r.Header.Get("X-Correlation-ID"))
+	common.WriteJSON(w, http.StatusOK, map[string]interface{}{"id": id, "is_active": active, "impact": impact}, nil)
+}
+
+type schoolImpact struct {
+	ActiveStudents int `json:"active_students"`
+	ActiveTeachers int `json:"active_teachers"`
+	ActiveUsers    int `json:"active_users"`
 }
 
 func (a *App) ActivateSchool(w http.ResponseWriter, r *http.Request) { a.setSchoolActive(w, r, true) }
@@ -232,7 +379,7 @@ func (a *App) AssignAdmin(w http.ResponseWriter, r *http.Request) {
 	_, err := a.DB.Exec(`INSERT INTO user_school_roles (user_id, school_id, role) VALUES ($1, $2, 'admin')
 		ON CONFLICT (user_id, school_id, role) DO NOTHING`, req.UserID, schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to assign admin: "+err.Error())
+		common.WriteDBError(w, err, "failed to assign admin")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"school_id": schoolID, "user_id": req.UserID, "role": "admin"}, nil)

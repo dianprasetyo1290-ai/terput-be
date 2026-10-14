@@ -34,6 +34,14 @@ type School struct {
 	CurrentAcademicYearID *string   `json:"current_academic_year_id"`
 	CreatedAt             time.Time `json:"created_at"`
 	UpdatedAt             time.Time `json:"updated_at"`
+	// Head of unit (BUG-068) and the per-unit settings other modules use
+	// (BUG-012): accounting entity and settlement account.
+	PrincipalName           *string `json:"principal_name"`
+	PrincipalUserID         *string `json:"principal_user_id"`
+	AccountingEntityCode    *string `json:"accounting_entity_code"`
+	SettlementBankName      *string `json:"settlement_bank_name"`
+	SettlementAccountNumber *string `json:"settlement_account_number"`
+	SettlementAccountName   *string `json:"settlement_account_name"`
 }
 
 type AcademicYear struct {
@@ -43,6 +51,12 @@ type AcademicYear struct {
 	IsCurrent bool      `json:"is_current"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// QA-IDN (migration 0020): period range (YYYY-MM-DD) and lock (BUG-070/015).
+	StartDate  *string    `json:"start_date"`
+	EndDate    *string    `json:"end_date"`
+	LockedAt   *time.Time `json:"locked_at"`
+	LockedBy   *string    `json:"locked_by,omitempty"`
+	LockReason *string    `json:"lock_reason,omitempty"`
 }
 
 type User struct {
@@ -58,6 +72,7 @@ type User struct {
 	Address         *string   `json:"address"`
 	Religion        *string   `json:"religion"`
 	NISN            *string    `json:"nisn"`
+	NIK             *string    `json:"nik,omitempty"`
 	IsSuperadmin    bool       `json:"is_superadmin"`
 	ManagedByHR     bool       `json:"managed_by_hr"`
 	DeactivateAt    *time.Time `json:"deactivate_at,omitempty"`
@@ -79,6 +94,8 @@ type UserSchoolRole struct {
 	Role           string  `json:"role"`
 	Status         string  `json:"status"`
 	AcademicYearID *string `json:"academic_year_id"`
+	// StudentStatus (siswa rows only): calon | aktif | lulus | keluar.
+	StudentStatus *string `json:"student_status,omitempty"`
 }
 
 type GuardianLink struct {

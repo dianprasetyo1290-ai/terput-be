@@ -10,6 +10,7 @@ import (
 	"github.com/xuri/excelize/v2"
 
 	"skci/identity/internal/common"
+	"skci/identity/internal/rules"
 )
 
 // Import Template Sekoci: a single .xlsx that registers a brand-new school
@@ -402,7 +403,7 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 			pi.school.city, pi.school.province, pi.school.registrationNumber, pi.school.yearFounded,
 			pi.school.phoneNumber, pi.school.email, pi.school.logo).Scan(&schoolID)
 		if err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to create school: "+err.Error())
+			common.WriteDBError(w, err, "failed to create school")
 			return
 		}
 	}
@@ -412,7 +413,7 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 	// to the same tahun akademik must not create a duplicate row).
 	academicYearID, err := findOrCreateAcademicYear(tx, schoolID, academicYearLabel)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to resolve academic year: "+err.Error())
+		common.WriteDBError(w, err, "failed to resolve academic year")
 		return
 	}
 	// Only (re)point "current academic year" for a brand-new school, or an
@@ -421,7 +422,7 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 	// which year the rest of the school is currently operating in.
 	if !hadCurrentYear {
 		if _, err := tx.Exec(`UPDATE schools SET current_academic_year_id=$1 WHERE id=$2`, academicYearID, schoolID); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to link academic year: "+err.Error())
+			common.WriteDBError(w, err, "failed to link academic year")
 			return
 		}
 	}
@@ -432,14 +433,14 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 		userID, plainPW, err := createImportedUser(tx, g["name"], g["email"], g["phone"], g["birth_date"], g["birth_place"], g["address"], g["religion"],
 			extraJSON(map[string]string{"nuptk": g["nuptk"], "tahun_akademik": g["tahun_akademik"], "pendidikan_terakhir": g["pendidikan_terakhir"]}))
 		if err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to create guru "+g["email"]+": "+err.Error())
+			common.WriteDBError(w, err, "failed to create guru "+g["email"])
 			return
 		}
 		_ = plainPW
 		emailToUserID[g["email"]] = userID
 		if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id, school_id, role, academic_year_id) VALUES ($1,$2,'guru',$3)`,
 			userID, schoolID, academicYearID); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to assign guru role: "+err.Error())
+			common.WriteDBError(w, err, "failed to assign guru role")
 			return
 		}
 		guruCreated++
@@ -451,12 +452,12 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 		userID, _, err := createImportedUser(tx, s["name"], s["email"], s["phone"], s["birth_date"], s["birth_place"], s["address"], s["religion"],
 			extraJSON(map[string]string{"nisn": s["nisn"], "kelas": s["kelas"], "tahun_akademik": s["tahun_akademik"], "asal_sekolah": s["asal_sekolah"], "nama_orang_tua": s["nama_orang_tua"]}))
 		if err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to create siswa "+s["email"]+": "+err.Error())
+			common.WriteDBError(w, err, "failed to create siswa "+s["email"])
 			return
 		}
 		if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id, school_id, role, academic_year_id) VALUES ($1,$2,'siswa',$3)`,
 			userID, schoolID, academicYearID); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to assign siswa role: "+err.Error())
+			common.WriteDBError(w, err, "failed to assign siswa role")
 			return
 		}
 		siswaUserIDByEmail[s["email"]] = userID
@@ -469,7 +470,7 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 	for _, g := range pi.guardians {
 		userID, _, err := createImportedUser(tx, g["name"], g["email"], g["phone"], "", "", g["address"], "", nil)
 		if err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to create guardian "+g["email"]+": "+err.Error())
+			common.WriteDBError(w, err, "failed to create guardian "+g["email"])
 			return
 		}
 		if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id,school_id,role) VALUES ($1,$2,'orang_tua')`, userID, schoolID); err != nil {
@@ -504,18 +505,18 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 		if err := tx.QueryRow(`INSERT INTO positions (school_id, name) VALUES ($1,$2)
 			ON CONFLICT (school_id, name) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
 			schoolID, o["jabatan"]).Scan(&positionID); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to create position: "+err.Error())
+			common.WriteDBError(w, err, "failed to create position")
 			return
 		}
 		if _, err := tx.Exec(`INSERT INTO position_assignments (position_id, user_id, school_id) VALUES ($1,$2,$3)
 			ON CONFLICT (position_id, user_id) DO NOTHING`, positionID, guruUserID, schoolID); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to assign position: "+err.Error())
+			common.WriteDBError(w, err, "failed to assign position")
 			return
 		}
 		if role, ok := common.JabatanOnlyRoleForPosition(o["jabatan"]); ok {
 			if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id, school_id, role) VALUES ($1,$2,$3)
 				ON CONFLICT (user_id, school_id, role) DO NOTHING`, guruUserID, schoolID, role); err != nil {
-				common.WriteError(w, http.StatusInternalServerError, "failed to mirror jabatan role: "+err.Error())
+				common.WriteDBError(w, err, "failed to mirror jabatan role")
 				return
 			}
 		}
@@ -532,7 +533,7 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 		for _, row := range rows {
 			payload, _ := json.Marshal(row)
 			if _, err := tx.Exec(`INSERT INTO import_staged_rows (school_id, kind, payload) VALUES ($1,$2,$3)`, schoolID, kind, payload); err != nil {
-				common.WriteError(w, http.StatusInternalServerError, "failed to stage "+kind+" row: "+err.Error())
+				common.WriteDBError(w, err, "failed to stage "+kind+" row")
 				return
 			}
 			stagedCounts[kind]++
@@ -540,7 +541,7 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := tx.Commit(); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "import failed to commit: "+err.Error())
+		common.WriteDBError(w, err, "import failed to commit")
 		return
 	}
 
@@ -667,16 +668,16 @@ func (a *App) reconcileClassrooms(pi *parsedImport, schoolID, defaultYearLabel s
 		}
 		yearID, err := resolveYear(strings.TrimSpace(s["tahun_akademik"]))
 		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s: gagal resolve tahun akademik: %s", s["name"], err.Error()))
+			errs = append(errs, fmt.Sprintf("%s: gagal resolve tahun akademik: %s", s["name"], common.SafeDBMessage(err, "galat sistem")))
 			continue
 		}
 		classroomID, err := resolveClassroom(yearID, kelasName)
 		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s: gagal membuat/menemukan kelas %q: %s", s["name"], kelasName, err.Error()))
+			errs = append(errs, fmt.Sprintf("%s: gagal membuat/menemukan kelas %q: %s", s["name"], kelasName, common.SafeDBMessage(err, "galat sistem")))
 			continue
 		}
 		if err := a.Academic.EnrollStudent(schoolID, classroomID, studentUserID); err != nil {
-			errs = append(errs, fmt.Sprintf("%s: gagal mendaftarkan ke kelas %q: %s", s["name"], kelasName, err.Error()))
+			errs = append(errs, fmt.Sprintf("%s: gagal mendaftarkan ke kelas %q: %s", s["name"], kelasName, common.SafeDBMessage(err, "galat sistem")))
 		}
 	}
 	return errs
@@ -691,9 +692,13 @@ func normalizeKelasName(s string) string {
 // duplicating when the label already exists for this school.
 func findOrCreateAcademicYear(tx *sql.Tx, schoolID, label string) (string, error) {
 	var id string
-	err := tx.QueryRow(`INSERT INTO academic_years (school_id, label, is_current) VALUES ($1,$2,true)
+	var start, end interface{}
+	if s, e, ok := rules.DefaultYearRange(label); ok { // migration 0020 dates
+		start, end = s.Format("2006-01-02"), e.Format("2006-01-02")
+	}
+	err := tx.QueryRow(`INSERT INTO academic_years (school_id, label, is_current, start_date, end_date) VALUES ($1,$2,true,$3,$4)
 		ON CONFLICT (school_id, label) WHERE deleted_at IS NULL DO UPDATE SET label = EXCLUDED.label
-		RETURNING id`, schoolID, label).Scan(&id)
+		RETURNING id`, schoolID, label, start, end).Scan(&id)
 	return id, err
 }
 

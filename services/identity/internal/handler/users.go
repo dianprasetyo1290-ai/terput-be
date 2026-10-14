@@ -14,6 +14,9 @@ import (
 
 	"skci/identity/internal/common"
 	"skci/identity/internal/model"
+	"skci/identity/internal/rules"
+	"skci/identity/internal/security"
+	"skci/identity/internal/store"
 )
 
 // Data Pengguna: superadmin-scoped user directory (list/filter by role and
@@ -26,11 +29,11 @@ import (
 // "admin can reset a student's password" for both, rather than duplicating
 // separate edit/reset handlers per entity (see README Assumptions).
 
-const userCols = `u.id, u.name, u.email, u.phone, u.default_password, u.password_changed, u.photo, u.birth_date, u.birth_place, u.address, u.religion, u.nisn, u.is_superadmin, u.created_at, u.updated_at, u.managed_by_hr, u.deactivate_at`
+const userCols = `u.id, u.name, u.email, u.phone, u.default_password, u.password_changed, u.photo, u.birth_date, u.birth_place, u.address, u.religion, u.nisn, u.is_superadmin, u.created_at, u.updated_at, u.managed_by_hr, u.deactivate_at, u.nik`
 
 func scanUser(row interface{ Scan(...interface{}) error }) (model.User, error) {
 	var u model.User
-	err := row.Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.DefaultPassword, &u.PasswordChanged, &u.Photo, &u.BirthDate, &u.BirthPlace, &u.Address, &u.Religion, &u.NISN, &u.IsSuperadmin, &u.CreatedAt, &u.UpdatedAt, &u.ManagedByHR, &u.DeactivateAt)
+	err := row.Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.DefaultPassword, &u.PasswordChanged, &u.Photo, &u.BirthDate, &u.BirthPlace, &u.Address, &u.Religion, &u.NISN, &u.IsSuperadmin, &u.CreatedAt, &u.UpdatedAt, &u.ManagedByHR, &u.DeactivateAt, &u.NIK)
 	if err == nil && u.PasswordChanged {
 		u.DefaultPassword = nil // hide once the user has changed it from the default
 	}
@@ -198,7 +201,7 @@ func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role strin
 
 	var total int
 	if err := a.DB.QueryRow(`SELECT count(*) FROM users u WHERE `+where, args...).Scan(&total); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to list users: "+err.Error())
+		common.WriteDBError(w, err, "failed to list users")
 		return
 	}
 
@@ -216,7 +219,7 @@ func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role strin
 
 	rows, err := a.DB.Query(query, args2...)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to list users: "+err.Error())
+		common.WriteDBError(w, err, "failed to list users")
 		return
 	}
 	defer rows.Close()
@@ -239,12 +242,12 @@ func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role strin
 		byID[out[i].ID] = &out[i]
 	}
 	if len(ids) > 0 {
-		roleRows, err := a.DB.Query(`SELECT id, user_id, school_id, role, status, academic_year_id FROM user_school_roles WHERE user_id = ANY($1::uuid[])`, pqStringArray(ids))
+		roleRows, err := a.DB.Query(`SELECT id, user_id, school_id, role, status, academic_year_id, student_status FROM user_school_roles WHERE user_id = ANY($1::uuid[])`, pqStringArray(ids))
 		if err == nil {
 			defer roleRows.Close()
 			for roleRows.Next() {
 				var ro model.UserSchoolRole
-				if err := roleRows.Scan(&ro.ID, &ro.UserID, &ro.SchoolID, &ro.Role, &ro.Status, &ro.AcademicYearID); err == nil {
+				if err := roleRows.Scan(&ro.ID, &ro.UserID, &ro.SchoolID, &ro.Role, &ro.Status, &ro.AcademicYearID, &ro.StudentStatus); err == nil {
 					if u, ok := byID[ro.UserID]; ok {
 						u.Roles = append(u.Roles, ro)
 					}
@@ -262,6 +265,7 @@ func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role strin
 			out[i].BirthPlace = nil
 			out[i].Religion = nil
 			out[i].NISN = nil
+			out[i].NIK = nil
 			out[i].Photo = nil
 			out[i].Roles = []model.UserSchoolRole{}
 		}
@@ -301,6 +305,17 @@ func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" || req.Email == "" || req.Role == "" {
 		common.WriteError(w, http.StatusBadRequest, "name, email, and role are required")
 		return
+	}
+	req.Email = strings.TrimSpace(req.Email)
+	if !rules.ValidEmail(req.Email) { // BUG-084
+		common.WriteValidationError(w, http.StatusBadRequest, "Format email tidak valid", map[string]string{"email": "Format email tidak valid"})
+		return
+	}
+	if req.Password != "" {
+		if msg := security.ValidPassword(req.Password); msg != "" {
+			common.WriteValidationError(w, http.StatusBadRequest, msg, map[string]string{"password": msg})
+			return
+		}
 	}
 	if !common.IsValidRole(req.Role) {
 		common.WriteError(w, http.StatusBadRequest, "invalid role")
@@ -347,15 +362,16 @@ func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 		req.Name, req.Email, req.Phone, hash, req.Role == common.RoleSuperadmin)
 	u, err = scanUser(row)
 	if err != nil {
-		common.WriteError(w, http.StatusConflict, "failed to create user (email may already be in use): "+err.Error())
+		common.WriteDBError(w, err, "failed to create user (email may already be in use)")
 		return
 	}
 	var schoolIDArg interface{}
 	if schoolID != "" {
 		schoolIDArg = schoolID
 	}
-	if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id, school_id, role) VALUES ($1,$2,$3)`, u.ID, schoolIDArg, req.Role); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to assign role: "+err.Error())
+	if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id, school_id, role, student_status)
+		VALUES ($1,$2,$3, CASE WHEN $3 = 'siswa' THEN 'aktif' END)`, u.ID, schoolIDArg, req.Role); err != nil {
+		common.WriteDBError(w, err, "failed to assign role")
 		return
 	}
 	if err := tx.Commit(); err != nil {
@@ -385,7 +401,7 @@ func (a *App) GetUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func aRolesFor(a *App, userID string) ([]model.UserSchoolRole, error) {
-	rows, err := a.DB.Query(`SELECT id, user_id, school_id, role, status, academic_year_id FROM user_school_roles WHERE user_id=$1`, userID)
+	rows, err := a.DB.Query(`SELECT id, user_id, school_id, role, status, academic_year_id, student_status FROM user_school_roles WHERE user_id=$1`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +409,7 @@ func aRolesFor(a *App, userID string) ([]model.UserSchoolRole, error) {
 	out := []model.UserSchoolRole{}
 	for rows.Next() {
 		var ro model.UserSchoolRole
-		if err := rows.Scan(&ro.ID, &ro.UserID, &ro.SchoolID, &ro.Role, &ro.Status, &ro.AcademicYearID); err != nil {
+		if err := rows.Scan(&ro.ID, &ro.UserID, &ro.SchoolID, &ro.Role, &ro.Status, &ro.AcademicYearID, &ro.StudentStatus); err != nil {
 			return nil, err
 		}
 		out = append(out, ro)
@@ -410,6 +426,25 @@ type updateUserRequest struct {
 	Address    *string `json:"address"`
 	Religion   *string `json:"religion"`
 	NISN       *string `json:"nisn"`
+	// NIK (migration 0020): omitted keeps the stored value, "" clears it.
+	NIK *string `json:"nik"`
+	// ConfirmDuplicate saves despite a possible-duplicate warning (BUG-016).
+	ConfirmDuplicate bool `json:"confirm_duplicate"`
+}
+
+func trimPtr(p *string) *string {
+	if p == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*p)
+	return &v
+}
+
+func deref(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 // UpdateUser: "admin can edit account data" for Data Siswa / Data Guru /
@@ -427,12 +462,12 @@ func (a *App) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	// AC-83-02: while HRIS is on for one of the user's schools, the name of an
 	// HR-managed account is owned by the hr service, not Data Guru/Pengguna.
 	var hrLocked bool
-	var currentName string
+	var currentName, curNISN, curNIK, curPhone string
 	err := a.DB.QueryRow(`SELECT u.managed_by_hr AND EXISTS (
 			SELECT 1 FROM user_school_roles usr
 			JOIN school_features sf ON sf.school_id = usr.school_id AND sf.feature_key = 'hris' AND sf.enabled
-			WHERE usr.user_id = u.id), u.name
-		FROM users u WHERE u.id = $1 AND u.deleted_at IS NULL`, id).Scan(&hrLocked, &currentName)
+			WHERE usr.user_id = u.id), u.name, COALESCE(u.nisn,''), COALESCE(u.nik,''), COALESCE(u.phone,'')
+		FROM users u WHERE u.id = $1 AND u.deleted_at IS NULL`, id).Scan(&hrLocked, &currentName, &curNISN, &curNIK, &curPhone)
 	if err == sql.ErrNoRows {
 		common.WriteError(w, http.StatusNotFound, "user not found")
 		return
@@ -444,16 +479,50 @@ func (a *App) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusConflict, "Data dikelola dari HRIS")
 		return
 	}
-	row := a.DB.QueryRow(`UPDATE users AS u SET name=$1, phone=$2, photo=$3, birth_date=$4, birth_place=$5, address=$6, religion=$7, nisn=$8, updated_at=now()
+	req.NISN, req.NIK = trimPtr(req.NISN), trimPtr(req.NIK)
+	if errs := rules.ValidateIdentityNumbers(req.NISN, req.NIK); len(errs) > 0 { // BUG-074
+		msg := errs["nisn"]
+		if msg == "" {
+			msg = errs["nik"]
+		}
+		common.WriteValidationError(w, http.StatusBadRequest, msg, errs)
+		return
+	}
+	// Only values that change are checked, so editing an unrelated field of
+	// an existing record never trips over a known shared number.
+	newIfChanged := func(v, cur string) string {
+		if v == cur {
+			return ""
+		}
+		return v
+	}
+	nikCheck := ""
+	if req.NIK != nil {
+		nikCheck = newIfChanged(*req.NIK, curNIK)
+	}
+	phoneCheck := ""
+	if rules.NormalizePhone(deref(req.Phone)) != rules.NormalizePhone(curPhone) {
+		phoneCheck = rules.NormalizePhone(deref(req.Phone))
+	}
+	if !req.ConfirmDuplicate && !a.checkDuplicates(w, r, id, newIfChanged(deref(req.NISN), curNISN), nikCheck, phoneCheck) {
+		return
+	}
+	row := a.DB.QueryRow(`UPDATE users AS u SET name=$1, phone=$2, photo=$3, birth_date=$4, birth_place=$5, address=$6, religion=$7, nisn=NULLIF($8,''),
+			nik = CASE WHEN $10::text IS NULL THEN nik ELSE NULLIF($10,'') END, updated_at=now()
 		WHERE id=$9 AND deleted_at IS NULL RETURNING `+userCols,
-		req.Name, req.Phone, req.Photo, req.BirthDate, req.BirthPlace, req.Address, req.Religion, req.NISN, id)
+		req.Name, req.Phone, req.Photo, req.BirthDate, req.BirthPlace, req.Address, req.Religion, req.NISN, id, req.NIK)
 	u, err := scanUser(row)
 	if err == sql.ErrNoRows {
 		common.WriteError(w, http.StatusNotFound, "user not found")
 		return
 	} else if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to update user")
+		common.WriteDBError(w, err, "failed to update user")
 		return
+	}
+	if req.ConfirmDuplicate {
+		claims := common.FromCtx(r)
+		a.RecordSecurityAudit(nil, "duplicate_warning_overridden", id, &claims.UserID, &claims.ActiveRole, nil,
+			map[string]any{"nisn": deref(req.NISN), "nik_set": deref(req.NIK) != ""}, "saved despite duplicate warning", r.Header.Get("X-Correlation-ID"))
 	}
 	common.WriteJSON(w, http.StatusOK, u, nil)
 }
@@ -968,4 +1037,43 @@ func (a *App) DownloadUsersTemplate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 	w.Header().Set("Content-Disposition", "attachment; filename=template_data_pengguna.xlsx")
 	_ = f.Write(w)
+}
+
+// checkDuplicates answers 409 with the possible duplicates (BUG-016) and
+// returns false, or returns true when there are none. Names of accounts
+// outside the caller's unit are withheld (tenant isolation).
+func (a *App) checkDuplicates(w http.ResponseWriter, r *http.Request, userID, nisn, nik, phoneNorm string) bool {
+	matches, err := store.FindDuplicateUsers(r.Context(), a.DB, userID, nisn, nik, phoneNorm)
+	if err != nil {
+		common.CaptureError(err) // a failed lookup must not block saving
+		return true
+	}
+	if len(matches) == 0 {
+		return true
+	}
+	claims := common.FromCtx(r)
+	type dup struct {
+		Field  string `json:"field"`
+		UserID string `json:"user_id,omitempty"`
+		Name   string `json:"name"`
+	}
+	out := make([]dup, 0, len(matches))
+	fields := map[string]string{}
+	for _, m := range matches {
+		d := dup{Field: m.Field, Name: "(pengguna di unit lain)"}
+		visible := claims != nil && claims.ActiveRole == common.RoleSuperadmin
+		for _, sid := range m.SchoolIDs {
+			if claims != nil && sid == claims.SchoolID {
+				visible = true
+			}
+		}
+		if visible {
+			d.UserID, d.Name = m.UserID, m.Name
+		}
+		out = append(out, d)
+		fields[m.Field] = map[string]string{"nisn": "NISN", "nik": "NIK", "phone": "Nomor ponsel"}[m.Field] + " sama dengan data lain: kemungkinan duplikat"
+	}
+	common.WriteJSONMsg(w, http.StatusConflict, map[string]any{"requires_confirmation": true, "duplicates": out, "fields": fields}, nil,
+		"Kemungkinan data duplikat. Periksa daftar berikut; kirim ulang dengan confirm_duplicate=true bila memang orang yang berbeda.")
+	return false
 }

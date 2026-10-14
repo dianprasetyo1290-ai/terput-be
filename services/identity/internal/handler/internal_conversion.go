@@ -108,7 +108,7 @@ func (a *App) internalUpsertUser(w http.ResponseWriter, r *http.Request, entityT
 	defer tx.Rollback()
 	u, err := upsertExternalUser(tx, req, entityType, role)
 	if err != nil {
-		common.WriteError(w, http.StatusConflict, "failed to upsert user: "+err.Error())
+		common.WriteDBError(w, err, "failed to upsert user")
 		return
 	}
 	if err := tx.Commit(); err != nil {

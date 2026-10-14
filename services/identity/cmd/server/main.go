@@ -264,7 +264,13 @@ func main() {
 			ar.Put("/{id}", app.UpdateAcademicYear)
 			ar.Delete("/{id}", app.DeleteAcademicYear)
 			ar.Post("/{id}/set-current", app.SetCurrentAcademicYear)
+			ar.Post("/{id}/lock", app.LockAcademicYear)
+			ar.Post("/{id}/unlock", app.UnlockAcademicYear)
 		})
+
+		// Status siswa calon/aktif/lulus/keluar (QA-IDN BUG-017/075).
+		pr.Post("/students/{id}/status", app.ChangeStudentStatus)
+		pr.Get("/students/{id}/status-history", app.StudentStatusHistory)
 
 		// Informasi (announcements).
 		pr.Route("/announcements", func(an chi.Router) {
@@ -362,6 +368,7 @@ func main() {
 		// admin sekolah itu sendiri (read-only).
 		ir.Get("/schools/{id}/features", app.ListSchoolFeatures)
 		ir.Get("/academic-years", app.ListAcademicYears)
+		ir.Get("/academic-years/{id}", app.GetAcademicYear)
 		// Organisasi Sekolah read: report-service scans this for the
 		// current "Kepala Sekolah" jabatan holder (see internal_auth.go).
 		// Still reachable with a normal user JWT too (falls through).

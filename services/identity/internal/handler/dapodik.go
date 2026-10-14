@@ -38,7 +38,7 @@ func (a *App) InternalDapodikStudents(w http.ResponseWriter, r *http.Request) {
 	`
 	rows, err := a.DB.QueryContext(r.Context(), query, schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to query students: "+err.Error())
+		common.WriteDBError(w, err, "failed to query students")
 		return
 	}
 	defer rows.Close()
