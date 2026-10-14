@@ -185,6 +185,8 @@ func main() {
 		ad.Post("/admin/refunds/{id}/process", app.ProcessRefund)
 
 		ad.Get("/admin/finance/summary", app.FinanceSummary)
+		ad.Get("/admin/finance/aging", app.FinanceAging)
+		ad.Get("/admin/finance/receipts", app.FinanceReceipts)
 		// T6 Payment Gateway & Cashier routes
 		ad.Get("/admin/payment-methods", app.AdminListPaymentMethods)
 		ad.Post("/admin/payment-methods", app.AdminCreatePaymentMethod)

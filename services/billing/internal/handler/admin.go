@@ -62,7 +62,8 @@ func (a *App) ListBills(w http.ResponseWriter, r *http.Request) {
 		        COALESCE((SELECT sum(al.amount_idr) FROM bill_payment_allocations al JOIN bill_payments p ON p.id=al.payment_id
 		                  WHERE p.student_bill_id=b.id AND p.school_id=b.school_id AND p.status='verified'),0),
 		        COALESCE((SELECT sum(rv.amount_idr) FROM bill_payment_reversals rv JOIN bill_payments p ON p.id=rv.payment_id
-		                  WHERE p.student_bill_id=b.id AND p.school_id=b.school_id),0)
+		                  WHERE p.student_bill_id=b.id AND p.school_id=b.school_id),0),
+		        count(*) OVER ()
 		 FROM student_bills b LEFT JOIN billing_schemes s ON s.id=b.scheme_id
 		 WHERE b.school_id=$1
 		   AND ($2='' OR b.student_user_id::text=$2)
@@ -80,6 +81,7 @@ func (a *App) ListBills(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	items := []map[string]any{}
+	total := 0
 	for rows.Next() {
 		var (
 			id, student, scheme, schemeName, billStatus string
@@ -89,7 +91,7 @@ func (a *App) ListBills(w http.ResponseWriter, r *http.Request) {
 			createdAt                                   time.Time
 		)
 		if err := rows.Scan(&id, &student, &scheme, &schemeName, &billStatus, &y, &m,
-			&base, &discount, &net, &dueAt, &createdAt, &verified, &reversed); err != nil {
+			&base, &discount, &net, &dueAt, &createdAt, &verified, &reversed, &total); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -106,7 +108,7 @@ func (a *App) ListBills(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	common.WriteJSON(w, http.StatusOK, items, nil)
+	common.WriteJSON(w, http.StatusOK, items, &common.Meta{Page: page, PerPage: perPage, Total: total})
 }
 
 // ListArrears is GET /admin/arrears — bills that still owe money.
@@ -121,7 +123,7 @@ func (a *App) ListArrears(w http.ResponseWriter, r *http.Request) {
 	page, perPage := common.Page(r)
 
 	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT * FROM (
+		`SELECT t.*, count(*) OVER () FROM (
 		   SELECT b.id,b.student_user_id::text,b.scheme_id::text,COALESCE(s.name,''),b.status,b.period_year,b.period_month,
 		          b.base_idr,b.discount_idr,b.net_idr,b.due_at,b.created_at,
 		          COALESCE((SELECT sum(al.amount_idr) FROM bill_payment_allocations al JOIN bill_payments p ON p.id=al.payment_id
@@ -143,6 +145,7 @@ func (a *App) ListArrears(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	items := []map[string]any{}
+	total := 0
 	for rows.Next() {
 		var (
 			id, student, scheme, schemeName, billStatus string
@@ -152,7 +155,7 @@ func (a *App) ListArrears(w http.ResponseWriter, r *http.Request) {
 			createdAt                                   time.Time
 		)
 		if err := rows.Scan(&id, &student, &scheme, &schemeName, &billStatus, &y, &m,
-			&base, &discount, &net, &dueAt, &createdAt, &verified, &reversed); err != nil {
+			&base, &discount, &net, &dueAt, &createdAt, &verified, &reversed, &total); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -169,7 +172,7 @@ func (a *App) ListArrears(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	common.WriteJSON(w, http.StatusOK, items, nil)
+	common.WriteJSON(w, http.StatusOK, items, &common.Meta{Page: page, PerPage: perPage, Total: total})
 }
 
 // ---------------------------------------------------------------------------
