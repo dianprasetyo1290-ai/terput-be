@@ -54,6 +54,21 @@ func main() {
 	if prod && delivery.Name() == "dev-noop" {
 		log.Fatal("refusing to start: a no-op delivery provider is not allowed in production")
 	}
+	router := provider.ChannelRouter{Default: delivery}
+	if cfg.EmailProvider == "smtp" {
+		router.Email, err = provider.NewSMTP(provider.SMTPConfig{Host: cfg.SMTPHost, Port: cfg.SMTPPort, Username: cfg.SMTPUsername,
+			Password: cfg.SMTPPassword, From: cfg.SMTPFrom, ImplicitTLS: cfg.SMTPImplicitTLS})
+		if err != nil {
+			log.Fatalf("email provider: %v", err)
+		}
+	}
+	if cfg.WhatsAppNotifyProvider == "http" {
+		router.WhatsApp, err = provider.NewHTTPWhatsApp(provider.HTTPWhatsAppConfig{URL: cfg.WAAPIURL, Token: cfg.WAAPIToken})
+		if err != nil {
+			log.Fatalf("whatsapp notification provider: %v", err)
+		}
+	}
+	delivery = router
 
 	loc, err := time.LoadLocation(cfg.Timezone)
 	if err != nil {
@@ -78,6 +93,8 @@ func main() {
 	h.Relations = client.Relations{Identity: identity, Academic: academic}
 	h.Attachments = storage.NewLocal(cfg.StorageRoot, maxAttachmentCeiling)
 	h.Audit = audit
+	h.Exceptions = core.ReportException
+	h.InternalURL = cfg.InternalURL
 	h.Location = loc
 	h.PushProvider = provider.NewWebPushProvider(provider.WebPushConfig{
 		VAPIDPublicKey:  cfg.WebPushVAPIDPublicKey,
@@ -98,7 +115,7 @@ func main() {
 	runner.Start()
 	defer runner.Stop()
 
-	router := handler.NewRouter(h, handler.RouterConfig{
+	httpRouter := handler.NewRouter(h, handler.RouterConfig{
 		JWTSecret:   cfg.JWTSecret,
 		InternalKey: cfg.InternalKey,
 		CORSOrigins: cfg.CORSOrigins,
@@ -106,7 +123,7 @@ func main() {
 	})
 
 	log.Printf("notification-service listening on :%s (%s, provider=%s, whatsapp=%v)", cfg.Port, cfg.AppEnv, delivery.Name(), whatsapp != nil)
-	if err := http.ListenAndServe(":"+cfg.Port, router); err != nil {
+	if err := http.ListenAndServe(":"+cfg.Port, httpRouter); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }

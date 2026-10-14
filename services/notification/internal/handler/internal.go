@@ -62,25 +62,22 @@ func (h *Handler) InternalSendNotification(w http.ResponseWriter, r *http.Reques
 
 	title := payload.Title
 	body := payload.Body
-	if payload.TemplateKey != "" && (title == "" || body == "") {
-		tpl, err := h.Store.FindNotificationTemplate(r.Context(), schoolID, payload.TemplateKey, model.ChannelInApp)
-		if err == nil && tpl != nil {
-			if title == "" {
-				title = tpl.Subject
-			}
-			if body == "" {
-				body = tpl.Body
-			}
-		} else if err != nil && !errors.Is(err, store.ErrNotFound) {
-			common.CaptureError(err)
-		}
+	// BUG-088: the latest admin-edited template for the event wins over the
+	// caller's text (template_key, else the event type). A template whose
+	// variables cannot all be filled falls back to the caller's text.
+	tplKey := strings.TrimSpace(payload.TemplateKey)
+	if tplKey == "" {
+		tplKey = payload.Type
+	}
+	if t, b, ok := h.renderTemplate(r.Context(), schoolID, tplKey, model.ChannelInApp, title, body, payload.Data); ok {
+		title, body = t, b
 	}
 	if strings.TrimSpace(title) == "" {
 		common.WriteError(w, http.StatusBadRequest, "title (or template_key with a subject) is required")
 		return
 	}
 
-	channels, err := normalizeChannels(payload.Channels)
+	requested, err := normalizeChannels(payload.Channels)
 	if err != nil {
 		common.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -102,12 +99,14 @@ func (h *Handler) InternalSendNotification(w http.ResponseWriter, r *http.Reques
 	}
 
 	if created {
+		campaign := n.Type == model.TypeCampaign
+		channels := model.ResolveChannels(requested, n.Type, isMandatory(n.Type, payload.Data), h.externalPrefs(r.Context(), n))
 		hasPushInChannels := false
 		for _, channel := range channels {
 			if channel == model.ChannelPush {
 				hasPushInChannels = true
 			}
-			h.dispatchChannel(r.Context(), n, channel)
+			h.dispatchChannel(r.Context(), n, channel, campaign)
 		}
 
 		if !hasPushInChannels && n.Type != "campaign" {
@@ -159,7 +158,7 @@ func (h *Handler) InternalRetryDelivery(w http.ResponseWriter, r *http.Request) 
 		if d.Status != model.DeliveryFailed {
 			continue
 		}
-		h.dispatchChannel(r.Context(), n, d.Channel)
+		h.dispatchChannel(r.Context(), n, d.Channel, false)
 		retried++
 	}
 
@@ -170,6 +169,14 @@ func (h *Handler) InternalRetryDelivery(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	n.Deliveries = deliveries
+	// Core's exception queue resolves an item only on 2xx: a delivery that is
+	// still failing must not look like a successful retry.
+	for _, d := range deliveries {
+		if d.Status == model.DeliveryFailed {
+			common.WriteError(w, http.StatusBadGateway, "pengiriman "+d.Channel+" masih gagal: "+d.LastErrorText())
+			return
+		}
+	}
 	common.WriteJSONMsg(w, http.StatusOK, n, map[string]int{"retried": retried}, "Retry pengiriman selesai")
 }
 
@@ -177,8 +184,10 @@ func (h *Handler) InternalRetryDelivery(w http.ResponseWriter, r *http.Request) 
 // its outcome. in_app is terminal immediately (the row IS the in-app message);
 // external channels go through the provider adapter, and an unavailable
 // recipient address is a recorded failure rather than an error response.
-func (h *Handler) dispatchChannel(ctx context.Context, n *model.Notification, channel string) {
-	if channel != model.ChannelInApp {
+// checkPreference re-applies the user's opt-out (campaign sends); normal
+// sends were already resolved by model.ResolveChannels.
+func (h *Handler) dispatchChannel(ctx context.Context, n *model.Notification, channel string, checkPreference bool) {
+	if checkPreference && channel != model.ChannelInApp {
 		enabled, err := h.Store.IsChannelEnabled(ctx, n.SchoolID, n.UserID, channel)
 		if err != nil {
 			common.CaptureError(err)
@@ -212,28 +221,36 @@ func (h *Handler) dispatchChannel(ctx context.Context, n *model.Notification, ch
 
 	recipient := h.recipientFor(ctx, n.UserID, channel)
 	if recipient == "" {
+		msg := "recipient address unavailable for channel " + channel
 		_, _ = h.Store.UpdateDelivery(ctx, d.ID, store.UpdateDeliveryInput{
 			Status:            model.DeliveryFailed,
-			LastError:         "recipient address unavailable for channel " + channel,
+			LastError:         msg,
 			IncrementAttempts: true,
 		})
+		h.reportDeliveryFailure(ctx, n, channel, failRecipient, msg)
 		return
 	}
 
 	if h.Provider == nil {
+		msg := "no delivery provider configured"
 		_, _ = h.Store.UpdateDelivery(ctx, d.ID, store.UpdateDeliveryInput{
 			Status:            model.DeliveryFailed,
-			LastError:         "no delivery provider configured",
+			LastError:         msg,
 			IncrementAttempts: true,
 		})
+		h.reportDeliveryFailure(ctx, n, channel, failProvider, msg)
 		return
 	}
 
+	subject, text := n.Title, n.Body
+	if t, b, ok := h.renderTemplate(ctx, n.SchoolID, n.Type, channel, n.Title, n.Body, n.Data); ok {
+		subject, text = t, b
+	}
 	msgID, err := h.Provider.Send(ctx, provider.Message{
 		Channel:   channel,
 		Recipient: recipient,
-		Subject:   n.Title,
-		Body:      n.Body,
+		Subject:   subject,
+		Body:      text,
 	})
 	if err != nil {
 		_, _ = h.Store.UpdateDelivery(ctx, d.ID, store.UpdateDeliveryInput{
@@ -241,6 +258,11 @@ func (h *Handler) dispatchChannel(ctx context.Context, n *model.Notification, ch
 			LastError:         err.Error(),
 			IncrementAttempts: true,
 		})
+		kind := failSend
+		if errors.Is(err, provider.ErrNotConfigured) {
+			kind = failProvider
+		}
+		h.reportDeliveryFailure(ctx, n, channel, kind, err.Error())
 		return
 	}
 	_, _ = h.Store.UpdateDelivery(ctx, d.ID, store.UpdateDeliveryInput{

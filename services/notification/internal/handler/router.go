@@ -30,13 +30,14 @@ type RouterConfig struct {
 func NewRouter(h *Handler, cfg RouterConfig) http.Handler {
 	r := chi.NewRouter()
 
-	r.Use(middleware.RequestID, middleware.RealIP, middleware.Logger)
+	r.Use(middleware.RequestID, common.CorrelationMiddleware, middleware.RealIP, middleware.Logger)
 	r.Use(common.SentryMiddleware())
 	r.Use(middleware.Recoverer)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   cfg.CORSOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Internal-Key", "Idempotency-Key"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Internal-Key", "Idempotency-Key", common.CorrelationHeader},
+		ExposedHeaders:   []string{common.CorrelationHeader},
 		AllowCredentials: true,
 	}))
 
