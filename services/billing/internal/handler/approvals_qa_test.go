@@ -22,6 +22,7 @@ type fakeCore struct {
 	approvals []client.ApprovalRequest
 	audits    []client.AuditEvent
 	notified  []client.Notification
+	guardians []string // returned for every student
 }
 
 func (f *fakeCore) handler() http.Handler {
@@ -58,7 +59,13 @@ func (f *fakeCore) handler() http.Handler {
 		common.WriteJSON(w, http.StatusCreated, map[string]string{"id": "x1"}, nil)
 	})
 	r.Get("/internal/students/{id}/guardians", func(w http.ResponseWriter, r *http.Request) {
-		common.WriteJSON(w, http.StatusOK, []map[string]string{}, nil)
+		f.mu.Lock()
+		rows := []map[string]string{}
+		for _, g := range f.guardians {
+			rows = append(rows, map[string]string{"guardian_user_id": g})
+		}
+		f.mu.Unlock()
+		common.WriteJSON(w, http.StatusOK, rows, nil)
 	})
 	return r
 }
@@ -103,4 +110,17 @@ func (c apiCaller) do(method, path string, body any) (int, map[string]any) {
 func dataOf(env map[string]any) map[string]any {
 	d, _ := env["data"].(map[string]any)
 	return d
+}
+
+// notificationsTo returns the notifications sent to userID.
+func (f *fakeCore) notificationsTo(userID string) []client.Notification {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []client.Notification
+	for _, n := range f.notified {
+		if n.UserID == userID {
+			out = append(out, n)
+		}
+	}
+	return out
 }

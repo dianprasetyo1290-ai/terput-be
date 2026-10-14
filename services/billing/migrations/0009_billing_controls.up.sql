@@ -115,3 +115,16 @@ UPDATE student_bills b
    SET status = d.status, updated_at = now()
   FROM derived d
  WHERE b.id = d.id AND b.status <> d.status;
+
+-- BUG-043/044/135: refunds are decided in core's Approval Center (request
+-- type 'refund', amount-based stages) and processed against a bank transfer
+-- reference. Rows created before this migration keep the local decision
+-- path (approval_id IS NULL) and are not required to carry a reference.
+ALTER TABLE bill_refunds
+    ADD COLUMN approval_id   text NULL,
+    ADD COLUMN transfer_ref  text NULL,
+    ADD COLUMN transfer_date date NULL,
+    ADD COLUMN process_note  text NULL;
+ALTER TABLE bill_refunds ADD CONSTRAINT bill_refunds_transfer_ref_required
+    CHECK (status <> 'processed' OR approval_id IS NULL OR btrim(COALESCE(transfer_ref, '')) <> '');
+CREATE UNIQUE INDEX bill_refunds_school_transfer_ref ON bill_refunds (school_id, transfer_ref) WHERE transfer_ref IS NOT NULL;
