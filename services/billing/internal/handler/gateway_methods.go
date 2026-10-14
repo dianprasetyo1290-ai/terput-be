@@ -2,7 +2,10 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -31,7 +34,7 @@ func (a *App) ListPaymentMethods(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var methods []model.GatewayMethod
+	var all []model.GatewayMethod
 	for rows.Next() {
 		var m model.GatewayMethod
 		if err := rows.Scan(&m.ID, &m.Code, &m.Kind, &m.ProviderCode, &m.Label, &m.Enabled,
@@ -39,10 +42,100 @@ func (a *App) ListPaymentMethods(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, err)
 			return
 		}
-		methods = append(methods, m)
+		all = append(all, m)
 	}
+	rows.Close()
 
+	// QA-PAY BUG-001: only methods that can really create a payment code
+	// now (routed to an enabled provider with credentials installed).
+	methods := []model.GatewayMethod{}
+	for i := range all {
+		reason, err := a.methodNotReadyReason(r.Context(), claims.SchoolID, &all[i])
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		if reason == "" {
+			methods = append(methods, all[i])
+		}
+	}
 	common.WriteSuccess(w, methods, nil)
+}
+
+// Reasons a payment method cannot take payments (shown to admins).
+const (
+	reasonNotRouted      = "Metode belum dirutekan ke provider aktif yang mendukung jenis ini"
+	reasonNoCredentials  = "Kredensial payment gateway untuk provider %s belum terpasang di server"
+	reasonGatewayOffline = "Pembayaran online belum tersedia: "
+)
+
+// methodReadyReason is the pure readiness rule (QA-PAY BUG-001): a method
+// is ready when routing found a provider and the primary or the failover
+// provider is ready. "" means ready.
+func methodReadyReason(d gateway.Decision, routeErr error, providerReady func(code string) bool) string {
+	if routeErr != nil || d.Primary == "" {
+		return reasonNotRouted
+	}
+	if providerReady(d.Primary) || (d.Fallback != "" && providerReady(d.Fallback)) {
+		return ""
+	}
+	return fmt.Sprintf(reasonNoCredentials, d.Primary)
+}
+
+// methodNotReadyReason applies methodReadyReason to a stored method.
+func (a *App) methodNotReadyReason(ctx context.Context, schoolID string, m *model.GatewayMethod) (string, error) {
+	d, routeErr := a.decideRoute(ctx, schoolID, m)
+	if routeErr != nil && !errors.Is(routeErr, gateway.ErrNotRouted) {
+		return "", routeErr
+	}
+	var dbErr error
+	reason := methodReadyReason(d, routeErr, func(code string) bool {
+		ok, err := a.providerReady(ctx, code)
+		if err != nil {
+			dbErr = err
+		}
+		return ok
+	})
+	return reason, dbErr
+}
+
+// providerReady: an injected adapter, or an enabled provider row whose
+// credentials are installed (simulator: explicitly enabled outside prod).
+func (a *App) providerReady(ctx context.Context, code string) (bool, error) {
+	if _, ok := a.Providers[code]; ok {
+		return true, nil
+	}
+	var adapter string
+	var enabled bool
+	var credRef sql.NullString
+	err := a.DB.QueryRowContext(ctx,
+		`SELECT adapter, enabled, credential_ref FROM payment_providers WHERE code = $1`, code).Scan(&adapter, &enabled, &credRef)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return enabled && a.credentialsInstalled(adapter, credRef.String), nil
+}
+
+// requireMethodReady answers 503 with the reason when a method cannot take
+// payments (instead of a provider error after the parent clicked "Bayar").
+func (a *App) requireMethodReady(w http.ResponseWriter, ctx context.Context, schoolID string, m *model.GatewayMethod) bool {
+	reason, err := a.methodNotReadyReason(ctx, schoolID, m)
+	if err != nil {
+		writeErr(w, err)
+		return false
+	}
+	if reason == reasonNotRouted {
+		common.WriteError(w, http.StatusUnprocessableEntity, gateway.ErrNotRouted.Error())
+		return false
+	}
+	if reason != "" {
+		common.WriteError(w, http.StatusServiceUnavailable, reasonGatewayOffline+reason+". Hubungi admin sekolah atau gunakan transfer manual.")
+		return false
+	}
+	return true
 }
 
 // AdminListPaymentMethods returns all methods for administration.
@@ -90,7 +183,12 @@ func (a *App) AdminListPaymentMethods(w http.ResponseWriter, r *http.Request) {
 		for _, p := range sortedMapKeys(mp) {
 			codes = append(codes, providerMethodCode{ProviderCode: p, ProviderMethodCode: mp[p]})
 		}
-		out = append(out, adminMethodDTO{GatewayMethod: m, ProviderCodes: codes})
+		reason, err := a.methodNotReadyReason(r.Context(), schoolID, &m)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		out = append(out, adminMethodDTO{GatewayMethod: m, ProviderCodes: codes, Ready: reason == "", NotReadyReason: reason})
 	}
 	common.WriteSuccess(w, out, nil)
 }
@@ -104,6 +202,9 @@ type providerMethodCode struct {
 type adminMethodDTO struct {
 	model.GatewayMethod
 	ProviderCodes []providerMethodCode `json:"provider_codes"`
+	// QA-PAY BUG-001: whether parents can pay with it right now, and why not.
+	Ready          bool   `json:"ready"`
+	NotReadyReason string `json:"not_ready_reason,omitempty"`
 }
 
 func sortedMapKeys(m map[string]string) []string {

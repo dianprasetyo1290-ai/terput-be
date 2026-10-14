@@ -1,10 +1,14 @@
 package handler
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
+	"skci/billing/internal/common"
 	"skci/billing/internal/gateway"
 )
 
@@ -91,5 +95,76 @@ func TestWebhookFailClosed(t *testing.T) {
 	}
 	if _, err := f.app.paymentProvider(t.Context(), simCode); err == nil {
 		t.Fatal("sim adapter built in production")
+	}
+}
+
+func TestMethodReadyReason(t *testing.T) {
+	ready := map[string]bool{"ok": true}
+	isReady := func(code string) bool { return ready[code] }
+	cases := []struct {
+		name     string
+		d        gateway.Decision
+		routeErr error
+		want     string
+	}{
+		{"not routed", gateway.Decision{}, gateway.ErrNotRouted, reasonNotRouted},
+		{"empty primary", gateway.Decision{}, nil, reasonNotRouted},
+		{"primary ready", gateway.Decision{Primary: "ok"}, nil, ""},
+		{"primary without credentials", gateway.Decision{Primary: "nicepay"}, nil, fmt.Sprintf(reasonNoCredentials, "nicepay")},
+		{"fallback ready", gateway.Decision{Primary: "nicepay", Fallback: "ok"}, nil, ""},
+		{"neither ready", gateway.Decision{Primary: "nicepay", Fallback: "other"}, nil, fmt.Sprintf(reasonNoCredentials, "nicepay")},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := methodReadyReason(c.d, c.routeErr, isReady); got != c.want {
+				t.Fatalf("got %q want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// QA-PAY BUG-001: without credentials parents see no method (and a clear
+// 503 on checkout), admins see why; once a provider is ready it appears.
+func TestPaymentMethodReadiness(t *testing.T) {
+	f := newExtFixture(t)
+	f.app.PaymentFeatures = nil // T6 path: every method goes to nicepay
+	m := f.method("va_ready", gateway.CapVA, "BNIN")
+	bill := f.bill(2026, 7, time.Now(), 800000)
+
+	list := func() []map[string]any {
+		code, _, raw := f.do(http.MethodGet, "/payment-methods", common.RoleParent, f.guardianID, nil)
+		if code != http.StatusOK {
+			t.Fatalf("list %d %s", code, raw)
+		}
+		var env struct {
+			Data []map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(raw), &env); err != nil || env.Data == nil {
+			t.Fatalf("data must be a JSON array: %s", raw)
+		}
+		return env.Data
+	}
+	if got := list(); len(got) != 0 {
+		t.Fatalf("parent methods without credentials=%v want none", got)
+	}
+	code, _, raw := f.checkout(m, bill)
+	if code != http.StatusServiceUnavailable || !strings.Contains(raw, "belum terpasang") {
+		t.Fatalf("checkout without credentials %d %s", code, raw)
+	}
+	if n := f.scalar(`SELECT COUNT(*)::text FROM gateway_transactions WHERE school_id = $1`, f.schoolID); n != "0" {
+		t.Fatalf("transactions=%s want 0", n)
+	}
+	_, _, raw = f.do(http.MethodGet, "/admin/payment-methods", common.RoleAdmin, genUUID(), nil)
+	if !strings.Contains(raw, `"ready":false`) || !strings.Contains(raw, "belum terpasang") {
+		t.Fatalf("admin list must explain readiness: %s", raw)
+	}
+
+	f.app.Providers = simNicepay()
+	if got := list(); len(got) != 1 || got[0]["id"] != m {
+		t.Fatalf("parent methods with ready provider=%v", got)
+	}
+	code, data, raw := f.checkout(m, bill)
+	if code != http.StatusOK || data["va_number"] == nil || data["total_idr"] != float64(804000) {
+		t.Fatalf("checkout %d %s", code, raw)
 	}
 }

@@ -145,6 +145,7 @@ func newExtFixture(t *testing.T) *extFixture {
 		pr.Get("/platform/payment-providers", f.app.PlatformListProviders)
 		pr.Post("/platform/payment-providers", f.app.PlatformCreateProvider)
 		pr.Put("/platform/payment-providers/{code}", f.app.PlatformUpdateProvider)
+		pr.Get("/admin/payment-methods", f.app.AdminListPaymentMethods)
 		pr.Post("/admin/payment-routing-rules", f.app.AdminCreateRoutingRule)
 		pr.Post("/admin/payment-routing-rules/preview", f.app.AdminPreviewRouting)
 		pr.Post("/admin/reconciliation/run", f.app.AdminRunReconciliation)
@@ -164,7 +165,6 @@ func (f *extFixture) exec(q string, args ...any) {
 	}
 }
 
-// provider registers a provider row + adapter override.
 // testSimSecret signs simulator notifications in tests (BUG-004: the sim
 // adapter rejects unsigned webhooks).
 const testSimSecret = "test-sim-webhook-secret-0123456789"
@@ -175,6 +175,7 @@ func simNicepay() map[string]gateway.Provider {
 	return map[string]gateway.Provider{gateway.DefaultProvider: &gateway.Sim{ProviderCode: gateway.DefaultProvider, WebhookSecret: testSimSecret}}
 }
 
+// provider registers a provider row + adapter override.
 func (f *extFixture) provider(p gateway.Provider, caps ...string) string {
 	if sim, ok := p.(*gateway.Sim); ok {
 		sim.WebhookSecret = testSimSecret

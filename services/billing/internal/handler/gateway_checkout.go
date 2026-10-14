@@ -84,6 +84,9 @@ func (a *App) ParentCheckoutPreview(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if !a.requireMethodReady(w, r.Context(), claims.SchoolID, method) {
+		return
+	}
 
 	resp := CheckoutPreviewResponse{
 		StudentUserID:  req.StudentUserID,
@@ -220,6 +223,9 @@ func (a *App) ParentCheckout(w http.ResponseWriter, r *http.Request) {
 
 	if err := a.checkMethodAllowed(r.Context(), claims.SchoolID, method); err != nil {
 		writeErr(w, err)
+		return
+	}
+	if !a.requireMethodReady(w, r.Context(), claims.SchoolID, method) {
 		return
 	}
 
