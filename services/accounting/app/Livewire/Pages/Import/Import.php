@@ -4,6 +4,9 @@ namespace App\Livewire\Pages\Import;
 
 use App\Support\Importer;
 use App\Support\Ledger;
+use App\Support\ReceivableReconciliation;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\DB;
 use Livewire\Component;
 use Livewire\WithFileUploads;
@@ -17,6 +20,11 @@ class Import extends Component
     public $file;
     public $result = null;
     public $confirmReplace = false;
+
+    /** Control-account vs billing check (QA BUG-059); null = not run yet. */
+    public $recon = null;
+    public $signOffNote = '';
+    public $signOffMessage = null;
 
     protected function rules(): array
     {
@@ -66,6 +74,33 @@ class Import extends Component
         }
     }
 
+    public function reconcile(): void
+    {
+        $this->authorize('viewimport_data');
+        $this->signOffMessage = null;
+        $this->recon = ReceivableReconciliation::check();
+    }
+
+    public function signOff(): void
+    {
+        $this->authorize('createimport_data');
+        $this->resetValidation();
+        $this->recon = ReceivableReconciliation::check(); // never trust the numbers held in the browser
+        try {
+            ReceivableReconciliation::signOff($this->recon, $this->signOffNote, (string) Auth::id());
+        } catch (ValidationException $e) {
+            foreach ($e->errors() as $k => $msgs) {
+                foreach ($msgs as $m) {
+                    $this->addError($k, $m);
+                }
+            }
+
+            return;
+        }
+        $this->signOffNote = '';
+        $this->signOffMessage = 'Sign-off migrasi piutang tercatat di audit trail.';
+    }
+
     private function existingOpening(int $year): bool
     {
         return DB::table('mst_saldo_news')->where('tahun', $year)->where('periode', 0)
@@ -79,6 +114,7 @@ class Import extends Component
         return view('livewire.pages.import.import', [
             'year' => $year,
             'hasOpening' => $this->existingOpening($year),
+            'lastSignOff' => ReceivableReconciliation::lastSignOff(),
         ]);
     }
 }
