@@ -37,11 +37,16 @@ class ModulesSeeder extends Seeder
             ['name' => 'permission', 'display_name' => 'Permission'],
             ['name' => 'account_group_table', 'display_name' => 'Account Group Table'],
             ['name' => 'sub_account_group_table', 'display_name' => 'Sub Account Group Table'],
+            // PRD menu 32-38 / QA-ACC (see App\Support\AccountingRoles).
+            ['name' => 'journal_validation', 'display_name' => 'Journal Validation'],
+            ['name' => 'trial_balance', 'display_name' => 'Trial Balance'],
+            ['name' => 'consolidation', 'display_name' => 'Consolidation'],
+            ['name' => 'auto_posting', 'display_name' => 'Auto Posting'],
+            ['name' => 'import_data', 'display_name' => 'Import Data'],
 
             // ['name' => 'balance_currency', 'display_name' => 'Balance Currency'],
             // ['name' => 'budgeting', 'display_name' => 'Budgeting'],
             // ['name' => 'setting_website', 'display_name' => 'Setting Website'],
-            // ['name' => 'journal_validation', 'display_name' => 'Journal Validation'],
             // ['name' => 'history_journal_validation', 'display_name' => 'History Journal Validation'],
             // ['name' => 'report_column', 'display_name' => 'Report Column'],
         ];

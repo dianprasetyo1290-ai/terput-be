@@ -84,6 +84,7 @@ trait WithTransactionHeader
 
     public function save()
     {
+        $this->authorize($this->idNya ? 'editjournal_transaction' : 'createjournal_transaction');
         $valid = [
             // Bug 1 fix: was validating against mst_division, now validates against mst_transaction
             'jt.trans_code' => 'required|exists:mst_transaction,trans_code',
@@ -165,6 +166,7 @@ trait WithTransactionHeader
 
     public function delete()
     {
+        $this->authorize('deletejournal_transaction');
         $datane = JournalTransaction::with('transDetail')->where('trans_no', $this->idNya)->first();
 
         if ($datane && $datane->transDetail->isNotEmpty()) {

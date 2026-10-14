@@ -102,6 +102,7 @@ class Balance extends Component
     }
     public function save()
     {
+        $this->authorize('editbalance');
         $valid = [
             'saldo.acc_code' => 'required',
             'saldo.div_code' => 'required',
