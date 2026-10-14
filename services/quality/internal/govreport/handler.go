@@ -512,9 +512,17 @@ func (h *Handler) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.SchoolID = schoolID
+	if msg := validateTemplate(&req); msg != "" {
+		common.WriteError(w, http.StatusBadRequest, msg)
+		return
+	}
 
 	tpl, err := h.store.CreateTemplate(r.Context(), req)
 	if err != nil {
+		if strings.Contains(err.Error(), "uq_regulatory_template_code") {
+			common.WriteError(w, http.StatusConflict, "kode template sudah dipakai")
+			return
+		}
 		common.WriteError(w, http.StatusInternalServerError, "failed to create template: "+err.Error())
 		return
 	}

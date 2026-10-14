@@ -80,14 +80,14 @@ func (h *Handler) CreateInstrument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.SchoolID = schoolID
-	if req.ScoreMin >= req.ScoreMax {
-		common.WriteError(w, http.StatusBadRequest, "score_max must be greater than score_min")
+	if msg := validInstrument(&req); msg != "" {
+		common.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
 
 	inst, err := h.store.CreateInstrument(r.Context(), req)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to create instrument: "+err.Error())
+		h.writeStoreErr(w, err, "gagal membuat instrumen")
 		return
 	}
 
@@ -107,9 +107,13 @@ func (h *Handler) UpdateInstrument(w http.ResponseWriter, r *http.Request) {
 	}
 	req.ID = id
 	req.SchoolID = schoolID
+	if msg := validInstrument(&req); msg != "" {
+		common.WriteError(w, http.StatusBadRequest, msg)
+		return
+	}
 
 	if err := h.store.UpdateInstrument(r.Context(), req); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to update instrument: "+err.Error())
+		h.writeStoreErr(w, err, "gagal memperbarui instrumen")
 		return
 	}
 	_ = h.store.RecordAudit(r.Context(), schoolID, "qa_instrument", id, "update", claims.UserID, claims.ActiveRole, nil, req, "Diperbarui")
@@ -332,7 +336,7 @@ func (h *Handler) CreateEvidence(w http.ResponseWriter, r *http.Request) {
 		ayID = r.FormValue("academic_year_id")
 		indIDs = r.Form["indicator_ids"]
 
-		objKey := fmt.Sprintf("schools/%s/evidence/%d_%s", schoolID, time.Now().UnixNano(), header.Filename)
+		objKey := fmt.Sprintf("schools/%s/evidence/%d_%s", schoolID, time.Now().UnixNano(), safeFileName(header.Filename))
 		checksum, size, err := h.storage.Save(objKey, file)
 		if err != nil {
 			common.WriteError(w, http.StatusInternalServerError, "failed to save evidence file: "+err.Error())
@@ -627,6 +631,9 @@ func (h *Handler) ListActionPlans(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromContext(r.Context())
 	ownerID := r.URL.Query().Get("owner_user_id")
 	status := r.URL.Query().Get("status")
+	if !isQAManager(claims) {
+		ownerID = claims.UserID // owners see only their own RTL
+	}
 
 	query := `
 		SELECT ap.id, ap.school_id, ap.self_eval_item_id, ap.action, ap.owner_user_id, ap.due_date::text,
@@ -703,6 +710,20 @@ func (h *Handler) UpdateActionPlanStatus(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	switch req.Status {
+	case "open", "in_progress", "done", "cancelled":
+	default:
+		common.WriteError(w, http.StatusBadRequest, "status RTL tidak dikenal")
+		return
+	}
+	if owner, err := h.store.actionPlanOwner(r.Context(), schoolID, id); err != nil {
+		h.writeStoreErr(w, err, "gagal memuat RTL")
+		return
+	} else if !isQAManager(claims) && owner != claims.UserID {
+		common.WriteError(w, http.StatusForbidden, "RTL ini bukan milik Anda")
+		return
+	}
+
 	var doneAt *time.Time
 	if req.Status == "done" {
 		t := time.Now()
@@ -724,80 +745,6 @@ func (h *Handler) UpdateActionPlanStatus(w http.ResponseWriter, r *http.Request)
 	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "Status rencana tindak lanjut diperbarui"})
 }
 
-// ------------------- Accreditation & Comparison Reports -------------------
-
-func (h *Handler) GetAccreditationReport(w http.ResponseWriter, r *http.Request) {
-	schoolID := h.effectiveSchoolID(r)
-	instID := r.URL.Query().Get("instrument_id")
-
-	inst, err := h.store.GetInstrument(r.Context(), schoolID, instID)
-	if err != nil || inst == nil {
-		common.WriteError(w, http.StatusNotFound, "instrument not found")
-		return
-	}
-
-	var stdScores []StandardScoreItem
-	type StdReport struct {
-		StandardCode string `json:"standard_code"`
-		StandardName string `json:"standard_name"`
-		WeightBP     int    `json:"weight_bp"`
-		ScoreMilli   int64  `json:"score_milli"`
-		Score        float64 `json:"score"`
-	}
-	var stdReports []StdReport
-
-	for _, std := range inst.Standards {
-		var itScores []ItemScore
-		for _, it := range std.Items {
-			for _, ind := range it.Indicators {
-				itScores = append(itScores, ItemScore{Score: 3, WeightBP: ind.WeightBP}) // default baseline
-			}
-		}
-		scoreMilli, _ := StandardScore(itScores)
-		stdScores = append(stdScores, StandardScoreItem{StandardScoreMilli: scoreMilli, WeightBP: std.WeightBP})
-		stdReports = append(stdReports, StdReport{
-			StandardCode: std.Code,
-			StandardName: std.Name,
-			WeightBP:     std.WeightBP,
-			ScoreMilli:   scoreMilli,
-			Score:        float64(scoreMilli) / 1000.0,
-		})
-	}
-
-	totalScoreMilli, _ := InstrumentScore(stdScores)
-	common.WriteJSON(w, http.StatusOK, map[string]interface{}{
-		"instrument_name":    inst.Name,
-		"instrument_version": inst.VersionLabel,
-		"total_score_milli":  totalScoreMilli,
-		"total_score":        float64(totalScoreMilli) / 1000.0,
-		"standards":          stdReports,
-	})
-}
-
-func (h *Handler) GetComparisonReport(w http.ResponseWriter, r *http.Request) {
-	schoolID := h.effectiveSchoolID(r)
-	schools, err := h.clients.GetFoundationSchools(r.Context(), schoolID)
-	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to get foundation schools: "+err.Error())
-		return
-	}
-
-	type SchoolCompItem struct {
-		SchoolID   string  `json:"school_id"`
-		SchoolName string  `json:"school_name"`
-		Score      float64 `json:"score"`
-	}
-	var comps []SchoolCompItem
-	for _, sc := range schools {
-		comps = append(comps, SchoolCompItem{
-			SchoolID:   sc.ID,
-			SchoolName: sc.Name,
-			Score:      3.65, // read model aggregated
-		})
-	}
-	common.WriteJSON(w, http.StatusOK, comps)
-}
-
 // ------------------- Excel Import Template -------------------
 
 func (h *Handler) GetImportTemplate(w http.ResponseWriter, r *http.Request) {
@@ -806,14 +753,14 @@ func (h *Handler) GetImportTemplate(w http.ResponseWriter, r *http.Request) {
 
 	sheet := "Instrumen"
 	f.SetSheetName("Sheet1", sheet)
-	headers := []string{"Kode Standar", "Nama Standar", "Bobot Standar (BP)", "Kode Butir", "Pernyataan Butir", "Kode Indikator", "Nama Indikator", "Bobot Indikator (BP)", "Satuan", "Arah", "Sumber"}
+	headers := []string{"Kode Standar", "Nama Standar", "Bobot Standar (BP)", "Kode Butir", "Pernyataan Butir", "Kode Indikator", "Nama Indikator", "Bobot Indikator (BP)", "Satuan", "Arah", "Sumber", "Kode Metrik (jika sumber metric)"}
 	for i, hdr := range headers {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
 		f.SetCellValue(sheet, cell, hdr)
 	}
 
 	// Example row
-	example := []interface{}{"STD-1", "Standar Isi", 1500, "BTR-1.1", "Kurikulum Sekolah", "IND-1.1.1", "Tingkat Kehadiran", 5000, "percent_bp", "higher_better", "metric"}
+	example := []interface{}{"STD-1", "Standar Isi", 1500, "BTR-1.1", "Kurikulum Sekolah", "IND-1.1.1", "Tingkat Kehadiran", 5000, "percent_bp", "higher_better", "metric", "attendance.student_rate"}
 	for i, val := range example {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 2)
 		f.SetCellValue(sheet, cell, val)
@@ -822,69 +769,4 @@ func (h *Handler) GetImportTemplate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 	w.Header().Set("Content-Disposition", "attachment; filename=template_instrumen_akreditasi.xlsx")
 	_ = f.Write(w)
-}
-
-func (h *Handler) ImportInstrument(w http.ResponseWriter, r *http.Request) {
-	dryRun := r.URL.Query().Get("dry_run") == "true"
-	schoolID := h.effectiveSchoolID(r)
-
-	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		common.WriteError(w, http.StatusBadRequest, "failed to parse multipart form")
-		return
-	}
-	file, _, err := r.FormFile("file")
-	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "missing file in form")
-		return
-	}
-	defer file.Close()
-
-	f, err := excelize.OpenReader(file)
-	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "failed to parse excel file: "+err.Error())
-		return
-	}
-	defer f.Close()
-
-	sheet := f.GetSheetName(0)
-	rows, err := f.GetRows(sheet)
-	if err != nil || len(rows) < 2 {
-		common.WriteError(w, http.StatusBadRequest, "excel file is empty or missing data rows")
-		return
-	}
-
-	// Dry run result
-	if dryRun {
-		common.WriteJSON(w, http.StatusOK, map[string]interface{}{
-			"dry_run":    true,
-			"valid":      true,
-			"row_count":  len(rows) - 1,
-			"message":    fmt.Sprintf("Validasi template berhasil. Siap mengimpor %d butir/indikator.", len(rows)-1),
-		})
-		return
-	}
-
-	// Create instrument
-	instCode := fmt.Sprintf("IMP-%d", time.Now().Unix())
-	inst := QAInstrument{
-		SchoolID:     schoolID,
-		Code:         instCode,
-		Name:         "Instrumen Impor " + time.Now().Format("02 Jan 2006"),
-		Issuer:       "BAN-S/M",
-		VersionLabel: "v1.0",
-		ScoreMin:     1,
-		ScoreMax:     4,
-		Status:       "active",
-	}
-	saved, err := h.store.CreateInstrument(r.Context(), inst)
-	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to import instrument: "+err.Error())
-		return
-	}
-
-	common.WriteJSON(w, http.StatusCreated, map[string]interface{}{
-		"message":       "Instrumen berhasil diimpor",
-		"instrument_id": saved.ID,
-		"row_count":     len(rows) - 1,
-	})
 }

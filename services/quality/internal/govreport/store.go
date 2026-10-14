@@ -309,7 +309,7 @@ func (s *Store) GetTemplate(ctx context.Context, schoolID, id string) (*Regulato
 	query := `
 		SELECT id, school_id, code, name, recipient, frequency, columns, export_format, status, created_at, updated_at
 		FROM regulatory_templates
-		WHERE id = $1 AND (school_id = $2 OR $2 = '') AND deleted_at IS NULL
+		WHERE id = $1 AND school_id::text = $2 AND deleted_at IS NULL
 	`
 	var tpl RegulatoryTemplate
 	var colBytes []byte
@@ -386,7 +386,7 @@ func (s *Store) GetReport(ctx context.Context, schoolID, id string) (*Regulatory
 		       template_snapshot, data_snapshot, snapshot_at, submitted_at, submitted_by::text, submission_note,
 		       export_object_key, idempotency_key, created_at, updated_at
 		FROM regulatory_reports
-		WHERE id = $1 AND (school_id = $2 OR $2 = '')
+		WHERE id = $1 AND school_id::text = $2
 	`
 	var rep RegulatoryReport
 	var appID, subBy, expKey sql.NullString

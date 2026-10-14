@@ -77,7 +77,7 @@ func (s *Store) GetInstrument(ctx context.Context, schoolID, id string) (*QAInst
 		SELECT id, school_id, code, name, issuer, version_label, score_min, score_max, status,
 		       effective_from::text, created_at, updated_at
 		FROM qa_instruments
-		WHERE id = $1 AND (school_id = $2 OR $2 = '') AND deleted_at IS NULL
+		WHERE id = $1 AND school_id::text = $2 AND deleted_at IS NULL
 	`
 	var inst QAInstrument
 	var eff sql.NullString
@@ -245,7 +245,7 @@ func (s *Store) CreateIndicator(ctx context.Context, ind QAIndicator) (*QAIndica
 func (s *Store) GetIndicator(ctx context.Context, schoolID, id string) (*QAIndicator, error) {
 	query := `
 		SELECT id, school_id, item_id, sort, code, name, weight_bp, unit, direction, source_kind, metric_key, rubric, created_at, updated_at
-		FROM qa_indicators WHERE id = $1 AND (school_id = $2 OR $2 = '') AND deleted_at IS NULL
+		FROM qa_indicators WHERE id = $1 AND school_id::text = $2 AND deleted_at IS NULL
 	`
 	var ind QAIndicator
 	var rBytes []byte
@@ -489,7 +489,7 @@ func (s *Store) GetSelfEvaluation(ctx context.Context, schoolID, id string) (*QA
 		SELECT id, school_id, instrument_id, academic_year_id, period_label, period_from::text, period_to::text,
 		       status, approval_id::text, reopen_approval_id::text, finalized_at, finalized_by::text, version, created_at, updated_at
 		FROM qa_self_evaluations
-		WHERE id = $1 AND (school_id = $2 OR $2 = '')
+		WHERE id = $1 AND school_id::text = $2
 	`
 	var se QASelfEvaluation
 	var appID, reopenID, finBy sql.NullString
