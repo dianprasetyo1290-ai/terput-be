@@ -3,8 +3,25 @@
     @if ($locked)
         <div class="alert alert-warning mb-4">
             Jurnal ini berstatus <strong>{{ $jtdetail['status'] }}</strong> sehingga tidak dapat diubah.
-            Koreksi jurnal posted dilakukan melalui jurnal pembalik di menu Jurnal.
+            Koreksi jurnal posted dilakukan melalui jurnal pembalik.
+            @if (($jtdetail['status'] ?? '') === 'posted')
+                @can('editjournal_validation')
+                    <button type="button" class="btn btn-sm btn-outline-danger ml-2"
+                        wire:click="reverseJournal('{{ $jtdetail['trans_no'] }}')"
+                        wire:confirm="Buat jurnal pembalik untuk {{ $jtdetail['trans_no'] }}? Jurnal asal akan berstatus Dibalik.">
+                        <i class="icon-undo2 mr-1"></i>Buat Jurnal Pembalik
+                    </button>
+                @else
+                    Minta Finance Manager/penyetuju membuat jurnal pembalik.
+                @endcan
+            @endif
         </div>
+        @if ($workflowError)
+            <div class="alert alert-danger">{{ $workflowError }}</div>
+        @endif
+        @if ($lastReversal)
+            <div class="alert alert-success">Jurnal pembalik {{ $lastReversal }} telah dibuat dan diposting.</div>
+        @endif
     @endif
     {{-- Info Header Transaksi --}}
     <div class="p-4 mb-5 border border-blue-100 bg-blue-50 rounded-xl">
@@ -54,7 +71,7 @@
                         class="form-control select-search2 @error('jtdetail.acc_code') is-invalid @enderror"
                         data-fouc wire:model.live="jtdetail.acc_code">
                         <option value="">{{ __('Pilih Akun') }}</option>
-                        @foreach ($acc as $ac)
+                        @foreach ($postableAcc as $ac)
                             <option value="{{ $ac->acc_code }}">
                                 {{ $ac->acc_code }} [{{ $ac->acc_name }}]
                             </option>
@@ -88,7 +105,7 @@
         {{-- Row 2: Deskripsi --}}
         <div class="form-row">
             <div class="form-group col-md-12">
-                <label class="mb-1 text-sm font-medium text-gray-700">Deskripsi</label>
+                <label class="mb-1 text-sm font-medium text-gray-700">Deskripsi <span class="text-red-500">*</span></label>
                 <textarea class="form-control @error('jtdetail.description') is-invalid @enderror"
                     wire:model.live="jtdetail.description" rows="2" placeholder="Masukkan deskripsi entri..."></textarea>
                 @error('jtdetail.description')

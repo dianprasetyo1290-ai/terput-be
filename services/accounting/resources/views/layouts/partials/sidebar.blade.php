@@ -65,13 +65,13 @@
                 </li>
                 <!-- Transaction -->
                 @canany(['viewjournal_transaction', 'viewjournal_validation', 'viewend_of_month', 'viewhistory_journal',
-                    'viewhistory_journal_validation', 'viewend_of_year', 'viewprior_year_adjustment'])
+                    'viewhistory_journal_validation', 'viewend_of_year', 'viewprior_year_adjustment', 'viewauto_posting'])
                     <li class="nav-item-header">
                         <div class="text-uppercase font-size-xs line-height-xs">Transaction</div> <i class="icon-menu"
                             title="Forms"></i>
                     </li>
                     <li
-                        class="nav-item nav-item-submenu {{ Request::is(['historyjournalvalidation', 'endofyear', 'prior-year-adjustment', 'journalvalidation', 'endofmonth', 'journaltransaction', 'historyjournaltransaction']) ? 'nav-item-expanded nav-item-open' : '' }}">
+                        class="nav-item nav-item-submenu {{ Request::is(['historyjournalvalidation', 'endofyear', 'prior-year-adjustment', 'journalvalidation', 'endofmonth', 'journaltransaction', 'historyjournaltransaction', 'autoposting']) ? 'nav-item-expanded nav-item-open' : '' }}">
                         <a href="#" class="nav-link"><i class="icon-book"></i> <span>Transaction</span></a>
                         <ul class="nav nav-group-sub" data-submenu-title="User pages">
                             @canany('viewjournal_transaction')
@@ -81,10 +81,14 @@
                                 </li>
                             @endcanany
                             @canany('viewjournal_validation')
-                                <!-- <li class="nav-item"><a href="{{ url('journalvalidation') }}"
-                                                                                                                class="nav-link {{ Request::is(['journalvalidation']) ? 'active' : '' }}">Journal
-                                                                                                                Validation</a>
-                                                                                                        </li> -->
+                                <li class="nav-item"><a href="{{ url('journalvalidation') }}"
+                                        class="nav-link {{ Request::is(['journalvalidation']) ? 'active' : '' }}">Approval Jurnal</a>
+                                </li>
+                            @endcanany
+                            @canany('viewauto_posting')
+                                <li class="nav-item"><a href="{{ url('autoposting') }}"
+                                        class="nav-link {{ Request::is(['autoposting']) ? 'active' : '' }}">Posting Otomatis</a>
+                                </li>
                             @endcanany
                             @canany('viewend_of_month')
                                 <li class="nav-item"><a href="{{ url('endofmonth') }}"
@@ -118,19 +122,34 @@
                 <!-- /Transaction -->
 
                 <!-- Report -->
-                @canany(['viewgeneral_ledger', 'viewfinancial_report'])
+                @canany(['viewgeneral_ledger', 'viewfinancial_report', 'viewtrial_balance', 'viewconsolidation'])
                     <li class="nav-item-header">
                         <div class="text-uppercase font-size-xs line-height-xs">Report</div> <i class="icon-menu"
                             title="Components"></i>
                     </li>
                     <li
-                        class="nav-item nav-item-submenu {{ Request::is(['reportgeneralledger', 'report/financial']) ? 'nav-item-expanded nav-item-open' : '' }}">
+                        class="nav-item nav-item-submenu {{ Request::is(['reportgeneralledger', 'report/financial', 'report/trial-balance', 'report/statements', 'report/consolidation']) ? 'nav-item-expanded nav-item-open' : '' }}">
                         <a href="#" class="nav-link"><i class="icon-file-presentation"></i> <span>Report</span></a>
                         <ul class="nav nav-group-sub" data-submenu-title="User pages">
                             @canany('viewgeneral_ledger')
                                 <li class="nav-item"><a href="{{ url('reportgeneralledger') }}"
                                         class="nav-link {{ Request::is('reportgeneralledger') ? 'active' : '' }}">General
                                         Ledger</a>
+                                </li>
+                            @endcanany
+                            @canany('viewtrial_balance')
+                                <li class="nav-item"><a href="{{ route('report.trial-balance') }}"
+                                        class="nav-link {{ Request::is('report/trial-balance') ? 'active' : '' }}">Neraca Saldo</a>
+                                </li>
+                            @endcanany
+                            @canany('viewfinancial_report')
+                                <li class="nav-item"><a href="{{ route('report.statements') }}"
+                                        class="nav-link {{ Request::is('report/statements') ? 'active' : '' }}">Laporan Keuangan</a>
+                                </li>
+                            @endcanany
+                            @canany('viewconsolidation')
+                                <li class="nav-item"><a href="{{ route('report.consolidation') }}"
+                                        class="nav-link {{ Request::is('report/consolidation') ? 'active' : '' }}">Konsolidasi</a>
                                 </li>
                             @endcanany
                             @canany('viewfinancial_report')
@@ -236,6 +255,13 @@
                                     <a href="{{ url('chartofaccount') }}"
                                         class="nav-link {{ Request::is('chartofaccount') ? 'active' : '' }}">Chart Of
                                         Account</a>
+                                </li>
+                            @endcanany
+
+                            @canany('viewimport_data')
+                                <li class="nav-item">
+                                    <a href="{{ url('import') }}"
+                                        class="nav-link {{ Request::is('import') ? 'active' : '' }}">Import COA / Saldo Awal</a>
                                 </li>
                             @endcanany
 

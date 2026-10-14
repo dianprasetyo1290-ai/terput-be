@@ -2,7 +2,6 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\SearchController;
 
 Route::get('/user', function (Request $request) {
     return $request->user();
@@ -10,8 +9,8 @@ Route::get('/user', function (Request $request) {
 Route::get('/healthz', function () {
     return response()->json(['status' => 'ok', 'service' => 'accounting']);
 });
-Route::get('/search-accounts', [SearchController::class, 'searchAccounts'])->name('api.search-accounts');
-Route::get('/search-divisions', [SearchController::class, 'searchDivisions'])->name('api.search-divisions');
+// search-accounts / search-divisions moved to routes/web.php behind auth,
+// the tenant schema and can:viewjournal_transaction (QA BUG-061).
 
 Route::middleware('internal.key')->group(function () {
     Route::post('/internal/journals', function (Request $request, \App\Services\AutoJournalService $service) {

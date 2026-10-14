@@ -70,6 +70,9 @@ function getLedgerDetails($tahun, $acc_code, $periodfrom, $periodto, $codedivfro
 
     if ($detailTable === 'this_detail') {
         $q->addSelect("{$detailTable}.period");
+    } else {
+        // BR-ACC-03: drafts and journals awaiting approval are not in the ledger.
+        $q->whereIn("{$headTable}.status", \App\Support\Ledger::POSTED);
     }
 
     // Filter akun

@@ -155,6 +155,7 @@ class EOY extends Component
 
     public function generate()
     {
+        $this->authorize('createend_of_year');
         $this->showConfirmModal = false;
         $this->failureMessage = '';
         $this->justRunMessage = '';

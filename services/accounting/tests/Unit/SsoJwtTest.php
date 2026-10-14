@@ -61,8 +61,11 @@ class SsoJwtTest extends TestCase
     public function test_only_mapped_sekoci_roles_are_allowed(): void
     {
         $this->assertSame('SuperAdmin', SsoController::ROLE_MAP['superadmin']);
-        $this->assertSame('Finance', SsoController::ROLE_MAP['kepala_sekolah']);
-        $this->assertSame('Finance', SsoController::ROLE_MAP['kepala_yayasan']);
+        $this->assertSame('Executive', SsoController::ROLE_MAP['kepala_sekolah']);
+        $this->assertSame('Executive', SsoController::ROLE_MAP['kepala_yayasan']);
+        $this->assertSame('FinanceManager', SsoController::ROLE_MAP['finance_manager']);
+        $this->assertSame('Auditor', SsoController::ROLE_MAP['auditor']);
+        $this->assertSame('Accounting', SsoController::ROLE_MAP['akuntan']);
         $this->assertArrayNotHasKey('guru', SsoController::ROLE_MAP);
         $this->assertArrayNotHasKey('siswa', SsoController::ROLE_MAP);
     }

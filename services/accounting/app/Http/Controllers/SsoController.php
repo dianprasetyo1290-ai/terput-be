@@ -11,12 +11,20 @@ use Illuminate\Support\Str;
 
 class SsoController extends Controller
 {
-    /** Sekoci role -> accounting (spatie) role. Anything else is denied. */
+    /**
+     * Sekoci role -> accounting (spatie) role, PRD §7.2; rights per role in
+     * App\Support\AccountingRoles. Anything else is denied.
+     * akuntan/accounting are accepted ahead of identity adding the role.
+     */
     public const ROLE_MAP = [
         'superadmin' => 'SuperAdmin',
         'admin' => 'Admin',
-        'kepala_sekolah' => 'Finance',
-        'kepala_yayasan' => 'Finance',
+        'akuntan' => 'Accounting',
+        'accounting' => 'Accounting',
+        'finance_manager' => 'FinanceManager',
+        'auditor' => 'Auditor',
+        'kepala_sekolah' => 'Executive',
+        'kepala_yayasan' => 'Executive',
     ];
 
     /**
@@ -121,6 +129,10 @@ class SsoController extends Controller
         }
         Tenancy::activate($schoolId);
 
+        if (! \Spatie\Permission\Models\Role::where('name', $role)->where('guard_name', 'web')->exists()) {
+            return response()->json(['message' => "Peran $role belum tersedia di Accounting sekolah ini; jalankan migrasi tenant."], 403);
+        }
+
         $user = User::withTrashed()->find($userId);
         if (! $user) {
             $user = new User();
@@ -134,7 +146,9 @@ class SsoController extends Controller
         $user->actived = true;
         $user->save();
 
-        if (! $user->hasRole($role)) {
+        // The active Sekoci role is authoritative: switching from admin to
+        // kepala_sekolah must drop the admin rights, not add to them.
+        if ($user->getRoleNames()->all() !== [$role]) {
             $user->syncRoles([$role]);
         }
 

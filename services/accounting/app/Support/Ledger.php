@@ -86,9 +86,10 @@ final class Ledger
 
     /**
      * One row per account: opening (before $period), debit/credit movement in
-     * $period, ending -- all posted only.
+     * $period, ending -- all posted only. $division limits to one unit
+     * (mst_division.div_code; QA BUG-064/065 per-unit reports).
      */
-    public static function balances(int $year, int $period): Collection
+    public static function balances(int $year, int $period, ?string $division = null): Collection
     {
         $a = self::active();
         $closedBefore = $year < $a['year'] ? 99 : ($year === $a['year'] ? $a['period'] : 0);
@@ -108,9 +109,9 @@ final class Ledger
                         sum(case when periode = ? then coalesce(debet,0) else 0 end) as d,
                         sum(case when periode = ? then coalesce(credit,0) else 0 end) as c
                    from mst_saldo_news
-                  where tahun = ? and periode <= ? and periode < ?
+                  where tahun = ? and periode <= ? and periode < ?'.($division !== null ? ' and div_code = ?' : '').'
                   group by acc_code',
-                [$period, $period, $period, $year, $period, $closedBefore]
+                array_merge([$period, $period, $period, $year, $period, $closedBefore], $division !== null ? [$division] : [])
             );
             foreach ($rows as $r) {
                 $add($r->acc_code, (float) $r->open, (float) $r->d, (float) $r->c);
@@ -118,7 +119,7 @@ final class Ledger
         }
 
         if ($year === $a['year'] && $a['period'] <= $period) {
-            foreach (self::openLines()->groupBy('acc_code') as $acc => $lines) {
+            foreach (self::openLines($division)->groupBy('acc_code') as $acc => $lines) {
                 $d = (float) $lines->sum('debet');
                 $c = (float) $lines->sum('credit');
                 $a['period'] < $period ? $add($acc, $d - $c, 0, 0) : $add($acc, 0, $d, $c);
@@ -130,7 +131,7 @@ final class Ledger
             ->leftJoin('account_sub_group_tables as s', 's.id', '=', 'a.sub_acc_group')
             ->orderBy('a.acc_code')
             ->get(['a.acc_code', 'a.acc_name', 'a.acc_group', 'g.name as group_name', 'a.sub_acc_group', 's.name as sub_group_name',
-                'a.parent_code', 'a.normal_balance', 'a.is_active', 'a.is_interunit', 'a.is_cash'])
+                'a.parent_code', 'a.normal_balance', 'a.is_active', 'a.is_interunit', 'a.is_cash', 'a.is_control'])
             ->map(function ($r) use ($agg) {
                 [$open, $d, $c] = $agg[$r->acc_code] ?? [0.0, 0.0, 0.0];
                 $r->acc_group = (int) $r->acc_group;
@@ -144,20 +145,21 @@ final class Ledger
     }
 
     /** Lines of posted journals in the open period (trans_detail). */
-    public static function openLines(): Collection
+    public static function openLines(?string $division = null): Collection
     {
         return DB::table('trans_detail as d')
             ->join('trans_head as h', 'h.trans_no', '=', 'd.trans_no')
             ->whereIn('h.status', self::POSTED)
-            ->get(['d.trans_no', 'd.trans_date', 'd.acc_code', 'd.description', 'd.debet', 'd.credit']);
+            ->when($division !== null, fn ($q) => $q->where('d.div_code', $division))
+            ->get(['d.trans_no', 'd.trans_date', 'd.acc_code', 'd.div_code', 'd.description', 'd.debet', 'd.credit']);
     }
 
     /** Posted journal lines of one period, closed or open, with their journal key. */
-    public static function periodLines(int $year, int $period): Collection
+    public static function periodLines(int $year, int $period, ?string $division = null): Collection
     {
         $a = self::active();
         if ($year === $a['year'] && $period === $a['period']) {
-            return self::openLines();
+            return self::openLines($division);
         }
         if ($year > $a['year'] || ($year === $a['year'] && $period > $a['period'])) {
             return collect();
@@ -166,7 +168,8 @@ final class Ledger
         return DB::table('this_detail')
             ->where('period', str_pad((string) $period, 2, '0', STR_PAD_LEFT))
             ->whereRaw('extract(year from trans_date) = ?', [$year])
-            ->get(['trans_no', 'trans_date', 'acc_code', 'description', 'debet', 'credit']);
+            ->when($division !== null, fn ($q) => $q->where('div_code', $division))
+            ->get(['trans_no', 'trans_date', 'acc_code', 'div_code', 'description', 'debet', 'credit']);
     }
 
     /** Sum of `ending` (debit-positive) over accounts in the given groups. */
@@ -197,6 +200,8 @@ final class Ledger
             'net_assets' => round(-self::sumGroups($rows, self::EQUITY) + $ytdSurplus, 2),
             'ytd_surplus' => $ytdSurplus,
             'cash' => round((float) $rows->where('is_cash', true)->sum('ending'), 2),
+            // Control accounts in assets = receivables fed by SEKOCI billing.
+            'receivables' => round((float) $rows->where('acc_group', 1)->where('is_control', true)->sum('ending'), 2),
         ];
     }
 

@@ -5,6 +5,9 @@ namespace App\Livewire\Pages\EndOfMonth;
 use App\Models\JournalTransaction;
 use App\Models\Parameter;
 use App\Models\MstSaldoNew;
+use App\Support\AuditLog;
+use App\Support\Ledger;
+use Livewire\Attributes\Locked;
 use Illuminate\Support\Facades\DB;
 use Livewire\Component;
 
@@ -14,6 +17,10 @@ class EOM extends Component
     public $year;
     public $checks = [];
     public $allPassed = false;
+
+    /** Period the page was opened for; transfer() refuses any other. */
+    #[Locked]
+    public $expectedPeriod;
 
     private function resolveParameterContext(): array
     {
@@ -45,17 +52,45 @@ class EOM extends Component
         // 3. Unbalance Journal - use existing scope
         $unbalancedCount = JournalTransaction::withNotEqualDebetAndCredit()->count();
 
-        // 4. Has transactions to transfer
+        // 4. QA BUG-147: every journal of the period must be posted (or
+        // reversed) -- a draft or a journal waiting for approval would be
+        // archived into history and counted in the closed balances.
+        $open = DB::table('trans_head')->whereIn('status', ['draft', 'pending'])
+            ->orderBy('trans_date')->get(['trans_no', 'status']);
+
+        // 5. QA BUG-147: failed automatic postings (billing/payment) dated in
+        // this period must be fixed and re-sent before it is closed.
+        $failed = $this->failedPostings();
+
+        // 6. Informational: an empty month can be closed too.
         $transactionCount = DB::table('trans_head')->count();
 
         $this->checks = [
             ['label' => 'Journal Integrity', 'desc' => 'Semua jurnal memiliki detail transaksi', 'passed' => $orphanCount === 0, 'issue' => $orphanCount],
             ['label' => 'Balance Integrity', 'desc' => 'Total header sesuai dengan detail', 'passed' => $mismatchCount === 0, 'issue' => $mismatchCount],
             ['label' => 'Unbalance Journal', 'desc' => 'Semua jurnal balance (debit = credit)', 'passed' => $unbalancedCount === 0, 'issue' => $unbalancedCount],
-            ['label' => 'Data Transaksi', 'desc' => 'Terdapat data transaksi untuk ditransfer', 'passed' => $transactionCount > 0, 'issue' => $transactionCount === 0 ? 1 : 0, 'count' => $transactionCount],
+            ['label' => 'Jurnal Draft / Menunggu Approval', 'desc' => 'Semua jurnal periode ini sudah diposting',
+                'passed' => $open->isEmpty(), 'issue' => $open->count(),
+                'items' => $open->map(fn ($j) => "{$j->trans_no} ({$j->status})")->take(20)->all()],
+            ['label' => 'Posting Otomatis Gagal', 'desc' => 'Tidak ada posting otomatis gagal pada periode ini',
+                'passed' => $failed->isEmpty(), 'issue' => $failed->count(),
+                'items' => $failed->map(fn ($f) => "{$f->kind} {$f->reference} ({$f->posting_date})")->take(20)->all()],
+            ['label' => 'Data Transaksi', 'desc' => "$transactionCount jurnal akan dipindahkan ke history", 'passed' => true, 'issue' => 0, 'count' => $transactionCount, 'info' => true],
         ];
 
         $this->allPassed = collect($this->checks)->every(fn($c) => $c['passed']);
+    }
+
+    /** Failed auto postings (acc_auto_postings) dated inside the open period. */
+    private function failedPostings()
+    {
+        $q = DB::table('acc_auto_postings')->where('status', 'failed');
+        $range = Ledger::range((int) $this->year, (int) $this->period);
+        if ($range) {
+            $q->whereBetween('posting_date', $range);
+        }
+
+        return $q->orderBy('posting_date')->get(['kind', 'reference', 'posting_date']);
     }
 
     public function confirmTransfer()
@@ -93,7 +128,14 @@ class EOM extends Component
     public function mount()
     {
         $this->loadPeriod();
+        $this->expectedPeriod = (int) $this->period;
         $this->runChecks();
+    }
+
+    private function alert(string $text, string $icon): void
+    {
+        $text = json_encode($text);
+        $this->js("Swal.fire({text: $text, icon: '$icon', confirmButtonColor: '#3085d6', confirmButtonText: 'OK'});");
     }
 
     public function loadPeriod()
@@ -105,24 +147,35 @@ class EOM extends Component
 
     public function transfer()
     {
-        $this->loadPeriod();
+        $this->authorize('createend_of_month');
 
-        // Guard double-run: kalau trans_head sudah kosong, periode ini sudah
-        // ditutup. Tanpa guard ini, re-run akan tetap incrementPeriod() dan
-        // melompati periode.
-        if (DB::table('trans_head')->count() === 0) {
-            $this->js(<<<'JS'
-                Swal.fire({
-                    text: "Tidak ada data untuk ditransfer. Periode ini kemungkinan sudah ditutup.",
-                    icon: 'warning',
-                    confirmButtonColor: '#3085d6',
-                    confirmButtonText: 'OK'
-                });
-            JS);
+        // Guard double-run (QA BUG-147): the period this page was opened for
+        // must still be the active one. A second click, a second tab or a
+        // stale page would otherwise close the NEXT period too.
+        $expected = (int) $this->expectedPeriod;
+        $this->loadPeriod();
+        if ($expected !== (int) $this->period || (int) $this->period >= 13) {
+            $this->runChecks();
+            $this->alert("Periode $expected sudah ditutup atau periode aktif berubah. Muat ulang halaman.", 'warning');
+
             return;
         }
 
-        DB::transaction(function () {
+        // Never trust the button state: re-run every check server-side.
+        $this->runChecks();
+        if (! $this->allPassed) {
+            $this->alert('Validasi belum lengkap. Perbaiki masalah yang ditemukan sebelum melanjutkan.', 'error');
+
+            return;
+        }
+
+        $closed = DB::transaction(function () use ($expected) {
+            // Serialise concurrent runs on the parameter row.
+            $param = DB::table('parameter')->lockForUpdate()->first();
+            if (! $param || (int) $param->period !== $expected) {
+                return false;
+            }
+
             $data = DB::table('trans_head')->get();
             $data2 = DB::table('trans_detail')->get();
 
@@ -172,7 +225,17 @@ class EOM extends Component
             $this->updateSaldoFromTransactions();
 
             $this->incrementPeriod();
+            AuditLog::record('period.close', $this->year.'-'.str_pad((string) $expected, 2, '0', STR_PAD_LEFT), ['journals' => $data->count()]);
+
+            return true;
         });
+        if (! $closed) {
+            $this->alert("Periode $expected sudah ditutup oleh proses lain.", 'warning');
+
+            return;
+        }
+        $this->expectedPeriod = (int) $this->period;
+        $this->runChecks();
 
         $this->js(<<<'JS'
             const Toast = Swal.mixin({

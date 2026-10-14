@@ -18,6 +18,12 @@ use App\Livewire\Pages\EndOfYear\EOY;
 use App\Livewire\Pages\HistoryJournalTransaction\HJT;
 use App\Livewire\Pages\HistoryJournalValidation\HJV;
 use App\Livewire\Pages\Home;
+use App\Livewire\Pages\AutoPosting\AutoPosting;
+use App\Livewire\Pages\Import\Import;
+use App\Livewire\Pages\JournalDetail\JournalDetail;
+use App\Livewire\Pages\Report\Consolidation\Consolidation;
+use App\Livewire\Pages\Report\Statements\Statements;
+use App\Livewire\Pages\Report\TrialBalance\TrialBalance;
 use App\Livewire\Pages\JournalTransaction\JT;
 use App\Livewire\Pages\JournalValidation\JV;
 use App\Livewire\Pages\Period\Period;
@@ -63,6 +69,9 @@ Route::middleware([
     });
     Route::group(['middleware' => ['can:viewjournal_transaction']], function () {
         Route::get('/journaltransaction', JT::class);
+        // Select2 lookups (were unauthenticated under /api).
+        Route::get('/api/search-accounts', [\App\Http\Controllers\SearchController::class, 'searchAccounts'])->name('api.search-accounts');
+        Route::get('/api/search-divisions', [\App\Http\Controllers\SearchController::class, 'searchDivisions'])->name('api.search-divisions');
     });
     Route::group(['middleware' => ['can:viewhistory_journal']], function () {
         Route::get('/historyjournaltransaction', HJT::class);
@@ -93,6 +102,15 @@ Route::middleware([
     });
     Route::group(['middleware' => ['can:viewjournal_validation']], function () {
         Route::get('/journalvalidation', JV::class);
+    });
+    Route::group(['middleware' => ['can:viewauto_posting']], function () {
+        Route::get('/autoposting', AutoPosting::class)->name('autoposting');
+    });
+    Route::group(['middleware' => ['can:viewimport_data']], function () {
+        Route::get('/import', Import::class)->name('import');
+    });
+    Route::group(['middleware' => ['can:viewgeneral_ledger']], function () {
+        Route::get('/journal/{transNo}', JournalDetail::class)->name('journal.detail');
     });
     Route::group(['middleware' => ['can:viewaccount_group_table']], function () {
         Route::get('/agt', AccountGroupPages::class);
@@ -128,27 +146,45 @@ Route::middleware([
     Route::group(['middleware' => ['can:viewgeneral_ledger']], function () {
         Route::get('/reportgeneralledger', ReportGeneralLedger::class)->name('reportgeneralledger');
     });
-    Route::get('/z', [GeneralLedgerController::class, 'report']);
-    Route::get('/summarygeneralledger', [GeneralLedgerController::class, 'reportsummary']);
+    // Every page below used to be reachable by any logged-in role (QA BUG-061).
+    Route::group(['middleware' => ['can:viewgeneral_ledger']], function () {
+        Route::get('/z', [GeneralLedgerController::class, 'report']);
+        Route::get('/summarygeneralledger', [GeneralLedgerController::class, 'reportsummary']);
+    });
 
     Route::group(['prefix' => 'generator', 'as' => 'generator.'], function () {
-        Route::get('row-generator', ReportRowHeadCrud::class)->name('row');
-        Route::get('row-generator/detail/{id?}', ReportRowDetails::class)->name('row-detail');
-        Route::get('report/row', ReportRowPrint::class)->name('report-preview');
-        // Column Generator
-        Route::get('col-generator', ReportColHeadCrud::class)->name('col');
-        Route::get('col-generator/detail/{id?}', ReportColDetailCrud::class)->name('col-detail');
-        // Final Generator
-        Route::get('report-final', ReportFinalCrud::class)->name('viewfinal_design');
-        Route::get('report-final-detail/{id?}', ReportFinalDetail::class)->name('viewfinal_design_detail');
+        Route::group(['middleware' => ['can:viewreport_row_design']], function () {
+            Route::get('row-generator', ReportRowHeadCrud::class)->name('row');
+            Route::get('row-generator/detail/{id?}', ReportRowDetails::class)->name('row-detail');
+            Route::get('report/row', ReportRowPrint::class)->name('report-preview');
+        });
+        Route::group(['middleware' => ['can:viewfinal_design']], function () {
+            // Column Generator
+            Route::get('col-generator', ReportColHeadCrud::class)->name('col');
+            Route::get('col-generator/detail/{id?}', ReportColDetailCrud::class)->name('col-detail');
+            // Final Generator
+            Route::get('report-final', ReportFinalCrud::class)->name('viewfinal_design');
+            Route::get('report-final-detail/{id?}', ReportFinalDetail::class)->name('viewfinal_design_detail');
+        });
     });
 
     Route::group(['prefix' => 'report', 'as' => 'report.'], function () {
         Route::group(['middleware' => ['can:viewfinancial_report']], function () {
             Route::get('financial', FinancialReport::class)->name('financial');
+            Route::get('statements', Statements::class)->name('statements');
+        });
+        Route::group(['middleware' => ['can:viewtrial_balance']], function () {
+            Route::get('trial-balance', TrialBalance::class)->name('trial-balance');
+        });
+        Route::group(['middleware' => ['can:viewconsolidation']], function () {
+            Route::get('consolidation', Consolidation::class)->name('consolidation');
         });
     });
 
-    Route::get('report/{id?}', ReportPrint::class)->name('report');
-    Route::get('/form-balance', FormBalance::class)->name('form.balance');
+    Route::group(['middleware' => ['can:viewfinancial_report']], function () {
+        Route::get('report/{id?}', ReportPrint::class)->name('report');
+    });
+    Route::group(['middleware' => ['can:viewbalance']], function () {
+        Route::get('/form-balance', FormBalance::class)->name('form.balance');
+    });
 });

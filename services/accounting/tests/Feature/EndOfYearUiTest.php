@@ -66,7 +66,7 @@ class EndOfYearUiTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        Livewire::test(EOY::class)
+        Livewire::actingAs($this->superAdmin())->test(EOY::class)
             ->call('generate')
             ->assertSet('failureMessage', 'End of Year belum bisa dijalankan. Validasi belum lengkap. Perbaiki masalah yang ditemukan sebelum melanjutkan.')
             ->assertSet('disabled', false);
@@ -78,7 +78,7 @@ class EndOfYearUiTest extends TestCase
         $this->seedCurrentYearBalances();
         $this->seedPendingAdjustment();
 
-        Livewire::test(EOY::class)
+        Livewire::actingAs($this->superAdmin())->test(EOY::class)
             ->call('generate')
             ->assertSet('disabled', true)
             ->assertSet('failureMessage', '');
@@ -123,6 +123,22 @@ class EndOfYearUiTest extends TestCase
             'acc_code' => '1000',
             'div_code' => '0000',
         ]);
+    }
+
+    private function superAdmin(): \App\Models\User
+    {
+        \Spatie\Permission\Models\Role::findOrCreate('SuperAdmin', 'web');
+
+        return tap(\App\Models\User::where('user_id', 'admin')->firstOrFail())->assignRole('SuperAdmin');
+    }
+
+    public function test_end_of_year_requires_permission(): void
+    {
+        $this->seedEndOfYearReferenceData();
+        $this->seedCurrentYearBalances();
+        $user = \App\Models\User::where('user_id', 'admin')->firstOrFail();
+
+        Livewire::actingAs($user)->test(EOY::class)->call('generate')->assertForbidden();
     }
 
     private function seedEndOfYearReferenceData(): void

@@ -9,6 +9,8 @@
         </p>
     </div>
 
+    @include('livewire.pages.partials.home-kpi')
+
     {{-- Summary Cards --}}
     <div class="row">
         {{-- Active Period --}}

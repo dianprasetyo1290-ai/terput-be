@@ -151,6 +151,7 @@ class HJT extends Component
 
     public function save()
     {
+        $this->authorize($this->idNya ? 'edithistory_journal' : 'createhistory_journal');
         $valid = [
             'jt.trans_code' => 'required|exists:mst_transaction,trans_code',
             'jt.trans_no' => ['required', 'max:15', 'regex:/^\S(.*\S)?$/', Rule::unique('this_head', 'trans_no')],
@@ -206,6 +207,7 @@ class HJT extends Component
 
     public function saveDetail()
     {
+        $this->authorize('edithistory_journal');
         $valid = [
             'jtdetail.acc_code' => 'required',
             'jtdetail.div_code' => 'required',
@@ -364,6 +366,7 @@ class HJT extends Component
 
     public function delete()
     {
+        $this->authorize('deletehistory_journal');
         $datane = ThisHead::with('transDetail')->where('trans_no', $this->idNya)->first();
 
         if ($datane && $datane->transDetail->isNotEmpty()) {
@@ -399,6 +402,7 @@ class HJT extends Component
 
     public function deleteD()
     {
+        $this->authorize('deletehistory_journal');
         $detail = ThisDetail::where('id', $this->countDetail)->first();
         if ($detail) {
             $detail->delete();

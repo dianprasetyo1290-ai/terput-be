@@ -1,8 +1,16 @@
+@can('createjournal_transaction')
 <div class="mb-5">
     <button type="button" class="btn btn-primary btn-lg rounded-lg shadow-sm" wire:click="add">
         <i class="mr-2 icon-plus-circle2"></i>Tambah Transaksi Jurnal Baru
     </button>
 </div>
+@endcan
+@if ($workflowError)
+    <div class="alert alert-danger">{{ $workflowError }}</div>
+@endif
+@if ($lastReversal)
+    <div class="alert alert-success">Jurnal pembalik {{ $lastReversal }} telah dibuat dan diposting.</div>
+@endif
 
 {{-- Filter and Search Section --}}
 <div class="p-4 mb-5 bg-white border border-gray-200 rounded-xl">
@@ -65,6 +73,16 @@
                     <a class="dropdown-item" href="#" wire:click.prevent="filt('u')">Belum Seimbang</a>
                 </div>
             </div>
+        </div>
+        <div class="col-md-2">
+            <label class="mb-1 text-sm font-medium text-gray-700">Status Jurnal</label>
+            <select class="form-control" wire:model.live="statusFilter">
+                <option value="">Semua</option>
+                <option value="draft">Draft</option>
+                <option value="pending">Menunggu Approval</option>
+                <option value="posted">Posted</option>
+                <option value="reversed">Dibalik</option>
+            </select>
         </div>
         <div class="col-md-2">
             <label class="mb-1 text-sm font-medium text-gray-700">Periode</label>
@@ -131,28 +149,63 @@
                         </a>
                     </td>
                     <td class="text-center">
-                        {{-- BR-ACC-01: only drafts are editable; approval/posting/reversal live on the Jurnal page. --}}
-                        @if (($row->status ?? 'draft') === 'draft')
+                        {{-- BR-ACC-01: only drafts are editable; posted ones are corrected by a reversal (QA BUG-062). --}}
+                        @php $st = $row->status ?? 'draft'; @endphp
                         <div class="list-icons">
                             <div class="dropdown">
                                 <a href="#" class="list-icons-item" data-toggle="dropdown">
                                     <i class="icon-menu9"></i>
                                 </a>
                                 <div class="dropdown-menu dropdown-menu-right">
-                                    <a href="#" class="dropdown-item"
-                                        wire:click.prevent='add("{{ Crypt::encrypt($row->trans_no) }}")'>
-                                        <i class="icon-pencil"></i> Edit
-                                    </a>
-                                    <a href="#" class="dropdown-item text-danger"
-                                        wire:click.prevent='confirmDelete("{{ Crypt::encrypt($row->trans_no) }}")'>
-                                        <i class="icon-trash"></i> Hapus
-                                    </a>
+                                    @if ($st === 'draft')
+                                        @can('editjournal_transaction')
+                                            <a href="#" class="dropdown-item"
+                                                wire:click.prevent='add("{{ Crypt::encrypt($row->trans_no) }}")'>
+                                                <i class="icon-pencil"></i> Edit
+                                            </a>
+                                            <a href="#" class="dropdown-item"
+                                                wire:click.prevent="submitJournal('{{ $row->trans_no }}')"
+                                                wire:confirm="Ajukan jurnal {{ $row->trans_no }} untuk approval?">
+                                                <i class="icon-paperplane"></i> Ajukan Approval
+                                            </a>
+                                        @endcan
+                                        @can('deletejournal_transaction')
+                                            <a href="#" class="dropdown-item text-danger"
+                                                wire:click.prevent='confirmDelete("{{ Crypt::encrypt($row->trans_no) }}")'>
+                                                <i class="icon-trash"></i> Hapus
+                                            </a>
+                                        @endcan
+                                    @elseif ($st === 'pending')
+                                        @can('editjournal_validation')
+                                            <a href="#" class="dropdown-item"
+                                                wire:click.prevent="approveJournal('{{ $row->trans_no }}')"
+                                                wire:confirm="Setujui dan posting jurnal {{ $row->trans_no }}?">
+                                                <i class="icon-checkmark"></i> Setujui &amp; Posting
+                                            </a>
+                                            <a href="#" class="dropdown-item"
+                                                wire:click.prevent="rejectJournal('{{ $row->trans_no }}')"
+                                                wire:confirm="Kembalikan jurnal {{ $row->trans_no }} ke draft?">
+                                                <i class="icon-undo"></i> Tolak (ke Draft)
+                                            </a>
+                                        @else
+                                            <span class="dropdown-item text-muted">Menunggu penyetuju</span>
+                                        @endcan
+                                    @elseif ($st === 'posted' && empty($row->reversal_of))
+                                        @can('editjournal_validation')
+                                            <a href="#" class="dropdown-item text-danger"
+                                                wire:click.prevent="reverseJournal('{{ $row->trans_no }}')"
+                                                wire:confirm="Buat jurnal pembalik untuk {{ $row->trans_no }}?">
+                                                <i class="icon-undo2"></i> Buat Jurnal Pembalik
+                                            </a>
+                                        @else
+                                            <span class="dropdown-item text-muted">Posted (koreksi via jurnal pembalik)</span>
+                                        @endcan
+                                    @else
+                                        <span class="dropdown-item text-muted">Tidak ada aksi</span>
+                                    @endif
                                 </div>
                             </div>
                         </div>
-                        @else
-                            <span class="text-muted" title="Jurnal non-draft tidak dapat diubah">&mdash;</span>
-                        @endif
                     </td>
                 </tr>
             @empty

@@ -25,25 +25,10 @@ class RoleAndPermissionSeeder extends Seeder
         $xyz = Role::firstOrCreate(['name' => 'SuperAdmin']);
         $xyz->givePermissionTo(Permission::all());
 
-        // These three were created with ZERO permissions, so anyone mapped to
-        // them could log in and open nothing but the dashboard. Each school's
-        // books live in their own schema, so "everything" here still only ever
+        // Admin, Accounting, FinanceManager, Auditor, Executive (+ legacy
+        // Finance): one spec shared with the tenant migration. Each school's
+        // books live in their own schema, so "everything" still only ever
         // means that one school's data.
-        //   Admin      = the school's admin: full access to its own books.
-        //   Accounting = same, minus user/role/permission administration.
-        //   Finance    = read-only (kepala sekolah / kepala yayasan).
-        Role::firstOrCreate(['name' => 'Admin'])
-            ->syncPermissions(Permission::all());
-
-        Role::firstOrCreate(['name' => 'Accounting'])
-            ->syncPermissions(
-                Permission::where('name', 'not like', '%user%')
-                    ->where('name', 'not like', '%role%')
-                    ->where('name', 'not like', '%permission%')
-                    ->get()
-            );
-
-        Role::firstOrCreate(['name' => 'Finance'])
-            ->syncPermissions(Permission::where('name', 'like', 'view%')->get());
+        \App\Support\AccountingRoles::install();
     }
 }
