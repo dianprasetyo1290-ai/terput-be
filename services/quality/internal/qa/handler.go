@@ -541,13 +541,13 @@ func (h *Handler) FinalizeSelfEvaluation(w http.ResponseWriter, r *http.Request)
 
 	// Submit approval to Core
 	appReq := client.ApprovalRequest{
-		SchoolID:      schoolID,
-		RequestType:   "qa_self_eval_finalize",
-		RequesterID:   claims.UserID,
-		SourceService: "quality",
-		SourceID:      se.ID,
-		Summary:       fmt.Sprintf("Finalisasi Evaluasi Diri %s (%s)", se.PeriodLabel, se.AcademicYearID),
-		CallbackURL:   fmt.Sprintf("http://quality:8095/internal/approval-callbacks"),
+		SchoolID:       schoolID,
+		RequestType:    "qa_self_eval_finalize",
+		RequesterID:    claims.UserID,
+		SourceService:  "quality",
+		SourceID:       se.ID,
+		Summary:        fmt.Sprintf("Finalisasi Evaluasi Diri %s (%s)", se.PeriodLabel, se.AcademicYearID),
+		CallbackURL:    fmt.Sprintf("http://quality:8095/internal/approval-callbacks"),
 		IdempotencyKey: fmt.Sprintf("qa-finalize:%s:%d", se.ID, se.Version),
 	}
 
@@ -598,13 +598,13 @@ func (h *Handler) ReopenSelfEvaluation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	appReq := client.ApprovalRequest{
-		SchoolID:      schoolID,
-		RequestType:   "qa_self_eval_reopen",
-		RequesterID:   claims.UserID,
-		SourceService: "quality",
-		SourceID:      se.ID,
-		Summary:       fmt.Sprintf("Pembukaan Kembali Evaluasi Diri %s: %s", se.PeriodLabel, req.Reason),
-		CallbackURL:   fmt.Sprintf("http://quality:8095/internal/approval-callbacks"),
+		SchoolID:       schoolID,
+		RequestType:    "qa_self_eval_reopen",
+		RequesterID:    claims.UserID,
+		SourceService:  "quality",
+		SourceID:       se.ID,
+		Summary:        fmt.Sprintf("Pembukaan Kembali Evaluasi Diri %s: %s", se.PeriodLabel, req.Reason),
+		CallbackURL:    fmt.Sprintf("http://quality:8095/internal/approval-callbacks"),
 		IdempotencyKey: fmt.Sprintf("qa-reopen:%s:%d", se.ID, se.Version),
 	}
 

@@ -17,11 +17,11 @@ import (
 )
 
 type Handler struct {
-	store       *Store
-	clients     *client.Clients
-	storage     *storage.LocalStorage
-	hashKey     string
-	maxRows     int
+	store   *Store
+	clients *client.Clients
+	storage *storage.LocalStorage
+	hashKey string
+	maxRows int
 }
 
 func NewHandler(s *Store, c *client.Clients, st *storage.LocalStorage, hashKey string, maxRows int) *Handler {
@@ -334,10 +334,10 @@ func (h *Handler) ImportDapodikFile(w http.ResponseWriter, r *http.Request) {
 	_ = h.store.RecordAudit(r.Context(), schoolID, "dapodik_import", savedImp.ID, "import", claims.UserID, claims.ActiveRole, nil, summary, "Impor & perbandingan Dapodik")
 
 	common.WriteJSON(w, http.StatusCreated, map[string]interface{}{
-		"import_id":   savedImp.ID,
-		"row_count":   len(rows),
-		"diff_count":  len(allDiffs),
-		"matched":     len(pairs),
+		"import_id":  savedImp.ID,
+		"row_count":  len(rows),
+		"diff_count": len(allDiffs),
+		"matched":    len(pairs),
 	})
 }
 
@@ -657,13 +657,13 @@ func (h *Handler) SubmitReportForApproval(w http.ResponseWriter, r *http.Request
 
 	// Submit approval to Core
 	appReq := client.ApprovalRequest{
-		SchoolID:      schoolID,
-		RequestType:   "regulatory_report",
-		RequesterID:   claims.UserID,
-		SourceService: "quality",
-		SourceID:      rep.ID,
-		Summary:       fmt.Sprintf("Persetujuan Laporan %s (%s s/d %s)", tpl.Name, rep.PeriodFrom, rep.PeriodTo),
-		CallbackURL:   "http://quality:8095/internal/approval-callbacks",
+		SchoolID:       schoolID,
+		RequestType:    "regulatory_report",
+		RequesterID:    claims.UserID,
+		SourceService:  "quality",
+		SourceID:       rep.ID,
+		Summary:        fmt.Sprintf("Persetujuan Laporan %s (%s s/d %s)", tpl.Name, rep.PeriodFrom, rep.PeriodTo),
+		CallbackURL:    "http://quality:8095/internal/approval-callbacks",
 		IdempotencyKey: fmt.Sprintf("rep-approve:%s", rep.ID),
 	}
 

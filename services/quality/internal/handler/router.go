@@ -112,7 +112,8 @@ func (a *App) Router() http.Handler {
 		api.Post("/qa/evidence/{id}/new-version", a.QAHandler.NewEvidenceVersion)
 		api.Delete("/qa/evidence/{id}", a.QAHandler.DeleteEvidence)
 		read.Get("/qa/evidence/{id}/download", a.QAHandler.DownloadEvidence)
-		with(rolesQAVerify).Post("/qa/evidence/{id}/verify", a.QAHandler.VerifyEvidence)
+		verify := with(rolesQAVerify)
+		verify.Post("/qa/evidence/{id}/verify", a.QAHandler.VerifyEvidence)
 		read.Get("/qa/completeness", a.QAHandler.GetCompleteness)
 
 		// Self evaluations (EDS)
@@ -134,7 +135,8 @@ func (a *App) Router() http.Handler {
 		// Reports
 		read.Get("/qa/reports/self-evaluation/{id}", a.QAHandler.SelfEvaluationReport)
 		read.Get("/qa/reports/accreditation", a.QAHandler.GetAccreditationReport)
-		with(rolesCompare).Get("/qa/reports/comparison", a.QAHandler.GetComparisonReport)
+		compare := with(rolesCompare)
+		compare.Get("/qa/reports/comparison", a.QAHandler.GetComparisonReport)
 
 		// ------------------- Gov Reporting & Dapodik (/gov) -------------------
 		dapodik := with(rolesDapodik)
@@ -150,9 +152,10 @@ func (a *App) Router() http.Handler {
 
 		// Regulatory report templates
 		gadmin, gread := with(rolesGovAdmin), with(rolesGovRead)
-		with(rolesTplRead).Get("/gov/report-templates", a.GovHandler.ListTemplates)
+		tplRead := with(rolesTplRead)
+		tplRead.Get("/gov/report-templates", a.GovHandler.ListTemplates)
 		gadmin.Post("/gov/report-templates", a.GovHandler.CreateTemplate)
-		with(rolesTplRead).Get("/gov/report-templates/{id}", a.GovHandler.GetTemplate)
+		tplRead.Get("/gov/report-templates/{id}", a.GovHandler.GetTemplate)
 		gadmin.Put("/gov/report-templates/{id}", a.GovHandler.UpdateTemplate)
 		gadmin.Delete("/gov/report-templates/{id}", a.GovHandler.DeleteTemplate)
 
