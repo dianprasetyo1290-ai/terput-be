@@ -115,6 +115,7 @@ func main() {
 		g.Post("/guardian/applications/{id}/cbt/enter", app.EnterCBT)
 
 		g.Get("/guardian/applications/{id}/schedules", app.GuardianSchedules)
+		g.Get("/guardian/applications/{id}/proof.pdf", app.GuardianRegistrationProof)
 		g.Get("/guardian/applications/{id}/decision", app.GetDecision)
 		g.Post("/guardian/applications/{id}/decision/respond", app.RespondDecision)
 
@@ -138,6 +139,7 @@ func main() {
 		ad.Get("/admin/applications/{id}/special-discounts", app.ListSpecialDiscounts)
 		ad.Post("/admin/applications/{id}/special-discounts", app.CreateSpecialDiscount)
 		ad.Get("/admin/applications/{id}/schedules", app.ListSchedules)
+		ad.Get("/admin/applications/{id}/proof.pdf", app.AdminRegistrationProof)
 		ad.Post("/admin/applications/{id}/schedules", app.UpsertSchedule)
 
 		ad.Get("/admin/config/periods", app.ListPeriods)

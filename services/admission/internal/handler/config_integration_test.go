@@ -91,3 +91,29 @@ func TestDashboardFunnel(t *testing.T) {
 		}
 	}
 }
+
+// BUG-162: the proof is only issued for a submitted application.
+func TestRegistrationProof(t *testing.T) {
+	a := testApp(t)
+	ctx := context.Background()
+	s := seedSchool(t, a.DB, 10)
+	app := seedApplication(t, a.DB, s, s.guardian, "draft")
+	if _, _, err := a.proofLines(ctx, s.school, app, s.guardian); err == nil {
+		t.Fatal("draft must not get a proof")
+	}
+	mustExec(t, a.DB, `UPDATE applications SET status='submitted',submitted_at=now() WHERE id=$1`, app)
+	if _, err := a.issueCharge(ctx, s.school, app, stageRegistration, issueOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	lines, number, err := a.proofLines(ctx, s.school, app, s.guardian)
+	if err != nil || number == "" {
+		t.Fatal(err)
+	}
+	if !strings.Contains(lines[len(lines)-4].Text, "Rp250.000 (belum lunas)") {
+		t.Fatalf("fee line %q", lines[len(lines)-4].Text)
+	}
+	other := mustID(t, a.DB, `INSERT INTO guardians(school_id,name) VALUES($1,'Lain') RETURNING id`, s.school)
+	if _, _, err := a.proofLines(ctx, s.school, app, other); err == nil {
+		t.Fatal("another guardian must not read the proof")
+	}
+}
