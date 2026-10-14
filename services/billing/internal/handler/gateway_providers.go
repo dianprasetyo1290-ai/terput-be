@@ -252,41 +252,27 @@ func (a *App) saveProvider(ctx context.Context, create bool, code, adapter, labe
 
 // ListPaymentProviderOptions: GET /payment-providers/options — enabled
 // providers with capabilities (no credential data) for routing and mandate
-// forms of admin, finance_manager and parents.
+// forms of admin, finance_manager and parents. credentials_installed lets
+// the UI say "belum dikonfigurasi" instead of offering a dead provider.
 func (a *App) ListPaymentProviderOptions(w http.ResponseWriter, r *http.Request) {
 	if common.FromCtx(r) == nil {
 		common.WriteError(w, http.StatusUnauthorized, "missing token")
 		return
 	}
-	providers, err := a.loadProviders(r.Context())
+	providers, err := a.listProviderDTOs(r.Context(), "p.enabled")
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	type option struct {
-		Code         string   `json:"code"`
-		Label        string   `json:"label"`
-		Capabilities []string `json:"capabilities"`
+		Code                 string   `json:"code"`
+		Label                string   `json:"label"`
+		Capabilities         []string `json:"capabilities"`
+		CredentialsInstalled bool     `json:"credentials_installed"`
 	}
-	labels := map[string]string{}
-	rows, err := a.DB.QueryContext(r.Context(), `SELECT code, label FROM payment_providers WHERE enabled`)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	for rows.Next() {
-		var c, l string
-		if rows.Scan(&c, &l) == nil {
-			labels[c] = l
-		}
-	}
-	rows.Close()
 	out := []option{}
-	for _, code := range sortedKeys(providers) {
-		p := providers[code]
-		if p.Enabled {
-			out = append(out, option{Code: code, Label: labels[code], Capabilities: p.Capabilities})
-		}
+	for _, p := range providers {
+		out = append(out, option{Code: p.Code, Label: p.Label, Capabilities: p.Capabilities, CredentialsInstalled: p.CredentialsInstalled})
 	}
 	common.WriteSuccess(w, out, nil)
 }
