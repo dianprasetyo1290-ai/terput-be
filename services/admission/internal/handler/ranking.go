@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -282,25 +283,31 @@ func (a *App) UpsertScore(w http.ResponseWriter, r *http.Request) {
 	if !common.Decode(w, r, &in) {
 		return
 	}
-	var periodID string
+	var periodID, status string
 	if err := a.DB.QueryRowContext(r.Context(),
-		`SELECT period_id FROM applications WHERE id=$1 AND school_id=$2`, applicationID, schoolID).Scan(&periodID); err != nil {
-		common.WriteError(w, http.StatusNotFound, "application not found")
+		`SELECT period_id,status FROM applications WHERE id=$1 AND school_id=$2`, applicationID, schoolID).Scan(&periodID, &status); err != nil {
+		common.WriteError(w, http.StatusNotFound, "pendaftaran tidak ditemukan")
 		return
 	}
-	componentID := in.ComponentID
-	code := in.ComponentCode
-	if componentID == "" || code == "" {
-		resolvedID, resolvedCode, err := a.ensureComponent(r, schoolID, periodID, componentID, code)
-		if err != nil {
-			writeErr(w, err)
-			return
-		}
-		componentID, code = resolvedID, resolvedCode
+	switch model.ApplicationStatus(status) {
+	case model.StatusEligibleForTest, model.StatusTested, model.StatusRanked:
+	default:
+		common.WriteError(w, http.StatusUnprocessableEntity, "nilai hanya dapat diisi untuk pendaftar yang siap tes atau sudah tes")
+		return
 	}
-	_ = code
-	if componentID == "" {
-		common.WriteError(w, http.StatusUnprocessableEntity, "component is required")
+	componentID, _, err := a.ensureComponent(r, schoolID, periodID, in.ComponentID, in.ComponentCode)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var maxScore int64
+	if err := a.DB.QueryRowContext(r.Context(),
+		`SELECT max_score FROM selection_components WHERE id=$1`, componentID).Scan(&maxScore); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := model.ValidateScore(in.Score, maxScore); err != nil {
+		common.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	final := in.Final == nil || *in.Final
@@ -312,6 +319,8 @@ func (a *App) UpsertScore(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	a.audit(r.Context(), schoolID, "application", applicationID, "score_saved", "admin", claims.UserID, claims.Name, "",
+		nil, map[string]any{"component_id": componentID, "score": in.Score, "final": final})
 	common.WriteJSON(w, http.StatusOK, map[string]any{"application_id": applicationID, "score": in.Score, "final": final}, nil)
 }
 
@@ -430,6 +439,10 @@ func (a *App) RunRanking(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, err)
 			return
 		}
+		if err = a.markRanked(r.Context(), tx, schoolID, entry["application_id"].(string)); err != nil {
+			writeErr(w, err)
+			return
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		writeErr(w, err)
@@ -454,10 +467,18 @@ func (a *App) computeRanking(r *http.Request, schoolID, periodID, waveID, trackI
 	if periodID == "" || waveID == "" || trackID == "" || formulaID == "" {
 		return nil, "", 0, &httpError{http.StatusUnprocessableEntity, "period_id, wave_id, track_id and formula_id are required"}
 	}
-	var raw []byte
+	var (
+		raw                       []byte
+		formulaWave, formulaTrack string
+	)
 	if err := a.DB.QueryRowContext(r.Context(),
-		`SELECT formula FROM selection_formula_versions WHERE id=$1 AND school_id=$2`, formulaID, schoolID).Scan(&raw); err != nil {
-		return nil, "", 0, &httpError{http.StatusNotFound, "formula not found"}
+		`SELECT formula,wave_id,track_id FROM selection_formula_versions WHERE id=$1 AND school_id=$2`, formulaID, schoolID).
+		Scan(&raw, &formulaWave, &formulaTrack); err != nil {
+		return nil, "", 0, &httpError{http.StatusNotFound, "formula tidak ditemukan"}
+	}
+	// BUG-161: a formula belongs to one wave + track.
+	if formulaWave != waveID || formulaTrack != trackID {
+		return nil, "", 0, &httpError{http.StatusUnprocessableEntity, "formula ini dibuat untuk gelombang/jalur lain"}
 	}
 	var spec model.FormulaSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
@@ -475,6 +496,7 @@ func (a *App) computeRanking(r *http.Request, schoolID, periodID, waveID, trackI
 		 JOIN component_scores cs ON cs.application_id=a.id AND cs.final
 		 JOIN selection_components sc ON sc.id=cs.component_id
 		 WHERE a.school_id=$1 AND a.period_id=$2 AND a.wave_id=$3 AND a.track_id=$4
+		   AND a.status IN('eligible_for_test','tested','ranked')
 		 ORDER BY a.id,sc.code`, schoolID, periodID, waveID, trackID)
 	if err != nil {
 		return nil, "", 0, err
@@ -561,4 +583,23 @@ func normalizeFormulaStatus(status string) string {
 		return "published"
 	}
 	return "draft"
+}
+
+// markRanked moves a scored applicant to "ranked" (via "tested" when needed),
+// so decisions can be drafted for it.
+func (a *App) markRanked(ctx context.Context, tx *sql.Tx, schoolID, applicationID string) error {
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM applications WHERE id=$1`, applicationID).Scan(&status); err != nil {
+		return err
+	}
+	steps := map[string][]model.ApplicationStatus{
+		string(model.StatusEligibleForTest): {model.StatusTested, model.StatusRanked},
+		string(model.StatusTested):          {model.StatusRanked},
+	}[status]
+	for _, to := range steps {
+		if _, err := a.transitionTx(ctx, tx, schoolID, applicationID, "system", "admission", "Sistem PPDB", to, "Hasil pemeringkatan", 0, ""); err != nil {
+			return err
+		}
+	}
+	return nil
 }

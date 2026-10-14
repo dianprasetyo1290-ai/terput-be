@@ -564,3 +564,29 @@ func TestSafeFileName(t *testing.T) {
 		}
 	}
 }
+
+func TestReregistrationDeadline(t *testing.T) {
+	now := time.Date(2027, 3, 1, 10, 0, 0, 0, time.UTC)
+	end := time.Date(2027, 3, 20, 17, 0, 0, 0, time.UTC)
+	past := time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name     string
+		waveEnd  *time.Time
+		days     int
+		waitlist bool
+		want     time.Time
+	}{
+		{"announced uses wave end", &end, 7, false, end},
+		{"waitlist gets relative days", &end, 5, true, now.AddDate(0, 0, 5)},
+		{"no wave end", nil, 3, false, now.AddDate(0, 0, 3)},
+		{"wave end already past", &past, 3, false, now.AddDate(0, 0, 3)},
+		{"zero days defaults to 7", nil, 0, true, now.AddDate(0, 0, 7)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ReregistrationDeadline(now, tc.waveEnd, tc.days, tc.waitlist); !got.Equal(tc.want) {
+				t.Fatalf("got %v want %v", got, tc.want)
+			}
+		})
+	}
+}

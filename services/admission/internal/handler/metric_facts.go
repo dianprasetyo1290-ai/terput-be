@@ -55,8 +55,8 @@ func (a *App) InternalMetricFacts(w http.ResponseWriter, r *http.Request) {
 
 	for rows.Next() {
 		var (
-			ar        appRow
-			wStart    *time.Time
+			ar     appRow
+			wStart *time.Time
 		)
 		if err := rows.Scan(&ar.ID, &ar.WaveID, &ar.Status, &ar.CreatedAt, &ar.WaveName, &wStart); err != nil {
 			writeErr(w, err)

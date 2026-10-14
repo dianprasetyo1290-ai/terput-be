@@ -45,10 +45,10 @@ func (a *App) decisionView(r *http.Request, schoolID, applicationID string) (map
 		published sql.NullTime
 	)
 	err := a.DB.QueryRowContext(r.Context(),
-		`SELECT d.decision,d.reason,re.rank,d.created_at
+		`SELECT d.decision,d.reason,re.rank,COALESCE(d.published_at,d.created_at)
 		 FROM decisions d
 		 LEFT JOIN ranking_entries re ON re.id=d.ranking_entry_id
-		 WHERE d.application_id=$1 AND d.school_id=$2
+		 WHERE d.application_id=$1 AND d.school_id=$2 AND d.status='published'
 		 ORDER BY d.version DESC LIMIT 1`, applicationID, schoolID).
 		Scan(&decision, &reason, &rank, &published)
 	switch {
@@ -115,14 +115,11 @@ func (a *App) FinalizeDecision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var (
-		status  string
-		version int
-	)
+	var status string
 	err := a.DB.QueryRowContext(r.Context(),
-		`SELECT status,version FROM applications WHERE id=$1 AND school_id=$2`, applicationID, schoolID).Scan(&status, &version)
+		`SELECT status FROM applications WHERE id=$1 AND school_id=$2`, applicationID, schoolID).Scan(&status)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "application not found")
+		common.WriteError(w, http.StatusNotFound, "pendaftaran tidak ditemukan")
 		return
 	}
 	if err != nil {
@@ -130,11 +127,11 @@ func (a *App) FinalizeDecision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if model.ApplicationStatus(status) != model.StatusRanked {
-		common.WriteError(w, http.StatusUnprocessableEntity, "application must be ranked before a final decision")
+		common.WriteError(w, http.StatusUnprocessableEntity, "pendaftar harus sudah diperingkat sebelum keputusan seleksi")
 		return
 	}
 
-	target, dbDecision, err := decisionTarget(in.Decision)
+	dbDecision, err := decisionTarget(in.Decision)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -155,51 +152,80 @@ func (a *App) FinalizeDecision(w http.ResponseWriter, r *http.Request) {
 		in.Reason = "decision published"
 	}
 
-	if _, err = a.transition(r.Context(), schoolID, applicationID, "admin", claims.UserID, "", target, in.Reason, version, ""); err != nil {
+	tx, err := a.DB.BeginTx(r.Context(), nil)
+	if err != nil {
 		writeErr(w, err)
 		return
 	}
-
+	defer func() { _ = tx.Rollback() }()
+	var pendingApproval bool
+	if err = tx.QueryRowContext(r.Context(),
+		`SELECT EXISTS(SELECT 1 FROM decisions WHERE application_id=$1 AND status IN('pending_approval','approved'))`,
+		applicationID).Scan(&pendingApproval); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if pendingApproval {
+		common.WriteError(w, http.StatusConflict, "hasil seleksi pendaftar ini sedang diajukan atau sudah disetujui; tidak dapat diubah")
+		return
+	}
 	var rankingEntryID sql.NullInt64
-	_ = a.DB.QueryRowContext(r.Context(),
-		`SELECT id FROM ranking_entries WHERE application_id=$1 AND school_id=$2 ORDER BY ranking_run_id DESC LIMIT 1`,
+	_ = tx.QueryRowContext(r.Context(),
+		`SELECT e.id FROM ranking_entries e JOIN ranking_runs rr ON rr.id=e.ranking_run_id
+		 WHERE e.application_id=$1 AND e.school_id=$2 ORDER BY rr.version DESC LIMIT 1`,
 		applicationID, schoolID).Scan(&rankingEntryID)
-
+	if _, err = tx.ExecContext(r.Context(),
+		`UPDATE decisions SET status='superseded' WHERE application_id=$1 AND status='draft'`, applicationID); err != nil {
+		writeErr(w, err)
+		return
+	}
 	var decisionVersion int
-	if err = a.DB.QueryRowContext(r.Context(),
+	if err = tx.QueryRowContext(r.Context(),
 		`SELECT COALESCE(max(version),0)+1 FROM decisions WHERE application_id=$1`, applicationID).Scan(&decisionVersion); err != nil {
 		writeErr(w, err)
 		return
 	}
-	if _, err = a.DB.ExecContext(r.Context(),
-		`INSERT INTO decisions(school_id,application_id,ranking_entry_id,decision,override,reason,actor_id,version)
-		 VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+	// The decision is a draft: it reaches the guardian only after the
+	// Selection Committee approves the wave result and the scheduled
+	// announcement publishes it (BUG-034/036).
+	if _, err = tx.ExecContext(r.Context(),
+		`INSERT INTO decisions(school_id,application_id,ranking_entry_id,decision,override,reason,actor_id,version,status,published_at)
+		 VALUES($1,$2,$3,$4,$5,$6,$7,$8,'draft',NULL)`,
 		schoolID, applicationID, rankingEntryID, dbDecision, override, in.Reason, claims.UserID, decisionVersion); err != nil {
 		writeErr(w, err)
 		return
 	}
-	a.audit(r.Context(), schoolID, "decision", applicationID, "decision_finalized", "admin", claims.UserID, "", in.Reason,
-		map[string]any{"status": status}, map[string]any{"decision": dbDecision, "override": override})
+	if _, err = tx.ExecContext(r.Context(),
+		`INSERT INTO audit_events(school_id,aggregate_type,aggregate_id,action,actor_type,actor_id,actor_name,after_data,reason)
+		 VALUES($1,'application',$2,'decision_drafted','admin',$3,$4,$5,$6)`,
+		schoolID, applicationID, claims.UserID, claims.Name, jsonRaw(map[string]any{"decision": dbDecision, "override": override, "version": decisionVersion}), in.Reason); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		writeErr(w, err)
+		return
+	}
 	common.WriteJSON(w, http.StatusCreated, map[string]any{
 		"application_id": applicationID,
 		"decision":       in.Decision,
 		"override":       override,
 		"version":        decisionVersion,
+		"status":         "draft",
 	}, nil)
 }
 
-// decisionTarget maps the API decision to the application status and the stored
-// decision vocabulary.
-func decisionTarget(decision string) (model.ApplicationStatus, string, error) {
+// decisionTarget maps the API decision to the stored decision vocabulary.
+func decisionTarget(decision string) (string, error) {
 	switch decision {
 	case "accepted", "offered":
-		return model.StatusOffered, "offered", nil
+		return "offered", nil
 	case "waitlisted":
-		return model.StatusWaitlisted, "waitlisted", nil
+		return "waitlisted", nil
 	case "rejected":
-		return model.StatusRejected, "rejected", nil
+		return "rejected", nil
 	default:
-		return "", "", &httpError{http.StatusUnprocessableEntity, "decision must be accepted, waitlisted or rejected"}
+		return "", &httpError{http.StatusUnprocessableEntity, "keputusan harus accepted, waitlisted, atau rejected"}
 	}
 }
 

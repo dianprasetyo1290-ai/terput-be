@@ -133,6 +133,8 @@ func main() {
 		ad.Post("/admin/applications/{id}/request_correction", app.RequestCorrection)
 		ad.Post("/admin/applications/{id}/mark_eligible", app.MarkEligible)
 		ad.Post("/admin/applications/{id}/reject", app.RejectApplication)
+		ad.Get("/admin/applications/{id}/special-discounts", app.ListSpecialDiscounts)
+		ad.Post("/admin/applications/{id}/special-discounts", app.CreateSpecialDiscount)
 
 		ad.Get("/admin/config/periods", app.ListPeriods)
 		ad.Post("/admin/config/periods", app.CreatePeriod)
@@ -179,6 +181,13 @@ func main() {
 		ad.Post("/admin/selection/rankings/preview", app.RankingPreview)
 		ad.Post("/admin/selection/rankings", app.RunRanking)
 		ad.Post("/admin/selection/decisions/{applicationId}", app.FinalizeDecision)
+		ad.Get("/admin/selection/approvals", app.ListSelectionApprovals)
+		ad.Post("/admin/selection/approvals", app.SubmitSelectionApproval)
+		ad.Get("/admin/selection/announcements", app.ListAnnouncements)
+		ad.Post("/admin/selection/announcements", app.CreateAnnouncement)
+		ad.Post("/admin/selection/announcements/{id}/cancel", app.CancelAnnouncement)
+		ad.Get("/admin/selection/waitlist", app.ListWaitlist)
+		ad.Post("/admin/selection/waitlist/promote", app.PromoteWaitlist)
 
 		ad.Get("/admin/conversions", app.ListConversions)
 		ad.Post("/admin/conversions", app.StartConversion)
@@ -191,6 +200,7 @@ func main() {
 	r.Group(func(in chi.Router) {
 		in.Use(common.InternalAuth(cfg.InternalKey))
 		in.Get("/internal/metric-facts", app.InternalMetricFacts)
+		in.Post("/internal/approval-callbacks", app.ApprovalCallback)
 	})
 
 	log.Printf("admission-service listening on :%s (%s)", cfg.Port, cfg.AppEnv)

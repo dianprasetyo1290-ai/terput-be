@@ -647,3 +647,19 @@ func SafeFileName(name, mime string) string {
 	}
 	return out
 }
+
+// ReregistrationDeadline is when an offered applicant must have paid the
+// re-registration minimum (BR-PPDB-08). Applicants promoted from the
+// waitlist get waitlistDays from the promotion; announced offers use the
+// wave's re-registration end, or waitlistDays from now when that is unset or
+// already past. waitlistDays <= 0 falls back to 7.
+func ReregistrationDeadline(now time.Time, waveEnd *time.Time, waitlistDays int, fromWaitlist bool) time.Time {
+	if waitlistDays <= 0 {
+		waitlistDays = 7
+	}
+	relative := now.AddDate(0, 0, waitlistDays)
+	if fromWaitlist || waveEnd == nil || !waveEnd.After(now) {
+		return relative
+	}
+	return *waveEnd
+}
