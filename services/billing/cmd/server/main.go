@@ -157,6 +157,7 @@ func main() {
 		ad.Get("/admin/schemes/{id}", app.GetScheme)
 		ad.Put("/admin/schemes/{id}", app.UpdateScheme)
 		ad.Delete("/admin/schemes/{id}", app.ArchiveScheme)
+		ad.Get("/admin/schemes/{id}/changes", app.ListSchemeChanges)
 
 		ad.Post("/admin/bills/generate", app.GenerateBills)
 		ad.Post("/admin/bills/reminders", app.AdminBillReminders)
@@ -249,6 +250,7 @@ func main() {
 		in.Post("/internal/bills/generate", app.InternalGenerateBills)
 		in.Get("/internal/students/{studentUserId}/outstanding", app.InternalStudentOutstanding)
 		in.Post("/internal/corrections/{id}/callback", app.CorrectionCallback)
+		in.Post("/internal/schemes/changes/{id}/callback", app.SchemeChangeCallback)
 		in.Get("/internal/students/{studentUserId}/financial-summary", app.InternalStudentFinancialSummary)
 		in.Post("/internal/students/{studentUserId}/exit", app.InternalStudentExit)
 		in.Post("/internal/students/{studentUserId}/refund", app.InternalStudentRefund)

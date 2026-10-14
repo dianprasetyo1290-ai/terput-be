@@ -57,6 +57,44 @@ CREATE TABLE bill_followups (
 );
 CREATE INDEX bill_followups_student_idx ON bill_followups (school_id, student_user_id, created_at DESC);
 
+-- BUG-124/127/172: tariff validity window, free-component flag and the
+-- fee-change approval queue (BUG-051).
+ALTER TABLE billing_schemes
+    ADD COLUMN effective_from date NULL,
+    ADD COLUMN effective_to   date NULL,
+    ADD CONSTRAINT billing_schemes_effective_window CHECK (effective_to IS NULL OR effective_from IS NULL OR effective_to >= effective_from);
+
+ALTER TABLE billing_scheme_components ADD COLUMN is_free boolean NOT NULL DEFAULT false;
+-- Existing zero tariffs were accepted as free; flag them so the new rule holds.
+UPDATE billing_scheme_components SET is_free = true WHERE amount_idr = 0;
+ALTER TABLE billing_scheme_components
+    ADD CONSTRAINT billing_scheme_components_free_amount CHECK ((is_free AND amount_idr = 0) OR (NOT is_free AND amount_idr > 0));
+
+-- A tariff change on an active scheme waits here until the Approval Center
+-- decides (request_type fee_change). payload is the requested scheme,
+-- before_data the scheme at request time.
+CREATE TABLE billing_scheme_changes (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id       uuid NOT NULL,
+    scheme_id       uuid NOT NULL REFERENCES billing_schemes(id),
+    status          text NOT NULL DEFAULT 'pending_approval'
+                    CHECK (status IN ('pending_approval','applied','rejected','failed')),
+    payload         jsonb NOT NULL,
+    before_data     jsonb NOT NULL,
+    approval_id     text NULL,
+    requested_by    uuid NOT NULL,
+    requested_role  text NOT NULL DEFAULT '',
+    decided_by      text NULL,
+    decision_note   text NULL,
+    failure_reason  text NULL,
+    idempotency_key text NOT NULL,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    decided_at      timestamptz NULL,
+    UNIQUE (school_id, idempotency_key)
+);
+CREATE UNIQUE INDEX billing_scheme_changes_one_pending ON billing_scheme_changes (scheme_id) WHERE status = 'pending_approval';
+CREATE INDEX billing_scheme_changes_school_idx ON billing_scheme_changes (school_id, created_at DESC);
+
 -- BUG-008: re-derive every stored bill status from the ledger (verified
 -- allocations minus reversals vs net), the same rule as
 -- model.DeriveBillStatus. Void bills are never touched. This is a data

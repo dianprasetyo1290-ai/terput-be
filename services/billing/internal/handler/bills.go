@@ -186,14 +186,15 @@ func (a *App) generateBills(ctx context.Context, schoolID string, in generateReq
 
 	// Resolve the scheme (school-scoped).
 	var (
-		gradeLevel  string
-		dueDay      int
-		schemeState string
+		gradeLevel     string
+		dueDay         int
+		schemeState    string
+		effFrom, effTo sql.NullTime
 	)
 	err := a.DB.QueryRowContext(ctx,
-		`SELECT COALESCE(grade_level,''),due_day,status
-		 FROM billing_schemes WHERE id=$1 AND school_id=$2`, in.SchemeID, schoolID).
-		Scan(&gradeLevel, &dueDay, &schemeState)
+		`SELECT COALESCE(grade_level,''),due_day,status,effective_from,effective_to
+		 FROM billing_schemes WHERE id::text=$1 AND school_id=$2`, in.SchemeID, schoolID).
+		Scan(&gradeLevel, &dueDay, &schemeState, &effFrom, &effTo)
 	if err == sql.ErrNoRows {
 		return result, &httpError{http.StatusNotFound, "scheme not found"}
 	}
@@ -202,6 +203,19 @@ func (a *App) generateBills(ctx context.Context, schoolID string, in generateReq
 	}
 	if schemeState == "archived" {
 		return result, &httpError{http.StatusUnprocessableEntity, "scheme is archived"}
+	}
+	if schemeState == "draft" {
+		return result, &httpError{http.StatusUnprocessableEntity, "skema masih draft; aktifkan skema sebelum menerbitkan tagihan"}
+	}
+	var from, to *time.Time
+	if effFrom.Valid {
+		from = &effFrom.Time
+	}
+	if effTo.Valid {
+		to = &effTo.Time
+	}
+	if !model.PeriodInWindow(in.PeriodYear, in.PeriodMonth, from, to) {
+		return result, &httpError{http.StatusUnprocessableEntity, "periode tagihan di luar masa berlaku tarif skema"}
 	}
 
 	// Line items from the scheme's components.
