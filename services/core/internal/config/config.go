@@ -33,6 +33,9 @@ type Config struct {
 	SchoolTimezone string
 	// SelfInternalURL is core's own base URL, used for exception retry_url.
 	SelfInternalURL string
+	// RetryLockSeconds is how long a manual exception retry holds its lock;
+	// a lock older than this (crashed worker) may be taken over.
+	RetryLockSeconds int
 }
 
 // Load reads and validates configuration from environment variables.
@@ -56,11 +59,12 @@ func Load() (Config, error) {
 		StorageRoot:         env("STORAGE_ROOT", "./data/private"),
 		MaxUploadBytes:      int64(integer("MAX_UPLOAD_BYTES", 10<<20)),
 		SchoolTimezone:      env("SCHOOL_TIMEZONE", "Asia/Jakarta"),
+		RetryLockSeconds:    integer("EXCEPTION_RETRY_LOCK_SECONDS", 300),
 	}
 	c.SelfInternalURL = env("CORE_INTERNAL_URL", "http://localhost:"+c.Port)
 
-	if c.JobIntervalSeconds <= 0 || c.CallbackMaxAttempts <= 0 || c.AuditExportMaxRows <= 0 {
-		return Config{}, errors.New("JOB_INTERVAL_SECONDS, CALLBACK_MAX_ATTEMPTS and AUDIT_EXPORT_MAX_ROWS must be positive")
+	if c.JobIntervalSeconds <= 0 || c.CallbackMaxAttempts <= 0 || c.AuditExportMaxRows <= 0 || c.RetryLockSeconds <= 0 {
+		return Config{}, errors.New("JOB_INTERVAL_SECONDS, CALLBACK_MAX_ATTEMPTS, AUDIT_EXPORT_MAX_ROWS and EXCEPTION_RETRY_LOCK_SECONDS must be positive")
 	}
 
 	production := strings.EqualFold(c.AppEnv, "production")
