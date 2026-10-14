@@ -389,6 +389,7 @@ func main() {
 		in.Get("/internal/dapodik/students", app.InternalDapodikStudents)
 		in.Post("/internal/role-conflict-exceptions/approval-callback", app.RoleConflictExceptionCallback)
 		in.Get("/internal/permissions", app.InternalPermissions)
+		in.Get("/internal/users", app.InternalUsersByRole)
 
 		// T24: Insight Read Model & Metric Facts
 		in.Get("/internal/metric-facts", app.InternalMetricFacts)

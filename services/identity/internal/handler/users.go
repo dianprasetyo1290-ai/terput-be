@@ -79,13 +79,15 @@ func (a *App) ListUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		// kepala_sekolah joins walikelas here: the principal's school dashboard
 		// and roster views resolve names off this same siswa directory.
-		directoryAllowed := role == common.RoleGuru || (role == common.RoleSiswa && (claims.ActiveRole == common.RoleWalikelas || claims.ActiveRole == common.RoleKepalaSekolah))
+		// QA-BILL: finance/oversight roles read the siswa directory of their
+		// unit as well (isStudentOversightRole includes kepala_sekolah).
+		directoryAllowed := role == common.RoleGuru || (role == common.RoleSiswa && (claims.ActiveRole == common.RoleWalikelas || isStudentOversightRole(claims.ActiveRole)))
 		if !directoryAllowed {
 			common.WriteError(w, http.StatusForbidden, "Akses ditolak: hanya untuk admin")
 			return
 		}
 	}
-	a.listUsersByRole(w, r, role, !privileged)
+	a.listUsersByRole(w, r, role, !privileged, !privileged && role == common.RoleSiswa && isStudentOversightRole(claims.ActiveRole))
 }
 
 // ListStudents backs Data Siswa (admin/superadmin, full fields) and also
@@ -96,14 +98,19 @@ func (a *App) ListUsers(w http.ResponseWriter, r *http.Request) {
 // can't supply since it only returns bare student_user_id).
 func (a *App) ListStudents(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	privileged := claims != nil && (claims.ActiveRole == common.RoleAdmin || claims.ActiveRole == common.RoleSuperadmin)
+	// A trusted X-Internal-Key caller (no claims) reads like an admin; it
+	// used to fall into the 403 branch below.
+	privileged := (claims == nil && common.IsInternal(r)) || (claims != nil && (claims.ActiveRole == common.RoleAdmin || claims.ActiveRole == common.RoleSuperadmin))
 	// walikelas (Presensi Siswa) needs the same directory-only list as guru,
 	// and kepala_sekolah's school-wide dashboard/presensi summary does too.
-	if !privileged && (claims == nil || (claims.ActiveRole != common.RoleGuru && claims.ActiveRole != common.RoleWalikelas && claims.ActiveRole != common.RoleKepalaSekolah)) {
-		common.WriteError(w, http.StatusForbidden, "Akses ditolak: hanya untuk admin")
+	// QA-BILL: finance_manager, kepala_yayasan and auditor read students of
+	// their own unit too (refund names, scholarship picker, student detail),
+	// with NISN kept so a student can be told apart.
+	if !privileged && (claims == nil || (claims.ActiveRole != common.RoleGuru && claims.ActiveRole != common.RoleWalikelas && !isStudentOversightRole(claims.ActiveRole))) {
+		common.WriteError(w, http.StatusForbidden, "Akses ditolak: data siswa hanya untuk admin, guru, kepala sekolah/yayasan, keuangan dan auditor")
 		return
 	}
-	a.listUsersByRole(w, r, common.RoleSiswa, !privileged)
+	a.listUsersByRole(w, r, common.RoleSiswa, !privileged, !privileged && isStudentOversightRole(claims.ActiveRole))
 }
 
 // ListTeachers mirrors ListStudents' admin-or-guru pattern (Bug Report
@@ -123,13 +130,15 @@ func (a *App) ListTeachers(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusForbidden, "Akses ditolak: hanya untuk admin")
 		return
 	}
-	a.listUsersByRole(w, r, common.RoleGuru, !privileged)
+	a.listUsersByRole(w, r, common.RoleGuru, !privileged, false)
 }
 
 // listUsersByRole executes the shared Data Pengguna/Siswa/Guru query.
 // directoryOnly strips account/security fields from the response — see
 // ListUsers' doc comment for when that's set.
-func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role string, directoryOnly bool) {
+// keepNISN (oversight roles) keeps NISN and the student's roles/status in a
+// directory-only response.
+func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role string, directoryOnly, keepNISN bool) {
 	schoolID, filtered := resolveSchoolScope(r)
 	status := r.URL.Query().Get("status") // aktif/nonaktif filter for guru, optional
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
@@ -264,10 +273,12 @@ func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role strin
 			out[i].BirthDate = nil
 			out[i].BirthPlace = nil
 			out[i].Religion = nil
-			out[i].NISN = nil
 			out[i].NIK = nil
 			out[i].Photo = nil
-			out[i].Roles = []model.UserSchoolRole{}
+			if !keepNISN {
+				out[i].NISN = nil
+				out[i].Roles = []model.UserSchoolRole{}
+			}
 		}
 	}
 
@@ -383,6 +394,10 @@ func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) GetUser(w http.ResponseWriter, r *http.Request) {
+	if c := common.FromCtx(r); c != nil && isStudentOversightRole(c.ActiveRole) {
+		a.getUserForOversight(w, r, c)
+		return
+	}
 	if !requireRole(w, r, common.RoleAdmin) {
 		return
 	}
