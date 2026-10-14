@@ -35,7 +35,7 @@ type createMessagePayload struct {
 func (h *Handler) ListThreads(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "sesi tidak valid, silakan masuk kembali")
 		return
 	}
 	schoolID := effectiveSchoolID(r, claims)
@@ -46,7 +46,7 @@ func (h *Handler) ListThreads(w http.ResponseWriter, r *http.Request) {
 	threads, total, err := h.Store.ListChatThreadsForUser(r.Context(), schoolID, claims.UserID, page, perPage)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to list threads")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat percakapan")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, threads, common.NewPageMeta(page, perPage, total))
@@ -56,7 +56,7 @@ func (h *Handler) ListThreads(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateThread(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "sesi tidak valid, silakan masuk kembali")
 		return
 	}
 	schoolID := effectiveSchoolID(r, claims)
@@ -69,7 +69,7 @@ func (h *Handler) CreateThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(payload.Subject) == "" {
-		common.WriteError(w, http.StatusBadRequest, "subject is required")
+		common.WriteError(w, http.StatusBadRequest, "subjek wajib diisi")
 		return
 	}
 
@@ -100,7 +100,7 @@ func (h *Handler) CreateThread(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to create thread")
+		common.WriteError(w, http.StatusInternalServerError, "gagal membuat percakapan")
 		return
 	}
 	common.WriteJSONMsg(w, http.StatusCreated, thread, nil, "Thread dibuat")
@@ -111,7 +111,7 @@ func (h *Handler) CreateThread(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "sesi tidak valid, silakan masuk kembali")
 		return
 	}
 	if _, ok := h.authorizeThread(w, r, claims, param(r, "id")); !ok {
@@ -121,7 +121,7 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	messages, total, err := h.Store.ListChatMessages(r.Context(), param(r, "id"), page, perPage)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to list messages")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat pesan")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, messages, common.NewPageMeta(page, perPage, total))
@@ -131,7 +131,7 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "sesi tidak valid, silakan masuk kembali")
 		return
 	}
 	thread, ok := h.authorizeThread(w, r, claims, param(r, "id"))
@@ -139,7 +139,7 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if thread.Closed() {
-		common.WriteError(w, http.StatusConflict, "thread is closed")
+		common.WriteError(w, http.StatusConflict, "percakapan sudah ditutup")
 		return
 	}
 
@@ -148,14 +148,14 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(payload.Body) == "" && strings.TrimSpace(payload.AttachmentKey) == "" {
-		common.WriteError(w, http.StatusBadRequest, "body or attachment_key is required")
+		common.WriteError(w, http.StatusBadRequest, "isi pesan atau lampiran wajib diisi")
 		return
 	}
 
 	key := strings.TrimSpace(payload.AttachmentKey)
 	if key != "" && !strings.HasPrefix(key, "chat/"+thread.ID+"/") {
 		// A key may only reference a file uploaded to this same thread.
-		common.WriteError(w, http.StatusBadRequest, "attachment_key does not belong to this thread")
+		common.WriteError(w, http.StatusBadRequest, "lampiran bukan milik percakapan ini")
 		return
 	}
 	h.postMessage(w, r, thread, store.CreateMessageInput{
@@ -171,7 +171,7 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) MarkThreadRead(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "sesi tidak valid, silakan masuk kembali")
 		return
 	}
 	thread, ok := h.authorizeThread(w, r, claims, param(r, "id"))
@@ -181,7 +181,7 @@ func (h *Handler) MarkThreadRead(w http.ResponseWriter, r *http.Request) {
 	marked, err := h.Store.MarkChatThreadRead(r.Context(), thread.ID, claims.UserID)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to mark thread read")
+		common.WriteError(w, http.StatusInternalServerError, "gagal menandai percakapan dibaca")
 		return
 	}
 	common.WriteJSONMsg(w, http.StatusOK, map[string]int{"marked": len(marked)}, nil, "Pesan ditandai sudah dibaca")
@@ -198,22 +198,22 @@ func (h *Handler) authorizeThread(w http.ResponseWriter, r *http.Request, claims
 	}
 	thread, err := h.Store.GetChatThread(r.Context(), threadID, schoolID)
 	if errors.Is(err, store.ErrNotFound) {
-		common.WriteError(w, http.StatusNotFound, "thread not found")
+		common.WriteError(w, http.StatusNotFound, "percakapan tidak ditemukan")
 		return nil, false
 	}
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to load thread")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat percakapan")
 		return nil, false
 	}
 	ok, err := h.Store.IsChatParticipant(r.Context(), threadID, claims.UserID)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to verify thread access")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memverifikasi akses percakapan")
 		return nil, false
 	}
 	if !ok {
-		common.WriteError(w, http.StatusForbidden, "forbidden: you are not a participant of this thread")
+		common.WriteError(w, http.StatusForbidden, "Anda bukan peserta percakapan ini")
 		return nil, false
 	}
 	return thread, true

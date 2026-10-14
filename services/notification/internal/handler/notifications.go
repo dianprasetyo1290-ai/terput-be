@@ -13,7 +13,7 @@ import (
 func (h *Handler) ListNotifications(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "sesi tidak valid, silakan masuk kembali")
 		return
 	}
 	schoolID := effectiveSchoolID(r, claims)
@@ -33,7 +33,7 @@ func (h *Handler) ListNotifications(w http.ResponseWriter, r *http.Request) {
 	items, total, err := h.Store.ListNotifications(r.Context(), filter)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to list notifications")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat notifikasi")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, items, common.NewPageMeta(page, perPage, total))
@@ -43,7 +43,7 @@ func (h *Handler) ListNotifications(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UnreadCount(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "sesi tidak valid, silakan masuk kembali")
 		return
 	}
 	schoolID := effectiveSchoolID(r, claims)
@@ -53,7 +53,7 @@ func (h *Handler) UnreadCount(w http.ResponseWriter, r *http.Request) {
 	count, err := h.Store.CountUnreadNotifications(r.Context(), schoolID, claims.UserID)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to count unread notifications")
+		common.WriteError(w, http.StatusInternalServerError, "gagal menghitung notifikasi belum dibaca")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]int{"count": count}, nil)
@@ -64,7 +64,7 @@ func (h *Handler) UnreadCount(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) MarkRead(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "sesi tidak valid, silakan masuk kembali")
 		return
 	}
 	schoolID := effectiveSchoolID(r, claims)
@@ -73,12 +73,12 @@ func (h *Handler) MarkRead(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err := h.Store.MarkNotificationRead(r.Context(), param(r, "id"), schoolID, claims.UserID)
 	if errors.Is(err, store.ErrNotFound) {
-		common.WriteError(w, http.StatusNotFound, "notification not found")
+		common.WriteError(w, http.StatusNotFound, "notifikasi tidak ditemukan")
 		return
 	}
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to mark notification read")
+		common.WriteError(w, http.StatusInternalServerError, "gagal menandai notifikasi dibaca")
 		return
 	}
 	common.WriteJSONMsg(w, http.StatusOK, n, nil, "Notifikasi ditandai sudah dibaca")
@@ -88,7 +88,7 @@ func (h *Handler) MarkRead(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) MarkAllRead(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "sesi tidak valid, silakan masuk kembali")
 		return
 	}
 	schoolID := effectiveSchoolID(r, claims)
@@ -98,7 +98,7 @@ func (h *Handler) MarkAllRead(w http.ResponseWriter, r *http.Request) {
 	marked, err := h.Store.MarkAllNotificationsRead(r.Context(), schoolID, claims.UserID)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to mark notifications read")
+		common.WriteError(w, http.StatusInternalServerError, "gagal menandai notifikasi dibaca")
 		return
 	}
 	common.WriteJSONMsg(w, http.StatusOK, map[string]int{"marked": marked}, nil, "Semua notifikasi ditandai sudah dibaca")
@@ -109,7 +109,7 @@ func (h *Handler) MarkAllRead(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListNotificationDeliveries(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "sesi tidak valid, silakan masuk kembali")
 		return
 	}
 	schoolID := effectiveSchoolID(r, claims)
@@ -118,18 +118,18 @@ func (h *Handler) ListNotificationDeliveries(w http.ResponseWriter, r *http.Requ
 	}
 	n, err := h.Store.GetNotification(r.Context(), param(r, "id"), schoolID, claims.UserID)
 	if errors.Is(err, store.ErrNotFound) {
-		common.WriteError(w, http.StatusNotFound, "notification not found")
+		common.WriteError(w, http.StatusNotFound, "notifikasi tidak ditemukan")
 		return
 	}
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to load notification")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat notifikasi")
 		return
 	}
 	deliveries, err := h.Store.ListDeliveries(r.Context(), n.ID)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to load deliveries")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat status pengiriman")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, deliveries, nil)

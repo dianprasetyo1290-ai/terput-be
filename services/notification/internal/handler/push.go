@@ -37,7 +37,7 @@ func (h *Handler) GetPushConfig(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) SubscribePush(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "unauthorized")
+		common.WriteError(w, http.StatusUnauthorized, "tidak terautentikasi")
 		return
 	}
 
@@ -54,7 +54,7 @@ func (h *Handler) SubscribePush(w http.ResponseWriter, r *http.Request) {
 
 	req.Endpoint = strings.TrimSpace(req.Endpoint)
 	if req.Endpoint == "" || req.Keys.P256dh == "" || req.Keys.Auth == "" {
-		common.WriteError(w, http.StatusBadRequest, "endpoint, keys.p256dh, and keys.auth are required")
+		common.WriteError(w, http.StatusBadRequest, "endpoint, keys.p256dh, dan keys.auth wajib diisi")
 		return
 	}
 
@@ -70,7 +70,7 @@ func (h *Handler) SubscribePush(w http.ResponseWriter, r *http.Request) {
 	out, err := h.Store.UpsertPushSubscription(r.Context(), sub)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to save push subscription")
+		common.WriteError(w, http.StatusInternalServerError, "gagal menyimpan langganan push")
 		return
 	}
 
@@ -81,7 +81,7 @@ func (h *Handler) SubscribePush(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UnsubscribePush(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "unauthorized")
+		common.WriteError(w, http.StatusUnauthorized, "tidak terautentikasi")
 		return
 	}
 
@@ -101,13 +101,13 @@ func (h *Handler) UnsubscribePush(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if endpoint == "" {
-		common.WriteError(w, http.StatusBadRequest, "endpoint is required")
+		common.WriteError(w, http.StatusBadRequest, "endpoint wajib diisi")
 		return
 	}
 
 	if err := h.Store.DeletePushSubscription(r.Context(), schoolID, claims.UserID, endpoint); err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to delete push subscription")
+		common.WriteError(w, http.StatusInternalServerError, "gagal menghapus langganan push")
 		return
 	}
 

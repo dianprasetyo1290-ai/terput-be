@@ -27,7 +27,7 @@ type preferenceChange struct {
 func (h *Handler) GetPreferences(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "sesi tidak valid, silakan masuk kembali")
 		return
 	}
 	schoolID := effectiveSchoolID(r, claims)
@@ -37,7 +37,7 @@ func (h *Handler) GetPreferences(w http.ResponseWriter, r *http.Request) {
 	stored, err := h.Store.ListNotificationPreferences(r.Context(), schoolID, claims.UserID)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to load preferences")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat preferensi")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, mergePreferences(stored), nil)
@@ -48,7 +48,7 @@ func (h *Handler) GetPreferences(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) PutPreferences(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "sesi tidak valid, silakan masuk kembali")
 		return
 	}
 	schoolID := effectiveSchoolID(r, claims)
@@ -66,7 +66,7 @@ func (h *Handler) PutPreferences(w http.ResponseWriter, r *http.Request) {
 		changes = append(changes, preferenceChange{Channel: payload.Channel, Enabled: payload.Enabled})
 	}
 	if len(changes) == 0 {
-		common.WriteError(w, http.StatusBadRequest, "at least one channel preference is required")
+		common.WriteError(w, http.StatusBadRequest, "minimal satu preferensi kanal wajib diisi")
 		return
 	}
 
@@ -74,7 +74,7 @@ func (h *Handler) PutPreferences(w http.ResponseWriter, r *http.Request) {
 	inputs := make([]store.PreferenceInput, 0, len(changes))
 	for _, c := range changes {
 		if !model.ValidChannels[c.Channel] {
-			common.WriteError(w, http.StatusBadRequest, "unknown channel "+c.Channel+" (want in_app|email|whatsapp)")
+			common.WriteError(w, http.StatusBadRequest, "kanal tidak dikenal: "+c.Channel+" (pilih in_app, email, atau whatsapp)")
 			return
 		}
 		if seen[c.Channel] {
@@ -90,14 +90,14 @@ func (h *Handler) PutPreferences(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := h.Store.UpsertNotificationPreferences(r.Context(), schoolID, claims.UserID, inputs); err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to save preferences")
+		common.WriteError(w, http.StatusInternalServerError, "gagal menyimpan preferensi")
 		return
 	}
 
 	stored, err := h.Store.ListNotificationPreferences(r.Context(), schoolID, claims.UserID)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "failed to load preferences")
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat preferensi")
 		return
 	}
 	common.WriteJSONMsg(w, http.StatusOK, mergePreferences(stored), nil, "Preferensi notifikasi disimpan")

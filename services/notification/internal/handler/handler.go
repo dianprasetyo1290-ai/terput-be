@@ -144,7 +144,7 @@ func effectiveSchoolID(r *http.Request, claims *common.Claims) string {
 // resolved (e.g. a superadmin calling a tenant route without ?school_id=).
 func requireSchool(w http.ResponseWriter, schoolID string) bool {
 	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school scope is required (superadmin must pass ?school_id=)")
+		common.WriteError(w, http.StatusBadRequest, "sekolah wajib dipilih (superadmin harus memilih sekolah aktif)")
 		return false
 	}
 	return true
