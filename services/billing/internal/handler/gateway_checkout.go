@@ -331,6 +331,18 @@ func (a *App) ParentRenewTransaction(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "transaksi ini tidak dapat diperbarui dari halaman tagihan")
 		return
 	}
+	// A pending code past its expiry is expired for the parent even before
+	// the expiry job has run (the page counts down to zero and offers
+	// "Perbarui"); close it here so it no longer blocks the bills.
+	if tx.Status == "pending" && !tx.ExpiresAt.After(time.Now()) {
+		if _, err := a.DB.ExecContext(r.Context(),
+			`UPDATE gateway_transactions SET status = 'expired', updated_at = now()
+			 WHERE id = $1 AND school_id = $2 AND status = 'pending' AND expires_at <= now()`, tx.ID, claims.SchoolID); err != nil {
+			writeErr(w, err)
+			return
+		}
+		tx.Status = "expired"
+	}
 	if tx.Status != "expired" && tx.Status != "failed" {
 		common.WriteError(w, http.StatusBadRequest, "hanya transaksi kedaluwarsa atau gagal yang dapat diperbarui")
 		return
