@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -41,25 +42,25 @@ type FinanceSnapshot struct {
 }
 
 type StudentStatusRequest struct {
-	ID                string          `json:"id"`
-	SchoolID          string          `json:"school_id"`
-	StudentUserID     string          `json:"student_user_id"`
-	Kind              string          `json:"kind"`
-	FromClassroomID   *string         `json:"from_classroom_id,omitempty"`
-	ToClassroomID     *string         `json:"to_classroom_id,omitempty"`
-	ToSchoolID        *string         `json:"to_school_id,omitempty"`
-	EffectiveDate     string          `json:"effective_date"` // YYYY-MM-DD
-	Reason            string          `json:"reason"`
-	Attachments       json.RawMessage `json:"attachments"`
-	FinanceSnapshot   json.RawMessage `json:"finance_snapshot,omitempty"`
-	RefundAmountIDR   *int64          `json:"refund_amount_idr,omitempty"`
-	Status            string          `json:"status"`
-	ApprovalID        *string         `json:"approval_id,omitempty"`
-	AppliedAt         *time.Time      `json:"applied_at,omitempty"`
-	RequestedBy       string          `json:"requested_by"`
-	IdempotencyKey    *string         `json:"idempotency_key,omitempty"`
-	CreatedAt         time.Time       `json:"created_at"`
-	UpdatedAt         time.Time       `json:"updated_at"`
+	ID              string          `json:"id"`
+	SchoolID        string          `json:"school_id"`
+	StudentUserID   string          `json:"student_user_id"`
+	Kind            string          `json:"kind"`
+	FromClassroomID *string         `json:"from_classroom_id,omitempty"`
+	ToClassroomID   *string         `json:"to_classroom_id,omitempty"`
+	ToSchoolID      *string         `json:"to_school_id,omitempty"`
+	EffectiveDate   string          `json:"effective_date"` // YYYY-MM-DD
+	Reason          string          `json:"reason"`
+	Attachments     json.RawMessage `json:"attachments"`
+	FinanceSnapshot json.RawMessage `json:"finance_snapshot,omitempty"`
+	RefundAmountIDR *int64          `json:"refund_amount_idr,omitempty"`
+	Status          string          `json:"status"`
+	ApprovalID      *string         `json:"approval_id,omitempty"`
+	AppliedAt       *time.Time      `json:"applied_at,omitempty"`
+	RequestedBy     string          `json:"requested_by"`
+	IdempotencyKey  *string         `json:"idempotency_key,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
 type AcademicSettings struct {
@@ -158,4 +159,72 @@ func ShouldApplyImmediately(effectiveDate string, now time.Time, loc *time.Locat
 	today := time.Date(nowInLoc.Year(), nowInLoc.Month(), nowInLoc.Day(), 0, 0, 0, 0, loc)
 
 	return !eff.After(today), nil
+}
+
+// ---------------------------------------------------------------------------
+// QA-PAY (BUG-057/137/176/177): Menu 78 guards. Pure rules, table-tested in
+// transfer_guard_test.go.
+// ---------------------------------------------------------------------------
+
+// Menu 78 role matrix (PRD): superadmin is platform-level and has no Mutasi
+// Siswa access. Kepala sekolah may only view (approval runs in core's
+// Approval Center).
+var (
+	statusRequestViewRoles   = map[string]bool{"admin": true, "walikelas": true, "kepala_sekolah": true}
+	statusRequestCreateRoles = map[string]bool{"admin": true, "walikelas": true}
+	statusRequestApplyRoles  = map[string]bool{"admin": true}
+)
+
+func CanViewStatusRequests(role string) bool  { return statusRequestViewRoles[role] }
+func CanCreateStatusRequest(role string) bool { return statusRequestCreateRoles[role] }
+func CanApplyStatusRequest(role string) bool  { return statusRequestApplyRoles[role] }
+
+// IsActiveStatusRequest reports whether a request still blocks a new one for
+// the same student (BUG-137): it is waiting for approval or approved but not
+// applied yet. Mirrors the partial unique index of migration 0007.
+func IsActiveStatusRequest(status string) bool {
+	return status == StatusPendingApproval || status == StatusApproved
+}
+
+// ValidateEffectiveDateAfterEnrollment rejects an effective date earlier than
+// the day the student entered the current (active) class, compared as
+// calendar dates in Asia/Jakarta (BUG-176, TC-78-011).
+func ValidateEffectiveDateAfterEnrollment(effectiveDate string, enrolledAt time.Time, loc *time.Location) error {
+	if loc == nil {
+		var err error
+		loc, err = time.LoadLocation("Asia/Jakarta")
+		if err != nil {
+			loc = time.FixedZone("WIB", 7*3600)
+		}
+	}
+	eff, err := time.ParseInLocation("2006-01-02", effectiveDate, loc)
+	if err != nil {
+		return errors.New("format tanggal efektif harus YYYY-MM-DD")
+	}
+	if enrolledAt.IsZero() {
+		return nil
+	}
+	e := enrolledAt.In(loc)
+	enrolledDay := time.Date(e.Year(), e.Month(), e.Day(), 0, 0, 0, 0, loc)
+	if eff.Before(enrolledDay) {
+		return fmt.Errorf("tanggal efektif tidak boleh sebelum tanggal masuk siswa di kelas aktif (%s)", enrolledDay.Format("2006-01-02"))
+	}
+	return nil
+}
+
+var (
+	ErrCancelNotRequester = errors.New("hanya pengaju yang dapat membatalkan pengajuan ini")
+	ErrCancelNotPending   = errors.New("pengajuan hanya dapat dibatalkan selama masih menunggu persetujuan")
+)
+
+// CheckCancelStatusRequest: only the requester may cancel, and only while the
+// request is still pending_approval (BUG-057).
+func CheckCancelStatusRequest(status, requestedBy, actorUserID string) error {
+	if requestedBy == "" || requestedBy != actorUserID {
+		return ErrCancelNotRequester
+	}
+	if !IsValidStatusTransition(status, StatusCancelled) {
+		return ErrCancelNotPending
+	}
+	return nil
 }

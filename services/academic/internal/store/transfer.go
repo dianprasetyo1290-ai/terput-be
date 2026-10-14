@@ -4,27 +4,32 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"skci/academic/internal/model"
 )
 
 type EnrollmentInfo struct {
-	ID             string `json:"id"`
-	SchoolID       string `json:"school_id"`
-	AcademicYearID string `json:"academic_year_id"`
-	ClassroomID    string `json:"classroom_id"`
-	ClassroomName  string `json:"classroom_name"`
-	GradeLevel     string `json:"grade_level"`
-	StudentUserID  string `json:"student_user_id"`
-	Status         string `json:"status"`
+	ID             string    `json:"id"`
+	SchoolID       string    `json:"school_id"`
+	AcademicYearID string    `json:"academic_year_id"`
+	ClassroomID    string    `json:"classroom_id"`
+	ClassroomName  string    `json:"classroom_name"`
+	GradeLevel     string    `json:"grade_level"`
+	StudentUserID  string    `json:"student_user_id"`
+	Status         string    `json:"status"`
+	EnrolledAt     time.Time `json:"enrolled_at"`
 }
 
 // GetActiveStudentEnrollment finds the student's active enrollment and classroom.
 func (s *Store) GetActiveStudentEnrollment(ctx context.Context, schoolID, studentUserID string) (*EnrollmentInfo, error) {
 	row := s.DB.QueryRowContext(ctx, `
 		SELECT ce.id, ce.school_id, ce.academic_year_id, ce.classroom_id,
-		       COALESCE(c.name, ''), COALESCE(c.grade_level, ''), ce.student_user_id, ce.status
+		       COALESCE(c.name, ''), COALESCE(c.grade_level, ''), ce.student_user_id, ce.status, ce.enrolled_at
 		FROM class_enrollments ce
 		JOIN classrooms c ON c.id = ce.classroom_id
 		WHERE ce.school_id = $1 AND ce.student_user_id = $2 AND ce.status = 'active'
@@ -33,7 +38,7 @@ func (s *Store) GetActiveStudentEnrollment(ctx context.Context, schoolID, studen
 
 	var info EnrollmentInfo
 	err := row.Scan(&info.ID, &info.SchoolID, &info.AcademicYearID, &info.ClassroomID,
-		&info.ClassroomName, &info.GradeLevel, &info.StudentUserID, &info.Status)
+		&info.ClassroomName, &info.GradeLevel, &info.StudentUserID, &info.Status, &info.EnrolledAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -76,10 +81,66 @@ func (s *Store) CreateStudentStatusRequest(ctx context.Context, req *model.Stude
 		req.Status, req.ApprovalID, req.RequestedBy, req.IdempotencyKey,
 	).Scan(&req.ID, &req.CreatedAt, &req.UpdatedAt)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "uq_student_status_requests_active" {
+			return nil, ErrActiveStatusRequestExists
+		}
 		return nil, err
 	}
 
 	return req, nil
+}
+
+// ErrActiveStatusRequestExists: the student already has a pending/approved
+// request (unique index uq_student_status_requests_active, migration 0007).
+var ErrActiveStatusRequestExists = errors.New("siswa sudah memiliki pengajuan mutasi yang sedang berjalan")
+
+const statusRequestColumns = `id, school_id, student_user_id, kind, from_classroom_id, to_classroom_id, to_school_id,
+		       effective_date::text, reason, attachments, finance_snapshot, refund_amount_idr,
+		       status, approval_id, applied_at, requested_by, idempotency_key, created_at, updated_at`
+
+// FindActiveStatusRequest returns the student's running (pending_approval or
+// approved, not yet applied) request, or nil.
+func (s *Store) FindActiveStatusRequest(ctx context.Context, schoolID, studentUserID string) (*model.StudentStatusRequest, error) {
+	row := s.DB.QueryRowContext(ctx, `
+		SELECT `+statusRequestColumns+`
+		FROM student_status_requests
+		WHERE school_id::text = $1 AND student_user_id::text = $2
+		  AND status IN ('pending_approval', 'approved')
+		ORDER BY created_at
+		LIMIT 1
+	`, schoolID, studentUserID)
+	return scanStatusRequest(row)
+}
+
+// DeleteUnsubmittedStatusRequest removes a request that never reached the
+// Approval Center (submit failed), so the user can fix the configuration
+// and submit again (same idempotency key included).
+func (s *Store) DeleteUnsubmittedStatusRequest(ctx context.Context, schoolID, id string) error {
+	_, err := s.DB.ExecContext(ctx, `
+		DELETE FROM student_status_requests
+		WHERE school_id::text = $1 AND id::text = $2
+		  AND status = 'pending_approval' AND approval_id IS NULL
+	`, schoolID, id)
+	return err
+}
+
+// TransitionStatusRequest moves a request from one status to another only if
+// it is still in `from` (compare-and-set). approvalID is kept when empty.
+// Reports false when the row was not in `from` any more.
+func (s *Store) TransitionStatusRequest(ctx context.Context, schoolID, id, from, to, approvalID string) (bool, error) {
+	res, err := s.DB.ExecContext(ctx, `
+		UPDATE student_status_requests
+		SET status = $1,
+		    approval_id = COALESCE(NULLIF($2, '')::uuid, approval_id),
+		    updated_at = now()
+		WHERE ($3 = '' OR school_id::text = $3) AND id::text = $4 AND status = $5
+	`, to, approvalID, schoolID, id, from)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
 }
 
 // GetStudentStatusRequestByIdempotency looks up a request by (school_id, idempotency_key).

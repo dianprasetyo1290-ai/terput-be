@@ -57,6 +57,7 @@ func TestAC78_01_WithdrawalWithArrears(t *testing.T) {
 	staffUserID := "55555555-5555-5555-5555-555555555555"
 
 	// Insert classroom and active enrollment for Rina
+	_, _ = db.ExecContext(ctx, `DELETE FROM student_status_requests WHERE school_id = $1`, schoolID)
 	_, _ = db.ExecContext(ctx, `DELETE FROM class_enrollments WHERE school_id = $1`, schoolID)
 	_, _ = db.ExecContext(ctx, `DELETE FROM classrooms WHERE id = $1`, classID)
 	_, err := db.ExecContext(ctx, `
@@ -69,8 +70,8 @@ func TestAC78_01_WithdrawalWithArrears(t *testing.T) {
 	}
 
 	_, err = db.ExecContext(ctx, `
-		INSERT INTO class_enrollments (school_id, academic_year_id, classroom_id, student_user_id, status)
-		VALUES ($1, $2, $3, $4, 'active')
+		INSERT INTO class_enrollments (school_id, academic_year_id, classroom_id, student_user_id, status, enrolled_at)
+		VALUES ($1, $2, $3, $4, 'active', '2026-07-13T08:00:00+07:00')
 	`, schoolID, academicYearID, classID, rinaUserID)
 	if err != nil {
 		t.Fatalf("failed to insert enrollment: %v", err)
@@ -108,7 +109,7 @@ func TestAC78_01_WithdrawalWithArrears(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"data": map[string]any{
-					"id":          "appr-12345",
+					"id":          "a0000000-0000-4000-8000-000000012345",
 					"status":      "pending",
 					"current_seq": 1,
 				},
@@ -213,6 +214,7 @@ func TestAC78_02_UnitTransferWithoutHistoryLoss(t *testing.T) {
 	bayuUserID := "87654321-4321-4321-4321-210987654321"
 
 	// Seed SMP classroom and enrollment
+	_, _ = db.ExecContext(ctx, `DELETE FROM student_status_requests WHERE school_id = $1`, smpSchoolID)
 	_, _ = db.ExecContext(ctx, `DELETE FROM class_enrollments WHERE school_id = $1`, smpSchoolID)
 	_, _ = db.ExecContext(ctx, `DELETE FROM classrooms WHERE id = $1`, smpClassID)
 	_, _ = db.ExecContext(ctx, `
@@ -330,6 +332,7 @@ func TestAC78_03_WithdrawalDepositRefund(t *testing.T) {
 	classID := "99999999-1111-2222-3333-444444444444"
 	studentID := "aaaaaaaa-1111-2222-3333-444444444444"
 
+	_, _ = db.ExecContext(ctx, `DELETE FROM student_status_requests WHERE school_id = $1`, schoolID)
 	_, _ = db.ExecContext(ctx, `DELETE FROM class_enrollments WHERE school_id = $1`, schoolID)
 	_, _ = db.ExecContext(ctx, `DELETE FROM classrooms WHERE id = $1`, classID)
 	_, _ = db.ExecContext(ctx, `
@@ -446,6 +449,7 @@ func TestIdempotentApply(t *testing.T) {
 	classID := "dddddddd-1111-2222-3333-444444444444"
 	yearID := "eeeeeeee-1111-2222-3333-444444444444"
 
+	_, _ = db.ExecContext(ctx, `DELETE FROM student_status_requests WHERE school_id = $1`, schoolID)
 	_, _ = db.ExecContext(ctx, `DELETE FROM class_enrollments WHERE school_id = $1`, schoolID)
 	_, _ = db.ExecContext(ctx, `DELETE FROM classrooms WHERE id = $1`, classID)
 	_, _ = db.ExecContext(ctx, `
