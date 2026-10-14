@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"skci/core/internal/model"
 )
@@ -53,7 +54,7 @@ type Store interface {
 	ListExceptions(ctx context.Context, f ExceptionFilter, page, perPage int) ([]model.IntegrationException, int, error)
 	AssignException(ctx context.Context, schoolID, id, assigneeUserID string) error
 	ResolveException(ctx context.Context, schoolID, id, resolvedBy, reason string) error
-	IncrementExceptionAttempt(ctx context.Context, schoolID, id string) error
+	ClaimExceptionForRetry(ctx context.Context, schoolID, id string, staleAfter time.Duration) error
 	ReopenException(ctx context.Context, schoolID, id, lastError string) error
 
 	// Central Audit Trail

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -481,6 +482,9 @@ func (f *fakeStore) ListExceptions(ctx context.Context, filter store.ExceptionFi
 		if filter.Kind != "" && e.Kind != filter.Kind {
 			continue
 		}
+		if !slices.Contains(filter.Kinds, e.Kind) {
+			continue
+		}
 		if filter.Status != "" && e.Status != filter.Status {
 			continue
 		}
@@ -525,13 +529,20 @@ func (f *fakeStore) ResolveException(ctx context.Context, schoolID, id, resolved
 	return nil
 }
 
-func (f *fakeStore) IncrementExceptionAttempt(ctx context.Context, schoolID, id string) error {
+func (f *fakeStore) ClaimExceptionForRetry(ctx context.Context, schoolID, id string, staleAfter time.Duration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	e, ok := f.exceptions[id]
 	if !ok || e.SchoolID != schoolID {
 		return store.ErrNotFound
 	}
+	switch {
+	case e.Status == model.ExceptionStatusResolved:
+		return store.ErrConflict
+	case e.Status == model.ExceptionStatusRetrying && time.Since(e.UpdatedAt) < staleAfter:
+		return store.ErrRetryInProgress
+	}
+	e.Status = model.ExceptionStatusRetrying
 	e.Attempts++
 	e.UpdatedAt = time.Now()
 	f.exceptions[id] = e

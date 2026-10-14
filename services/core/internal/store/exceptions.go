@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"skci/core/internal/model"
 )
@@ -180,9 +181,33 @@ func (s *PGStore) ResolveException(ctx context.Context, schoolID, id, resolvedBy
 		"status = 'resolved', resolved_by = $1, resolution_reason = $2, resolved_at = now()", resolvedBy, reason)
 }
 
-// IncrementExceptionAttempt counts a manual retry and marks the item 'retrying'.
-func (s *PGStore) IncrementExceptionAttempt(ctx context.Context, schoolID, id string) error {
-	return s.updateOpenException(ctx, schoolID, id, "attempts = attempts + 1, status = 'retrying'")
+// ErrRetryInProgress: another retry of the same item holds the lock (BUG-167).
+var ErrRetryInProgress = fmt.Errorf("%w: retry item ini sedang diproses, tunggu hingga selesai", ErrConflict)
+
+// ClaimExceptionForRetry atomically moves an open item to 'retrying' and
+// counts the attempt; the row itself is the lock. A 'retrying' row older than
+// staleAfter (worker died mid-retry) may be claimed again. Concurrent callers
+// get ErrRetryInProgress, a resolved item ErrConflict.
+func (s *PGStore) ClaimExceptionForRetry(ctx context.Context, schoolID, id string, staleAfter time.Duration) error {
+	res, err := s.DB.ExecContext(ctx, `UPDATE integration_exceptions
+		SET status = 'retrying', attempts = attempts + 1, updated_at = now()
+		WHERE id = $1 AND school_id = $2
+		  AND (status = 'open' OR (status = 'retrying' AND updated_at < now() - make_interval(secs => $3)))`,
+		id, schoolID, staleAfter.Seconds())
+	if err != nil {
+		return fmt.Errorf("claim exception: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return nil
+	}
+	cur, err := s.GetExceptionByID(ctx, schoolID, id)
+	if err != nil {
+		return err
+	}
+	if cur.Status == model.ExceptionStatusRetrying {
+		return ErrRetryInProgress
+	}
+	return fmt.Errorf("%w: item sudah diselesaikan", ErrConflict)
 }
 
 // ReopenException puts a failed retry back to 'open'.

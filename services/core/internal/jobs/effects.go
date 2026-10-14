@@ -2,11 +2,11 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
 	"skci/core/internal/client"
-	"skci/core/internal/common"
 	"skci/core/internal/model"
 	"skci/core/internal/store"
 )
@@ -89,41 +89,81 @@ func DeliverCallback(ctx context.Context, st store.Store, cl *client.Client, req
 
 // StepRecipients resolves who acts on a step: its named user (also the
 // resolved direct supervisor), else every holder of its role in the school.
-func StepRecipients(ctx context.Context, cl *client.Client, schoolID string, st model.ApprovalStep) []string {
-	if st.ApproverUserID != nil {
-		return []string{*st.ApproverUserID}
+// The maker is left out: BR-GEN-09 forbids them to decide (BUG-111).
+func StepRecipients(ctx context.Context, cl *client.Client, req *model.ApprovalRequest, st model.ApprovalStep) ([]string, error) {
+	var ids []string
+	switch {
+	case st.ApproverUserID != nil:
+		ids = []string{*st.ApproverUserID}
+	case st.ApproverRole != nil && cl != nil:
+		var err error
+		if ids, err = cl.UsersByRole(ctx, req.SchoolID, *st.ApproverRole); err != nil {
+			return nil, fmt.Errorf("resolve recipients for role %s: %w", *st.ApproverRole, err)
+		}
 	}
-	if st.ApproverRole == nil || cl == nil {
-		return nil
+	out := ids[:0:0]
+	for _, id := range ids {
+		if id != req.MakerUserID {
+			out = append(out, id)
+		}
 	}
-	ids, err := cl.UsersByRole(ctx, schoolID, *st.ApproverRole)
-	if err != nil {
-		log.Printf("resolve recipients for role %s: %v", *st.ApproverRole, err)
-	}
-	return ids
+	return out, nil
 }
 
 func approvalData(req *model.ApprovalRequest) map[string]any {
-	return map[string]any{"approval_id": req.ID, "source_service": req.SourceService, "source_id": req.SourceID}
+	return map[string]any{"approval_id": req.ID, "source_service": req.SourceService, "source_id": req.SourceID,
+		"correlation_id": req.CorrelationID, "url": "/approval/" + req.ID}
+}
+
+// reportNotifyFailure makes an undelivered approval notification visible in
+// the exception queue (FR-80-001, BUG-028/113) instead of a log line only.
+// The same key reported again bumps attempts on the existing item.
+func reportNotifyFailure(ctx context.Context, st store.Store, req *model.ApprovalRequest, keyBase string, cause error) {
+	log.Printf("notify %s: %v", keyBase, cause)
+	if st == nil {
+		return
+	}
+	_, _, err := st.UpsertException(ctx, model.IntegrationException{
+		SchoolID:      req.SchoolID,
+		SourceService: "core",
+		Kind:          model.ExceptionKindNotification,
+		Severity:      model.SeverityNormal,
+		CorrelationID: req.CorrelationID,
+		ErrorMessage:  "notifikasi approval gagal dikirim: " + cause.Error(),
+		MaxAttempts:   1,
+		PayloadSummary: map[string]any{
+			"approval_id": req.ID, "request_type": req.RequestType, "notification_key": keyBase,
+		},
+		IdempotencyKey: "notify:" + keyBase,
+	})
+	if err != nil {
+		log.Printf("notify %s: queue exception: %v", keyBase, err)
+	}
 }
 
 // NotifyStep tells a step's approvers that a request waits on them (FR-07-002).
-func NotifyStep(ctx context.Context, cl *client.Client, req *model.ApprovalRequest, st model.ApprovalStep, title, body string) {
+func NotifyStep(ctx context.Context, st store.Store, cl *client.Client, req *model.ApprovalRequest, step model.ApprovalStep, title, body string) {
 	if cl == nil {
 		return
 	}
-	err := cl.NotifyUsers(ctx, client.Notice{
-		SchoolID: req.SchoolID,
-		KeyBase:  fmt.Sprintf("approval:%s:%d:%s", req.ID, st.Seq, st.Status),
-		Type:     "approval", Title: title, Body: body, Data: approvalData(req),
-	}, StepRecipients(ctx, cl, req.SchoolID, st))
+	keyBase := fmt.Sprintf("approval:%s:%d:%s", req.ID, step.Seq, step.Status)
+	recipients, err := StepRecipients(ctx, cl, req, step)
+	if err == nil && len(recipients) == 0 {
+		err = errors.New("tidak ada penerima untuk tahap ini")
+	}
+	if err == nil {
+		err = cl.NotifyUsers(ctx, client.Notice{
+			SchoolID: req.SchoolID, KeyBase: keyBase,
+			Type: "approval", Title: title, Body: body, Data: approvalData(req),
+		}, recipients)
+	}
 	if err != nil {
-		log.Printf("notify step %s/%d: %v", req.ID, st.Seq, err)
+		reportNotifyFailure(ctx, st, req, keyBase, err)
 	}
 }
 
 // NotifyMaker tells the maker the final outcome.
-func NotifyMaker(ctx context.Context, cl *client.Client, req *model.ApprovalRequest) {
+func NotifyMaker(ctx context.Context, st store.Store, cl *client.Client, req *model.ApprovalRequest) {
 	if cl == nil {
 		return
 	}
@@ -132,13 +172,13 @@ func NotifyMaker(ctx context.Context, cl *client.Client, req *model.ApprovalRequ
 		_, comment := model.FinalDecision(req)
 		title, body = "Pengajuan Ditolak", fmt.Sprintf("Pengajuan %q ditolak: %s", req.Title, comment)
 	}
+	keyBase := fmt.Sprintf("approval:%s:final:%s", req.ID, req.Status)
 	err := cl.NotifyUsers(ctx, client.Notice{
-		SchoolID: req.SchoolID,
-		KeyBase:  fmt.Sprintf("approval:%s:final:%s", req.ID, req.Status),
-		Type:     "approval", Title: title, Body: body, Data: approvalData(req),
+		SchoolID: req.SchoolID, KeyBase: keyBase,
+		Type: "approval", Title: title, Body: body, Data: approvalData(req),
 	}, []string{req.MakerUserID})
 	if err != nil {
-		log.Printf("notify maker %s: %v", req.ID, err)
+		reportNotifyFailure(ctx, st, req, keyBase, err)
 	}
 }
 
@@ -146,35 +186,63 @@ func NotifyMaker(ctx context.Context, cl *client.Client, req *model.ApprovalRequ
 // notification, or (when final) callback + maker notification.
 func AfterTransition(ctx context.Context, st store.Store, cl *client.Client, req *model.ApprovalRequest, maxAttempts int) {
 	if next := model.CurrentStep(req); next != nil {
-		NotifyStep(ctx, cl, req, *next, "Menunggu Persetujuan", fmt.Sprintf("Pengajuan %q menunggu persetujuan Anda.", req.Title))
+		NotifyStep(ctx, st, cl, req, *next, "Menunggu Persetujuan", fmt.Sprintf("Pengajuan %q menunggu persetujuan Anda.", req.Title))
 		return
 	}
 	if req.Status == model.RequestStatusApproved || req.Status == model.RequestStatusRejected {
 		DeliverCallback(ctx, st, cl, req, maxAttempts)
-		NotifyMaker(ctx, cl, req)
+		NotifyMaker(ctx, st, cl, req)
 	}
 }
 
-// NotifyCriticalException alerts the school's admins about a new critical
-// exception (FR-80-006).
+// NotifyCriticalException alerts the people responsible for a new critical
+// exception (FR-80-006): every holder of a role allowed to act on its kind
+// (model.ExceptionResponsibleRoles), so a journal-posting failure reaches
+// Accounting and a webhook failure the Finance Admin.
 func NotifyCriticalException(ctx context.Context, cl *client.Client, exc *model.IntegrationException) {
 	if cl == nil || exc == nil || exc.Severity != model.SeverityCritical {
 		return
 	}
-	admins, err := cl.UsersByRole(ctx, exc.SchoolID, common.RoleAdmin)
-	if err != nil {
-		log.Printf("resolve admins for exception %s: %v", exc.ID, err)
+	var recipients []string
+	for _, role := range model.ExceptionResponsibleRoles(exc.Kind) {
+		ids, err := cl.UsersByRole(ctx, exc.SchoolID, role)
+		if err != nil {
+			log.Printf("resolve %s for exception %s: %v", role, exc.ID, err)
+			continue
+		}
+		recipients = append(recipients, ids...)
+	}
+	if len(recipients) == 0 {
+		log.Printf("critical exception %s (%s): no responsible user to notify", exc.ID, exc.Kind)
 		return
 	}
-	err = cl.NotifyUsers(ctx, client.Notice{
+	err := cl.NotifyUsers(ctx, client.Notice{
 		SchoolID: exc.SchoolID,
 		KeyBase:  "exception:" + exc.ID + ":critical",
 		Type:     "integration_exception",
 		Title:    "Galat Integrasi Kritis",
 		Body:     fmt.Sprintf("%s (%s): %s", exc.SourceService, exc.Kind, exc.ErrorMessage),
-		Data:     map[string]any{"exception_id": exc.ID, "correlation_id": exc.CorrelationID},
-	}, admins)
+		Data:     map[string]any{"exception_id": exc.ID, "correlation_id": exc.CorrelationID, "url": "/integrasi/antrean-galat"},
+	}, recipients)
 	if err != nil {
 		log.Printf("notify critical exception %s: %v", exc.ID, err)
+	}
+}
+
+// NotifyAssignee tells the officer an exception was assigned to them (FR-80-004).
+func NotifyAssignee(ctx context.Context, cl *client.Client, exc *model.IntegrationException, assigneeUserID string) {
+	if cl == nil || exc == nil {
+		return
+	}
+	err := cl.NotifyUsers(ctx, client.Notice{
+		SchoolID: exc.SchoolID,
+		KeyBase:  "exception:" + exc.ID + ":assigned:" + exc.UpdatedAt.Format("20060102150405.000"),
+		Type:     "integration_exception",
+		Title:    "Galat Integrasi Ditugaskan kepada Anda",
+		Body:     fmt.Sprintf("%s (%s): %s", exc.SourceService, exc.Kind, exc.ErrorMessage),
+		Data:     map[string]any{"exception_id": exc.ID, "correlation_id": exc.CorrelationID, "url": "/integrasi/antrean-galat"},
+	}, []string{assigneeUserID})
+	if err != nil {
+		log.Printf("notify assignee of exception %s: %v", exc.ID, err)
 	}
 }

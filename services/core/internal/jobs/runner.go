@@ -120,9 +120,9 @@ func (r *Runner) runEscalation(ctx context.Context) error {
 		})
 		// FR-79-006 / AC-79-04: both the overdue approver(s) and the new one hear about it.
 		step.Status = model.StepStatusEscalated
-		NotifyStep(ctx, r.Client, req, step, "Persetujuan Dieskalasi",
+		NotifyStep(ctx, r.Store, r.Client, req, step, "Persetujuan Dieskalasi",
 			fmt.Sprintf("Pengajuan %q dialihkan ke %s karena melewati batas waktu.", req.Title, targetRole))
-		NotifyStep(ctx, r.Client, req, *repl, "Persetujuan Baru (Eskalasi)",
+		NotifyStep(ctx, r.Store, r.Client, req, *repl, "Persetujuan Baru (Eskalasi)",
 			fmt.Sprintf("Pengajuan %q dialihkan kepada Anda untuk diputuskan.", req.Title))
 	}
 	return nil
