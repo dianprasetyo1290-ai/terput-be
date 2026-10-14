@@ -16,20 +16,27 @@
             </div>
         </div>
         <div class="card-body">
-            <form action="#" wire:submit="confirmTransfer" class="text-center">
-                <h2>Check Journal Integrity</h2>
-                <h2>Check Balance Integrity</h2>
-                <h2>Check Foreign Currency Balance Integrity</h2>
-                @foreach($data as $row)
-                @foreach($row as $key => $value)
-                <input type="radio" name="transfer" value="{{ substr($key, 1) }}" required>
-                {{ $value }}
-                @endforeach
-                @endforeach
-                <div class="text-right">
-                    <button type="submit" class="btn btn-primary">Process <i class="icon-paperplane ml-2"></i></button>
-                </div>
-            </form>
+            {{-- QA round 2: the old "Process" button here called a method that
+                 never existed. Closing a period is End of Month, reopening is
+                 Buka Kembali Periode; this page only lists the closed periods. --}}
+            <p class="text-muted">Periode tahun buku berjalan yang sudah ditutup. Tutup periode melalui
+                <a href="{{ url('endofmonth') }}">End of Month</a>; koreksi periode tertutup melalui
+                <a href="{{ url('period-reopen') }}">Buka Kembali Periode</a>.</p>
+            <table class="table table-sm table-bordered">
+                <thead><tr><th style="width:120px">Periode</th><th>Keterangan</th></tr></thead>
+                <tbody>
+                    @php($n = 0)
+                    @foreach ($data as $row)
+                        @foreach ($row as $key => $value)
+                            @php($n++)
+                            <tr><td>{{ substr($key, 1) }}</td><td>{{ $value }}</td></tr>
+                        @endforeach
+                    @endforeach
+                    @if ($n === 0)
+                        <tr><td colspan="2" class="text-center text-muted">Belum ada periode yang ditutup pada tahun buku berjalan.</td></tr>
+                    @endif
+                </tbody>
+            </table>
         </div>
     </div>
 </div>

@@ -16,8 +16,23 @@ use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Crypt;
 
+/**
+ * History journals (closed periods). QA round 2: READ-ONLY. Editing, adding or
+ * deleting a journal of a closed period here bypassed the approval workflow,
+ * the period close and the audit trail (TC-34-032: a closed period changes
+ * only through an approved reopen). Corrections go through "Buka Kembali
+ * Periode" (BUG-178) or the prior year adjustment. The write methods stay for
+ * reference but refuse every call.
+ */
 class HJT extends Component
 {
+    public const WRITABLE = false;
+
+    private function refuseWrite(): void
+    {
+        abort_unless(self::WRITABLE, 403, 'Jurnal histori hanya dapat dilihat. Gunakan Buka Kembali Periode atau Penyesuaian Tahun Lalu.');
+    }
+
     use WithPagination;
     protected $paginationTheme = 'bootstrap';
 
@@ -34,6 +49,7 @@ class HJT extends Component
 
     public function add($id = "")
     {
+        $this->refuseWrite();
         $this->jt['trans_date'] = Carbon::now()->format('m-d-Y');
 
         if ($id) {
@@ -79,6 +95,9 @@ class HJT extends Component
 
     public function detail($id, $c = "")
     {
+        if ($c !== '' && $c !== null) {
+            $this->refuseWrite();
+        }
         $this->js(<<<'JS'
             $(document).ready(function() {
                 $('.select-search2').select2();
@@ -151,6 +170,7 @@ class HJT extends Component
 
     public function save()
     {
+        $this->refuseWrite();
         $this->authorize($this->idNya ? 'edithistory_journal' : 'createhistory_journal');
         $valid = [
             'jt.trans_code' => 'required|exists:mst_transaction,trans_code',
@@ -207,6 +227,7 @@ class HJT extends Component
 
     public function saveDetail()
     {
+        $this->refuseWrite();
         $this->authorize('edithistory_journal');
         $valid = [
             'jtdetail.acc_code' => 'required',
@@ -324,6 +345,7 @@ class HJT extends Component
 
     public function confirmDelete($id)
     {
+        $this->refuseWrite();
         $this->idNya = Crypt::decrypt($id);
         $this->js(<<<'JS'
         Swal.fire({
@@ -345,6 +367,7 @@ class HJT extends Component
 
     public function confirmDeleteDetail($id)
     {
+        $this->refuseWrite();
         $this->countDetail = $id;
         $this->js(<<<'JS'
         Swal.fire({
@@ -366,6 +389,7 @@ class HJT extends Component
 
     public function delete()
     {
+        $this->refuseWrite();
         $this->authorize('deletehistory_journal');
         $datane = ThisHead::with('transDetail')->where('trans_no', $this->idNya)->first();
 
@@ -402,6 +426,7 @@ class HJT extends Component
 
     public function deleteD()
     {
+        $this->refuseWrite();
         $this->authorize('deletehistory_journal');
         $detail = ThisDetail::where('id', $this->countDetail)->first();
         if ($detail) {
@@ -508,6 +533,7 @@ class HJT extends Component
             'cur' => $cur,
             'monthsAndYears' => $monthsAndYears,
             'transaction_code' => $transaction_code,
+            'writable' => self::WRITABLE,
         ]);
     }
 }
