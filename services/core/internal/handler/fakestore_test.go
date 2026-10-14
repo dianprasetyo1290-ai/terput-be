@@ -415,7 +415,7 @@ func (f *fakeStore) RevokeDelegation(ctx context.Context, schoolID, id, userID s
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	d, ok := f.delegations[id]
-	if !ok || d.SchoolID != schoolID || d.FromUserID != userID {
+	if !ok || d.SchoolID != schoolID || d.FromUserID != userID || d.RevokedAt != nil {
 		return store.ErrNotFound
 	}
 	now := time.Now()
