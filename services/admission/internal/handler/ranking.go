@@ -448,7 +448,7 @@ func (a *App) RunRanking(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	a.audit(r.Context(), schoolID, "ranking", runID, "ranking_published", "admin", claims.UserID, "", "",
+	a.audit(r.Context(), schoolID, "ranking", runID, "ranking_published", "admin", claims.UserID, claims.Name, "",
 		nil, map[string]any{"version": version, "entries": len(entries)})
 	common.WriteJSON(w, http.StatusCreated, map[string]any{
 		"id":         runID,

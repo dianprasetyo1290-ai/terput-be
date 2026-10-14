@@ -314,128 +314,6 @@ func normalizeSchemeStatus(status string) string {
 // Discount rules
 // ---------------------------------------------------------------------------
 
-type discountRuleInput struct {
-	Name      string `json:"name"`
-	Type      string `json:"type"`
-	Value     int64  `json:"value"`
-	Priority  int    `json:"priority"`
-	Cap       int64  `json:"cap"`
-	Status    string `json:"status"`
-	Stackable *bool  `json:"stackable"`
-	PeriodID  string `json:"period_id"`
-}
-
-// ListDiscountRules is GET /admin/finance/discount-rules.
-func (a *App) ListDiscountRules(w http.ResponseWriter, r *http.Request) {
-	if !common.RequireAdmin(w, r) {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT id,name,kind,value,COALESCE(cap_idr,0),priority,status,stackable,period_id
-		 FROM discount_rules WHERE school_id=$1 ORDER BY priority,created_at`, schoolID)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	defer rows.Close()
-	out := []map[string]any{}
-	for rows.Next() {
-		var (
-			id, name, kind, status, periodID string
-			value, cap                       int64
-			priority                         int
-			stackable                        bool
-		)
-		if err := rows.Scan(&id, &name, &kind, &value, &cap, &priority, &status, &stackable, &periodID); err != nil {
-			writeErr(w, err)
-			return
-		}
-		out = append(out, map[string]any{
-			"id":        id,
-			"name":      name,
-			"type":      ruleKindToAPI(kind),
-			"value":     value,
-			"priority":  priority,
-			"cap":       cap,
-			"status":    status,
-			"stackable": stackable,
-			"period_id": periodID,
-		})
-	}
-	common.WriteJSON(w, http.StatusOK, out, nil)
-}
-
-// CreateDiscountRule is POST /admin/finance/discount-rules.
-func (a *App) CreateDiscountRule(w http.ResponseWriter, r *http.Request) {
-	if !common.RequireAdmin(w, r) {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	var in discountRuleInput
-	if !common.Decode(w, r, &in) {
-		return
-	}
-	if in.Name == "" {
-		common.WriteError(w, http.StatusBadRequest, "name is required")
-		return
-	}
-	periodID, err := a.resolvePeriodID(r, schoolID, in.PeriodID)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	kind, value, err := ruleKindFromAPI(in.Type, in.Value)
-	if err != nil {
-		common.WriteError(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	stackable := in.Stackable == nil || *in.Stackable
-	status := normalizeRuleStatus(in.Status)
-	var id string
-	err = a.DB.QueryRowContext(r.Context(),
-		`INSERT INTO discount_rules(school_id,period_id,name,kind,value,cap_idr,priority,active,stackable,status)
-		 VALUES($1,$2,$3,$4,$5,NULLIF($6,0),$7,$8,$9,$10) RETURNING id`,
-		schoolID, periodID, in.Name, kind, value, in.Cap, in.Priority, status == "active", stackable, status).Scan(&id)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	common.WriteJSON(w, http.StatusCreated, map[string]any{"id": id}, nil)
-}
-
-// UpdateDiscountRule is PUT /admin/finance/discount-rules/{id}.
-func (a *App) UpdateDiscountRule(w http.ResponseWriter, r *http.Request) {
-	if !common.RequireAdmin(w, r) {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	var in discountRuleInput
-	if !common.Decode(w, r, &in) {
-		return
-	}
-	kind, value, err := ruleKindFromAPI(in.Type, in.Value)
-	if err != nil {
-		common.WriteError(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	stackable := in.Stackable == nil || *in.Stackable
-	status := normalizeRuleStatus(in.Status)
-	res, err := a.DB.ExecContext(r.Context(),
-		`UPDATE discount_rules SET name=COALESCE(NULLIF($1,''),name),kind=$2,value=$3,cap_idr=NULLIF($4,0),priority=$5,active=$6,stackable=$7,status=$8
-		 WHERE id=$9 AND school_id=$10`,
-		in.Name, kind, value, in.Cap, in.Priority, status == "active", stackable, status, param(r, "id"), schoolID)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "discount rule not found")
-		return
-	}
-	common.WriteJSON(w, http.StatusOK, map[string]any{"id": param(r, "id")}, nil)
-}
-
 // ---------------------------------------------------------------------------
 // Vouchers
 // ---------------------------------------------------------------------------
@@ -445,6 +323,7 @@ type voucherInput struct {
 	Type       string `json:"type"`
 	Value      int64  `json:"value"`
 	Quota      int    `json:"quota"`
+	ValidFrom  string `json:"valid_from"`
 	ValidUntil string `json:"valid_until"`
 	Status     string `json:"status"`
 	PeriodID   string `json:"period_id"`
@@ -460,7 +339,7 @@ func (a *App) ListVouchers(w http.ResponseWriter, r *http.Request) {
 	}
 	schoolID := common.EffectiveSchoolID(r)
 	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT id,COALESCE(code_hint,''),kind,value,usage_limit,used_count,valid_until,COALESCE(status,'active')
+		`SELECT id,COALESCE(code_hint,''),kind,value,usage_limit,used_count,valid_from,valid_until,COALESCE(status,'active')
 		 FROM discount_vouchers WHERE school_id=$1 ORDER BY created_at DESC`, schoolID)
 	if err != nil {
 		writeErr(w, err)
@@ -473,9 +352,9 @@ func (a *App) ListVouchers(w http.ResponseWriter, r *http.Request) {
 			id, hint, kind, status string
 			value                  int64
 			limit, used            int
-			validUntil             time.Time
+			validFrom, validUntil  time.Time
 		)
-		if err := rows.Scan(&id, &hint, &kind, &value, &limit, &used, &validUntil, &status); err != nil {
+		if err := rows.Scan(&id, &hint, &kind, &value, &limit, &used, &validFrom, &validUntil, &status); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -483,98 +362,16 @@ func (a *App) ListVouchers(w http.ResponseWriter, r *http.Request) {
 			"id":          id,
 			"code":        hint,
 			"type":        ruleKindToAPI(kind),
-			"value":       value,
+			"value":       ruleValueToAPI(kind, value),
 			"quota":       limit,
 			"used":        used,
-			"valid_until": validUntil,
+			"valid_from":  validFrom.In(wib).Format("2006-01-02"),
+			"valid_until": validUntil.In(wib).Format("2006-01-02"),
+			"expired":     time.Now().After(validUntil),
 			"status":      status,
 		})
 	}
 	common.WriteJSON(w, http.StatusOK, out, nil)
-}
-
-// CreateVoucher is POST /admin/finance/vouchers.
-func (a *App) CreateVoucher(w http.ResponseWriter, r *http.Request) {
-	if !common.RequireAdmin(w, r) {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	var in voucherInput
-	if !common.Decode(w, r, &in) {
-		return
-	}
-	if strings.TrimSpace(in.Code) == "" {
-		common.WriteError(w, http.StatusBadRequest, "code is required")
-		return
-	}
-	periodID, err := a.resolvePeriodID(r, schoolID, in.PeriodID)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	kind, value, err := ruleKindFromAPI(in.Type, in.Value)
-	if err != nil {
-		common.WriteError(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	validUntil, err := parseTime(in.ValidUntil)
-	if err != nil || validUntil.IsZero() {
-		common.WriteError(w, http.StatusBadRequest, "valid_until is required")
-		return
-	}
-	hash, err := hashVoucher(strings.TrimSpace(in.Code))
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	quota := maxInt(in.Quota, 1)
-	var id string
-	err = a.DB.QueryRowContext(r.Context(),
-		`INSERT INTO discount_vouchers(school_id,period_id,code_hash,code_hint,kind,value,cap_idr,priority,usage_limit,valid_from,valid_until,status)
-		 VALUES($1,$2,$3,$4,$5,$6,NULLIF($7,0),$8,$9,now(),$10,$11) RETURNING id`,
-		schoolID, periodID, hash, maskCode(in.Code), kind, value, in.Cap, in.Priority, quota, validUntil, normalizeVoucherStatus(in.Status)).
-		Scan(&id)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	common.WriteJSON(w, http.StatusCreated, map[string]any{"id": id, "code": maskCode(in.Code)}, nil)
-}
-
-// UpdateVoucher is PUT /admin/finance/vouchers/{id}.
-func (a *App) UpdateVoucher(w http.ResponseWriter, r *http.Request) {
-	if !common.RequireAdmin(w, r) {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	var in voucherInput
-	if !common.Decode(w, r, &in) {
-		return
-	}
-	kind, value, err := ruleKindFromAPI(in.Type, in.Value)
-	if err != nil {
-		common.WriteError(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	validUntil, err := parseTime(in.ValidUntil)
-	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "valid_until is invalid")
-		return
-	}
-	res, err := a.DB.ExecContext(r.Context(),
-		`UPDATE discount_vouchers SET kind=$1,value=$2,cap_idr=NULLIF($3,0),priority=$4,usage_limit=$5,
-		        valid_until=COALESCE(NULLIF($6,'')::timestamptz,valid_until),status=$7
-		 WHERE id=$8 AND school_id=$9`,
-		kind, value, in.Cap, in.Priority, maxInt(in.Quota, 1), validUntil.Format(time.RFC3339), normalizeVoucherStatus(in.Status), param(r, "id"), schoolID)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "voucher not found")
-		return
-	}
-	common.WriteJSON(w, http.StatusOK, map[string]any{"id": param(r, "id")}, nil)
 }
 
 // ---------------------------------------------------------------------------
@@ -590,20 +387,29 @@ func ruleKindToAPI(kind string) string {
 
 // ruleKindFromAPI converts the frontend percent value (0-100) into the engine's
 // basis-point scale.
+// ruleValueToAPI converts a stored value back to the API scale (percent
+// rules are stored in basis points).
+func ruleValueToAPI(kind string, value int64) int64 {
+	if kind == string(model.DiscountPercent) {
+		return value / 100
+	}
+	return value
+}
+
 func ruleKindFromAPI(apiType string, value int64) (model.DiscountKind, int64, error) {
 	switch apiType {
 	case "percentage", "percent":
 		if value < 0 || value > 100 {
-			return "", 0, &httpError{http.StatusUnprocessableEntity, "percentage value must be between 0 and 100"}
+			return "", 0, &httpError{http.StatusUnprocessableEntity, "persentase harus antara 0 dan 100"}
 		}
 		return model.DiscountPercent, value * 100, nil
 	case "fixed", "":
 		if value < 0 {
-			return "", 0, &httpError{http.StatusUnprocessableEntity, "value must not be negative"}
+			return "", 0, &httpError{http.StatusUnprocessableEntity, "nilai potongan tidak boleh negatif"}
 		}
 		return model.DiscountFixed, value, nil
 	default:
-		return "", 0, &httpError{http.StatusUnprocessableEntity, "invalid discount type"}
+		return "", 0, &httpError{http.StatusUnprocessableEntity, "jenis potongan tidak dikenal"}
 	}
 }
 

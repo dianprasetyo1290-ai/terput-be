@@ -6,7 +6,9 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -257,11 +259,16 @@ func (a *App) RequestCorrection(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	if err = a.notify(r.Context(), tx, schoolID, applicationID, "correction_requested", "Perbaikan data diminta",
+		"Panitia meminta perbaikan data pendaftaran: "+in.Reason, "correction:"+applicationID+":"+strconv.Itoa(version+1), nil); err != nil {
+		writeErr(w, err)
+		return
+	}
 	if err = tx.Commit(); err != nil {
 		writeErr(w, err)
 		return
 	}
-	a.audit(r.Context(), schoolID, "application", applicationID, "correction_requested", "admin", claims.UserID, "",
+	a.audit(r.Context(), schoolID, "application", applicationID, "correction_requested", "admin", claims.UserID, claims.Name,
 		in.Reason, map[string]any{"status": status}, map[string]any{"status": status})
 	a.writeAdminApplication(w, r, schoolID, applicationID)
 }
@@ -360,8 +367,13 @@ func (a *App) RejectApplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	applicationID := param(r, "id")
-	if _, err := a.transition(r.Context(), schoolID, applicationID, "admin", claims.UserID, "",
+	if _, err := a.transition(r.Context(), schoolID, applicationID, "admin", claims.UserID, claims.Name,
 		model.StatusRejected, in.Reason, in.Version, ""); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := a.notify(r.Context(), a.DB, schoolID, applicationID, "rejected", "Pendaftaran tidak dapat dilanjutkan",
+		"Mohon maaf, pendaftaran tidak dapat dilanjutkan. Alasan: "+in.Reason, "app_rejected:"+applicationID, nil); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -398,7 +410,17 @@ func (a *App) RespondDecision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if model.ApplicationStatus(status) != model.StatusOffered {
-		common.WriteError(w, http.StatusUnprocessableEntity, "no open offer to respond to")
+		common.WriteError(w, http.StatusUnprocessableEntity, "tidak ada penawaran kursi yang dapat dijawab")
+		return
+	}
+	var due sql.NullTime
+	if err := a.DB.QueryRowContext(r.Context(),
+		`SELECT reregistration_due_at FROM applications WHERE id=$1`, applicationID).Scan(&due); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if response == "accepted" && due.Valid && time.Now().After(due.Time) {
+		common.WriteError(w, http.StatusUnprocessableEntity, "batas waktu daftar ulang sudah lewat")
 		return
 	}
 

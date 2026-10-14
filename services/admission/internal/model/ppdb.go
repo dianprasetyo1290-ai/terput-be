@@ -663,3 +663,143 @@ func ReregistrationDeadline(now time.Time, waveEnd *time.Time, waitlistDays int,
 	}
 	return *waveEnd
 }
+
+// WaveScheduleChanged reports whether any configured date differs.
+func WaveScheduleChanged(a, b WaveSchedule) bool {
+	eq := func(x, y *time.Time) bool {
+		if x == nil || y == nil {
+			return x == nil && y == nil
+		}
+		return x.Equal(*y)
+	}
+	return !a.RegistrationStart.Equal(b.RegistrationStart) || !a.RegistrationEnd.Equal(b.RegistrationEnd) ||
+		!eq(a.PaymentEnd, b.PaymentEnd) || !eq(a.TestAt, b.TestAt) ||
+		!eq(a.AnnouncementAt, b.AnnouncementAt) || !eq(a.ReregistrationEnd, b.ReregistrationEnd)
+}
+
+// RegistrationNumber formats a per-wave sequential registration number.
+func RegistrationNumber(prefix string, seq int) string {
+	return fmt.Sprintf("%s-%04d", prefix, seq)
+}
+
+// ActorLabel names who performed an audited action when no person name was
+// recorded.
+func ActorLabel(actorType, actorName string) string {
+	if strings.TrimSpace(actorName) != "" {
+		return actorName
+	}
+	switch actorType {
+	case "guardian":
+		return "Calon orang tua"
+	case "system":
+		return "Sistem PPDB"
+	case "approval":
+		return "Approval Center"
+	default:
+		return "Admin PPDB"
+	}
+}
+
+// ScheduleKindLabel is the Indonesian label of a selection schedule kind.
+func ScheduleKindLabel(kind string) string {
+	if kind == "interview" {
+		return "Wawancara"
+	}
+	return "Tes seleksi"
+}
+
+// ValidateSchedule checks a per-applicant test/interview schedule.
+func ValidateSchedule(kind string, at, now time.Time) error {
+	if kind != "test" && kind != "interview" {
+		return errors.New("jenis jadwal harus tes atau wawancara")
+	}
+	if !at.After(now) {
+		return errors.New("jadwal harus di masa depan")
+	}
+	return nil
+}
+
+// SchedulableStatus reports whether an application may receive a test or
+// interview schedule.
+func SchedulableStatus(status string) bool {
+	switch ApplicationStatus(status) {
+	case StatusDocumentReview, StatusEligibleForTest, StatusTested:
+		return true
+	}
+	return false
+}
+
+// wibZone is the PPDB business timezone (Asia/Jakarta, no DST).
+var wibZone = time.FixedZone("WIB", 7*3600)
+
+// ParseWIBDate parses a promo/voucher date. A plain "YYYY-MM-DD" is a WIB
+// calendar day: its start, or its last instant when endOfDay is set, so a
+// promo "s.d. 31-10-2026" stays valid all day long. RFC3339 values are taken
+// as-is. Empty input means "no bound".
+func ParseWIBDate(value string, endOfDay bool) (*time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return &t, nil
+	}
+	day, err := time.ParseInLocation("2006-01-02", value, wibZone)
+	if err != nil {
+		return nil, errors.New("format tanggal harus YYYY-MM-DD")
+	}
+	if endOfDay {
+		day = day.AddDate(0, 0, 1).Add(-time.Nanosecond)
+	}
+	return &day, nil
+}
+
+// FunnelCounts is how many applications reached each PPDB stage.
+type FunnelCounts struct {
+	Registered, Submitted, FormPaid, Verified, Accepted, Reregistered int
+}
+
+// FunnelStage is one bar of the PPDB funnel with its rates in basis points.
+type FunnelStage struct {
+	Key          string `json:"key"`
+	Label        string `json:"label"`
+	Count        int    `json:"count"`
+	OfFirstBP    int    `json:"of_first_bp"`
+	OfPreviousBP int    `json:"of_previous_bp"`
+}
+
+func ratioBP(n, d int) int {
+	if d <= 0 {
+		return 0
+	}
+	return n * 10000 / d
+}
+
+// BuildFunnel turns stage counts into the dashboard funnel (BUG-030).
+func BuildFunnel(c *FunnelCounts) []FunnelStage {
+	if c == nil {
+		c = &FunnelCounts{}
+	}
+	stages := []FunnelStage{
+		{Key: "registered", Label: "Mendaftar", Count: c.Registered},
+		{Key: "submitted", Label: "Kirim formulir", Count: c.Submitted},
+		{Key: "form_paid", Label: "Bayar formulir", Count: c.FormPaid},
+		{Key: "verified", Label: "Terverifikasi", Count: c.Verified},
+		{Key: "accepted", Label: "Diterima", Count: c.Accepted},
+		{Key: "reregistered", Label: "Daftar ulang", Count: c.Reregistered},
+	}
+	for i := range stages {
+		stages[i].OfFirstBP = ratioBP(stages[i].Count, stages[0].Count)
+		if i == 0 {
+			stages[i].OfPreviousBP = ratioBP(stages[i].Count, stages[i].Count)
+			continue
+		}
+		stages[i].OfPreviousBP = ratioBP(stages[i].Count, stages[i-1].Count)
+	}
+	return stages
+}
+
+// ConversionBP is re-registered over registered, in basis points.
+func ConversionBP(c FunnelCounts) int {
+	return ratioBP(c.Reregistered, c.Registered)
+}

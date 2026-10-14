@@ -114,6 +114,7 @@ func main() {
 		g.Get("/guardian/applications/{id}/cbt", app.GetCBT)
 		g.Post("/guardian/applications/{id}/cbt/enter", app.EnterCBT)
 
+		g.Get("/guardian/applications/{id}/schedules", app.GuardianSchedules)
 		g.Get("/guardian/applications/{id}/decision", app.GetDecision)
 		g.Post("/guardian/applications/{id}/decision/respond", app.RespondDecision)
 
@@ -123,10 +124,11 @@ func main() {
 	// ---------------------------------------------------------------------
 	// Admin PPDB (identity JWT, admin or superadmin).
 	// ---------------------------------------------------------------------
+	// The PPDB dashboard is also readable by Yayasan / kepala sekolah (BUG-030).
+	r.With(common.DashboardAuth(cfg.JWTSecret)).Get("/admin/dashboard", app.AdminDashboard)
+
 	r.Group(func(ad chi.Router) {
 		ad.Use(common.AdminAuth(cfg.JWTSecret))
-
-		ad.Get("/admin/dashboard", app.AdminDashboard)
 
 		ad.Get("/admin/applications", app.ListApplications)
 		ad.Get("/admin/applications/{id}", app.AdminApplicationDetail)
@@ -135,6 +137,8 @@ func main() {
 		ad.Post("/admin/applications/{id}/reject", app.RejectApplication)
 		ad.Get("/admin/applications/{id}/special-discounts", app.ListSpecialDiscounts)
 		ad.Post("/admin/applications/{id}/special-discounts", app.CreateSpecialDiscount)
+		ad.Get("/admin/applications/{id}/schedules", app.ListSchedules)
+		ad.Post("/admin/applications/{id}/schedules", app.UpsertSchedule)
 
 		ad.Get("/admin/config/periods", app.ListPeriods)
 		ad.Post("/admin/config/periods", app.CreatePeriod)

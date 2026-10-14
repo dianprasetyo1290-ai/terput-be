@@ -1,12 +1,16 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"skci/admission/internal/common"
+	"skci/admission/internal/model"
 )
 
 // ---------------------------------------------------------------------------
@@ -69,6 +73,23 @@ type applicantInput struct {
 	PreviousSchool       string `json:"previous_school"`
 	Address              string `json:"address"`
 	GuardianRelationship string `json:"guardian_relationship"`
+}
+
+// validate normalises and checks the applicant biodata (BUG-103/121).
+func (in *applicantInput) validate() error {
+	in.FullName = strings.TrimSpace(in.FullName)
+	in.NIK = strings.TrimSpace(in.NIK)
+	if in.FullName == "" || in.BirthDate == "" {
+		return &httpError{http.StatusUnprocessableEntity, "nama lengkap dan tanggal lahir wajib diisi"}
+	}
+	birth, err := time.Parse("2006-01-02", in.BirthDate)
+	if err != nil || birth.After(time.Now()) {
+		return &httpError{http.StatusUnprocessableEntity, "tanggal lahir tidak valid"}
+	}
+	if err := model.ValidateNIK(in.NIK); err != nil {
+		return &httpError{http.StatusUnprocessableEntity, err.Error()}
+	}
+	return nil
 }
 
 // ListApplicants is GET /guardian/applicants.
@@ -185,8 +206,8 @@ func (a *App) CreateApplicant(w http.ResponseWriter, r *http.Request) {
 	if !common.Decode(w, r, &in) {
 		return
 	}
-	if in.FullName == "" || in.BirthDate == "" {
-		common.WriteError(w, http.StatusBadRequest, "full_name and birth_date are required")
+	if err := in.validate(); err != nil {
+		writeErr(w, err)
 		return
 	}
 	var id string
@@ -210,8 +231,8 @@ func (a *App) UpdateApplicant(w http.ResponseWriter, r *http.Request) {
 	if !common.Decode(w, r, &in) {
 		return
 	}
-	if in.FullName == "" || in.BirthDate == "" {
-		common.WriteError(w, http.StatusBadRequest, "full_name and birth_date are required")
+	if err := in.validate(); err != nil {
+		writeErr(w, err)
 		return
 	}
 	id := param(r, "id")
@@ -310,18 +331,27 @@ func (a *App) CreateApplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var id, registrationNumber string
+	warnings, err := a.checkNewApplication(r.Context(), tx, c.SchoolID, in)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	registrationNumber, err := nextRegistrationNumber(r.Context(), tx, c.SchoolID, in.WaveID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var id string
 	err = tx.QueryRowContext(r.Context(),
 		`INSERT INTO applications(school_id,applicant_id,period_id,wave_id,track_id,registration_number)
-		 VALUES($1,$2,$3,$4,$5,'PPDB-'||to_char(now(),'YYYY')||'-'||upper(substr(replace(gen_random_uuid()::text,'-',''),1,8)))
-		 RETURNING id,registration_number`,
-		c.SchoolID, in.ApplicantID, in.PeriodID, in.WaveID, in.TrackID).Scan(&id, &registrationNumber)
+		 VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
+		c.SchoolID, in.ApplicantID, in.PeriodID, in.WaveID, in.TrackID, registrationNumber).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
-			common.WriteError(w, http.StatusConflict, "an application for this period already exists")
+			common.WriteError(w, http.StatusConflict, "calon siswa ini sudah terdaftar pada periode ini")
 			return
 		}
-		common.WriteError(w, http.StatusBadRequest, "invalid period, wave or track")
+		writeErr(w, err)
 		return
 	}
 	if _, err = tx.ExecContext(r.Context(),
@@ -342,7 +372,82 @@ func (a *App) CreateApplication(w http.ResponseWriter, r *http.Request) {
 		"status":              "draft",
 		"version":             1,
 		"registration_number": registrationNumber,
+		"warnings":            nonNil(warnings),
 	}, nil)
+}
+
+// checkNewApplication verifies that period, wave and track belong together
+// and to the school, that registration is open, that the track still has a
+// seat (BUG-031; enforced again under lock at submit) and that the applicant
+// meets the track's eligibility rules (BUG-110).
+func (a *App) checkNewApplication(ctx context.Context, tx *sql.Tx, schoolID string, in createApplicationInput) ([]string, error) {
+	var (
+		open, trackActive bool
+		quota, active     int
+		eligibility       []byte
+		birth             sql.NullTime
+	)
+	err := tx.QueryRowContext(ctx,
+		`SELECT p.status='open' AND now() BETWEEN w.registration_start AND w.registration_end,t.is_active,t.quota,t.eligibility_config,
+		        (SELECT count(*) FROM applications x WHERE x.track_id=t.id AND x.status NOT IN('draft','withdrawn','rejected','dropped')),
+		        (SELECT birth_date FROM applicants WHERE id=$5)
+		 FROM admission_periods p
+		 JOIN admission_waves w ON w.period_id=p.id AND w.id=$3 AND w.deleted_at IS NULL
+		 JOIN admission_tracks t ON t.period_id=p.id AND t.id=$4 AND t.deleted_at IS NULL
+		 WHERE p.id=$2 AND p.school_id=$1`, schoolID, in.PeriodID, in.WaveID, in.TrackID, in.ApplicantID).
+		Scan(&open, &trackActive, &quota, &eligibility, &active, &birth)
+	if err == sql.ErrNoRows {
+		return nil, &httpError{http.StatusUnprocessableEntity, "periode, gelombang, atau jalur tidak valid"}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !open {
+		return nil, &httpError{http.StatusUnprocessableEntity, "masa pendaftaran gelombang ini belum dibuka atau sudah ditutup"}
+	}
+	if !trackActive {
+		return nil, &httpError{http.StatusUnprocessableEntity, "jalur ini tidak menerima pendaftaran"}
+	}
+	if model.CheckQuota(quota, active) != nil {
+		return nil, &httpError{http.StatusUnprocessableEntity, "Kuota jalur ini sudah penuh; silakan pilih jalur lain."}
+	}
+	rules, err := model.ParseEligibility(eligibility)
+	if err != nil {
+		return nil, err
+	}
+	if issues := rules.CheckEligibility(nullTimePtr(birth), in.WaveID, time.Now()); len(issues) > 0 {
+		return nil, &httpError{http.StatusUnprocessableEntity, "Tidak memenuhi syarat jalur: " + strings.Join(issues, "; ") + "."}
+	}
+	var warnings []string
+	if remaining := model.VacantSeats(quota, active); remaining <= 3 {
+		warnings = append(warnings, fmt.Sprintf("Sisa kuota jalur ini %d kursi; kirim pendaftaran segera.", remaining))
+	}
+	return warnings, nil
+}
+
+// nextRegistrationNumber issues "PPDB-<tahun>-G<urutan gelombang>-<nomor>",
+// sequential per wave (BUG-162). The counter row is locked by the upsert so
+// concurrent registrations never share a number.
+func nextRegistrationNumber(ctx context.Context, tx *sql.Tx, schoolID, waveID string) (string, error) {
+	var (
+		prefix string
+		value  int
+	)
+	err := tx.QueryRowContext(ctx,
+		`INSERT INTO registration_counters(wave_id,school_id,prefix,last_value)
+		 SELECT w.id,w.school_id,
+		        'PPDB-'||left(p.academic_year,4)||'-G'||lpad((SELECT count(*) FROM admission_waves w2
+		            JOIN admission_periods p2 ON p2.id=w2.period_id
+		            WHERE w2.school_id=w.school_id AND left(p2.academic_year,4)=left(p.academic_year,4)
+		              AND (w2.created_at,w2.id)<=(w.created_at,w.id))::text,2,'0'),1
+		 FROM admission_waves w JOIN admission_periods p ON p.id=w.period_id
+		 WHERE w.id=$1 AND w.school_id=$2
+		 ON CONFLICT (wave_id) DO UPDATE SET last_value=registration_counters.last_value+1
+		 RETURNING prefix,last_value`, waveID, schoolID).Scan(&prefix, &value)
+	if err != nil {
+		return "", err
+	}
+	return model.RegistrationNumber(prefix, value), nil
 }
 
 // ApplicationDetail is GET /guardian/applications/{id}.
@@ -404,6 +509,10 @@ func (a *App) applicationDetail(r *http.Request, schoolID, applicationID, scope,
 		"previous_school":       previousSchool,
 		"address":               address,
 		"guardian_relationship": relationship,
+	}
+	if scope != "guardian" {
+		// Staff never see the full NIK (BUG-121).
+		applicant["nik"] = model.MaskNIK(nik)
 	}
 	result := map[string]any{
 		"id":                  id,

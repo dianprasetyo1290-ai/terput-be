@@ -590,3 +590,132 @@ func TestReregistrationDeadline(t *testing.T) {
 		})
 	}
 }
+
+func TestWaveScheduleChanged(t *testing.T) {
+	base := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	later := base.AddDate(0, 1, 0)
+	s := WaveSchedule{RegistrationStart: base, RegistrationEnd: later}
+	same := s
+	sameLater := later
+	same.RegistrationEnd = sameLater
+	withPay := s
+	withPay.PaymentEnd = &later
+	cases := []struct {
+		name string
+		a, b WaveSchedule
+		want bool
+	}{
+		{"identical", s, same, false},
+		{"payment deadline added", s, withPay, true},
+		{"close moved", s, WaveSchedule{RegistrationStart: base, RegistrationEnd: later.Add(time.Hour)}, true},
+	}
+	for _, c := range cases {
+		if got := WaveScheduleChanged(c.a, c.b); got != c.want {
+			t.Errorf("%s: got %v", c.name, got)
+		}
+	}
+}
+
+func TestRegistrationNumber(t *testing.T) {
+	cases := []struct {
+		prefix string
+		seq    int
+		want   string
+	}{
+		{"PPDB-2027-G01", 1, "PPDB-2027-G01-0001"},
+		{"PPDB-2027-G02", 125, "PPDB-2027-G02-0125"},
+		{"PPDB-2027-G01", 12345, "PPDB-2027-G01-12345"},
+	}
+	for _, c := range cases {
+		if got := RegistrationNumber(c.prefix, c.seq); got != c.want {
+			t.Errorf("got %s want %s", got, c.want)
+		}
+	}
+}
+
+func TestActorLabel(t *testing.T) {
+	cases := []struct{ typ, name, want string }{
+		{"admin", "Bu Rina", "Bu Rina"},
+		{"guardian", "", "Calon orang tua"},
+		{"system", " ", "Sistem PPDB"},
+		{"approval", "", "Approval Center"},
+		{"admin", "", "Admin PPDB"},
+	}
+	for _, c := range cases {
+		if got := ActorLabel(c.typ, c.name); got != c.want {
+			t.Errorf("%s/%q: %s", c.typ, c.name, got)
+		}
+	}
+}
+
+func TestValidateSchedule(t *testing.T) {
+	now := time.Date(2026, 10, 14, 8, 0, 0, 0, time.UTC)
+	cases := []struct {
+		kind string
+		at   time.Time
+		ok   bool
+	}{
+		{"test", now.Add(time.Hour), true},
+		{"interview", now.Add(24 * time.Hour), true},
+		{"test", now, false},
+		{"exam", now.Add(time.Hour), false},
+	}
+	for _, c := range cases {
+		if err := ValidateSchedule(c.kind, c.at, now); (err == nil) != c.ok {
+			t.Errorf("%s %v: %v", c.kind, c.at, err)
+		}
+	}
+	for status, want := range map[string]bool{"eligible_for_test": true, "document_review": true, "tested": true, "draft": false, "offered": false} {
+		if SchedulableStatus(status) != want {
+			t.Errorf("schedulable %s", status)
+		}
+	}
+}
+
+func TestParseWIBDate(t *testing.T) {
+	cases := []struct {
+		in      string
+		end     bool
+		want    string
+		wantErr bool
+	}{
+		{"", false, "", false},
+		{"2026-10-31", false, "2026-10-30T17:00:00Z", false},
+		{"2026-10-31", true, "2026-10-31T16:59:59.999999999Z", false},
+		{"2026-10-31T10:00:00+07:00", true, "2026-10-31T03:00:00Z", false},
+		{"31/10/2026", false, "", true},
+	}
+	for _, c := range cases {
+		got, err := ParseWIBDate(c.in, c.end)
+		if (err != nil) != c.wantErr {
+			t.Fatalf("%q: err %v", c.in, err)
+		}
+		if c.want == "" {
+			if got != nil && !c.wantErr {
+				t.Errorf("%q: want nil", c.in)
+			}
+			continue
+		}
+		if got.UTC().Format(time.RFC3339Nano) != c.want {
+			t.Errorf("%q end=%v: got %s", c.in, c.end, got.UTC().Format(time.RFC3339Nano))
+		}
+	}
+}
+
+func TestBuildFunnel(t *testing.T) {
+	c := FunnelCounts{Registered: 120, Submitted: 100, FormPaid: 90, Verified: 80, Accepted: 70, Reregistered: 60}
+	f := BuildFunnel(&c)
+	if len(f) != 6 || f[0].Count != 120 || f[5].Count != 60 {
+		t.Fatalf("funnel %+v", f)
+	}
+	if f[1].OfFirstBP != 8333 || f[1].OfPreviousBP != 8333 || f[5].OfPreviousBP != 8571 {
+		t.Errorf("rates %+v", f)
+	}
+	if ConversionBP(c) != 5000 {
+		t.Errorf("conversion %d", ConversionBP(c))
+	}
+	empty := BuildFunnel(nil)
+	if empty[3].OfFirstBP != 0 || ConversionBP(FunnelCounts{}) != 0 {
+		t.Error("empty funnel must not divide by zero")
+	}
+}
