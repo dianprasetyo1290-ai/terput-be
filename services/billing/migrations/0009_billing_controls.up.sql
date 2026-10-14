@@ -128,3 +128,15 @@ ALTER TABLE bill_refunds
 ALTER TABLE bill_refunds ADD CONSTRAINT bill_refunds_transfer_ref_required
     CHECK (status <> 'processed' OR approval_id IS NULL OR btrim(COALESCE(transfer_ref, '')) <> '');
 CREATE UNIQUE INDEX bill_refunds_school_transfer_ref ON bill_refunds (school_id, transfer_ref) WHERE transfer_ref IS NOT NULL;
+
+-- BUG-056: resolving a reconciliation exception is maker-checker through
+-- core's Approval Center (request type 'recon_adjustment'). While waiting
+-- the exception is 'pending_approval'; an approved adjustment journal goes
+-- to the journal outbox (gateway_journal_postings.exception_id).
+ALTER TABLE reconciliation_exceptions DROP CONSTRAINT IF EXISTS reconciliation_exceptions_status_check;
+ALTER TABLE reconciliation_exceptions ADD CONSTRAINT reconciliation_exceptions_status_check
+    CHECK (status IN ('open', 'pending_approval', 'resolved'));
+ALTER TABLE reconciliation_exceptions
+    ADD COLUMN requested_by  text NULL,
+    ADD COLUMN requested_at  timestamptz NULL,
+    ADD COLUMN decision_note text NULL;

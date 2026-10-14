@@ -252,6 +252,7 @@ func main() {
 		in.Post("/internal/corrections/{id}/callback", app.CorrectionCallback)
 		in.Post("/internal/schemes/changes/{id}/callback", app.SchemeChangeCallback)
 		in.Post("/internal/refunds/{id}/callback", app.RefundCallback)
+		in.Post("/internal/reconciliation/exceptions/{id}/callback", app.ReconExceptionCallback)
 		in.Get("/internal/students/{studentUserId}/financial-summary", app.InternalStudentFinancialSummary)
 		in.Post("/internal/students/{studentUserId}/exit", app.InternalStudentExit)
 		in.Post("/internal/students/{studentUserId}/refund", app.InternalStudentRefund)

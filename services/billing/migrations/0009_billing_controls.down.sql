@@ -1,3 +1,8 @@
+UPDATE reconciliation_exceptions SET status = 'open' WHERE status = 'pending_approval';
+ALTER TABLE reconciliation_exceptions DROP CONSTRAINT IF EXISTS reconciliation_exceptions_status_check;
+ALTER TABLE reconciliation_exceptions ADD CONSTRAINT reconciliation_exceptions_status_check CHECK (status IN ('open', 'resolved'));
+ALTER TABLE reconciliation_exceptions DROP COLUMN IF EXISTS requested_by, DROP COLUMN IF EXISTS requested_at,
+    DROP COLUMN IF EXISTS decision_note;
 DROP INDEX IF EXISTS bill_refunds_school_transfer_ref;
 ALTER TABLE bill_refunds DROP CONSTRAINT IF EXISTS bill_refunds_transfer_ref_required;
 ALTER TABLE bill_refunds DROP COLUMN IF EXISTS approval_id, DROP COLUMN IF EXISTS transfer_ref,

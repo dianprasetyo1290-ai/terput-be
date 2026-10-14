@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -127,108 +126,6 @@ func (a *App) AdminRunReconciliation(w http.ResponseWriter, r *http.Request) {
 		"exceptions":      reconResult.Exceptions,
 		"providers":       perProvider,
 	}, nil)
-}
-
-// AdminListExceptions lists reconciliation exceptions.
-func (a *App) AdminListExceptions(w http.ResponseWriter, r *http.Request) {
-	claims := common.RequireFinance(w, r)
-	if claims == nil {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id required")
-		return
-	}
-
-	status := r.URL.Query().Get("status")
-	kind := r.URL.Query().Get("kind")
-
-	query := `SELECT id, provider, kind, ref, detail, status, COALESCE(resolution_note, ''), created_at, updated_at
-	          FROM reconciliation_exceptions
-	          WHERE school_id = $1`
-	var args []any
-	args = append(args, schoolID)
-
-	if status != "" {
-		args = append(args, status)
-		query += fmt.Sprintf(" AND status = $%d", len(args))
-	}
-	if kind != "" {
-		args = append(args, kind)
-		query += fmt.Sprintf(" AND kind = $%d", len(args))
-	}
-	if provider := r.URL.Query().Get("provider"); provider != "" {
-		args = append(args, provider)
-		query += fmt.Sprintf(" AND provider = $%d", len(args))
-	}
-	query += " ORDER BY created_at DESC"
-
-	rows, err := a.DB.QueryContext(r.Context(), query, args...)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	defer rows.Close()
-
-	type exRow struct {
-		ID             string          `json:"id"`
-		Provider       string          `json:"provider"`
-		Kind           string          `json:"kind"`
-		Ref            string          `json:"ref"`
-		Detail         json.RawMessage `json:"detail"`
-		Status         string          `json:"status"`
-		ResolutionNote string          `json:"resolution_note"`
-		CreatedAt      time.Time       `json:"created_at"`
-		UpdatedAt      time.Time       `json:"updated_at"`
-	}
-
-	var items []exRow
-	for rows.Next() {
-		var it exRow
-		var det []byte
-		if err := rows.Scan(&it.ID, &it.Provider, &it.Kind, &it.Ref, &det, &it.Status, &it.ResolutionNote, &it.CreatedAt, &it.UpdatedAt); err == nil {
-			it.Detail = det
-			items = append(items, it)
-		}
-	}
-
-	common.WriteSuccess(w, items, nil)
-}
-
-// AdminResolveException marks an exception as resolved with a note.
-func (a *App) AdminResolveException(w http.ResponseWriter, r *http.Request) {
-	claims := common.RequireFinance(w, r)
-	if claims == nil {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	id := param(r, "id")
-
-	var req struct {
-		ResolutionNote string `json:"resolution_note"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
-	if req.ResolutionNote == "" {
-		common.WriteError(w, http.StatusBadRequest, "catatan penyelesaian (resolution_note) wajib diisi")
-		return
-	}
-
-	res, err := a.DB.ExecContext(r.Context(),
-		`UPDATE reconciliation_exceptions
-		 SET status = 'resolved', resolution_note = $1, updated_at = now()
-		 WHERE id = $2 AND school_id = $3`, req.ResolutionNote, id, schoolID)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		common.WriteError(w, http.StatusNotFound, "exception not found")
-		return
-	}
-
-	common.WriteSuccess(w, map[string]string{"id": id, "status": "resolved"}, nil)
 }
 
 // AdminImportBankStatement imports a bank mutation file (AC-31-02). The
