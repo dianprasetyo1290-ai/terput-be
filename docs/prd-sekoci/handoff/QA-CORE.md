@@ -189,3 +189,40 @@ web: npx vue-tsc -b -> 0 error ; npm run build -> built in 12.39s
 
 1. Jalankan migrasi core sampai versi 5 (`core-migrate`). Artikel bawaan langsung tampil di portal orang tua.
 2. Admin sekolah sebaiknya mengganti artikel "Cara melihat dan membayar tagihan" dengan kanal pembayaran sekolahnya lewat Pengaturan → Panduan & FAQ.
+
+## 10. Putaran 3
+
+Commit `63e664c`. Pemicu: QA-BILL kini mengirim kegagalan posting jurnal sebagai item antrean galat kritis.
+
+### Perubahan
+
+- **Matriks peran × jenis** (`core/internal/model/exception_access.go`): peran baru `akuntan` (`common.RoleAkuntan`) melihat dan menindak `webhook` dan `journal_posting`, sama seperti `finance_manager`. Item kritis kedua jenis itu kini juga dikirim ke akuntan. Matriks web (`services/core/types.ts`) disamakan.
+- **Penerima notifikasi kritis** (`core/internal/jobs/effects.go`, `client.RoleHolders`):
+  - Core memanggil `GET {IDENTITY_URL}/internal/users?role=<peran>&school_id=<sekolah>` dengan `X-Internal-Key`. Respons yang diharapkan adalah envelope `{"data":[{"id":"<uuid>"}...]}`; field `user_id` juga diterima.
+  - Bila identity menjawab **404** (rute belum ada), core memakai perilaku lama: `GET /users?role=&school_id=&status=active&per_page=200`. Notifikasi tidak gagal.
+  - Galat lain (5xx/timeout) hanya di-log per peran, dan peran lain tetap dikirimi.
+  - Pengguna yang memegang beberapa peran penanggung jawab hanya menerima satu notifikasi.
+- **Web**:
+  - Peran `akuntan` ditambahkan ke tipe `Role` (`types/envelope.ts`) dan diberi label di `RoleSwitcher`.
+  - Menu Sistem → Antrean Galat Integrasi kini tampil untuk `akuntan`. `finance_manager` sudah mendapatkannya sejak putaran 1.
+
+### Test
+
+- `TestCriticalException_UsesInternalUserList`: identity palsu melayani `/internal/users` dan menyembunyikan `/users`. Penerima yang diharapkan adalah tepat akuntan dan finance_manager, masing-masing sekali, tanpa admin. Akuntan juga bisa membaca daftar `kind=journal_posting`.
+- `TestCriticalException_NotifiesResponsibleRoles`: identity palsu tanpa `/internal/users` (404), sehingga jalur fallback ke `/users` teruji.
+- `TestExceptionKindsFor` dan `TestExceptionResponsibleRoles` mencakup akuntan.
+
+### Verifikasi (output asli)
+
+```
+core: go vet ./... ; TEST_PG_DSN=... go test -count=1 ./...
+  ok common, handler, model, servicedesk, store
+web: npx vue-tsc -b -> 0 error ; npm run build -> built in 25.86s
+```
+
+### Catatan untuk area lain
+
+- **Identity (QA-IDN)**:
+  - Peran `akuntan` harus bisa diberikan (enum/daftar peran identity).
+  - `/internal/users` sebaiknya hanya mengembalikan pengguna aktif dengan peran itu di sekolah tersebut.
+- **Web/akuntansi**: `DashboardRedirectView` belum punya halaman awal khusus `akuntan`, jadi akuntan mendarat di dasbor umum. Menu akuntansi lain untuk akuntan adalah milik area akuntansi. Core tidak mengubahnya agar tidak bentrok.
