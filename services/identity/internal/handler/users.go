@@ -5,7 +5,6 @@ import (
 	"database/sql/driver"
 	"encoding/csv"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -841,134 +840,6 @@ func (a *App) ExportUsers(w http.ResponseWriter, r *http.Request) {
 	cw.Flush()
 }
 
-type userImportRowError struct {
-	Row   int    `json:"row"`
-	Issue string `json:"issue"`
-}
-
-type userImportReport struct {
-	Created int                  `json:"created"`
-	Errors  []userImportRowError `json:"errors"`
-}
-
-// ImportUsers: "Import Excel" button on Data Siswa / Data Guru. Columns:
-// Nama, Email, No Telepon (optional). Role + school come from the caller's
-// context (role is required — Data Pengguna's own "Tambah Pengguna" already
-// covers ad hoc single-role creation, so bulk import here is deliberately
-// scoped to the role the admin is currently viewing, same as
-// listUsersByRole's role parameter).
-func (a *App) ImportUsers(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
-		return
-	}
-	claims := common.FromCtx(r)
-	role := r.FormValue("role")
-	// If role is provided in the request (Data Siswa/Data Guru), validate it.
-	// If empty (Data Pengguna), we will read it per-row from the 4th column.
-	if role != "" {
-		if !common.IsValidRole(role) {
-			common.WriteError(w, http.StatusBadRequest, "valid role is required")
-			return
-		}
-		if claims.ActiveRole == common.RoleAdmin && role != common.RoleGuru && role != common.RoleSiswa {
-			common.WriteError(w, http.StatusForbidden, "admin may only import guru or siswa accounts")
-			return
-		}
-	}
-	schoolID := claims.SchoolID
-	if claims.ActiveRole == common.RoleSuperadmin {
-		if sid := r.FormValue("school_id"); sid != "" {
-			schoolID = sid
-		}
-	}
-	if role != common.RoleSuperadmin && schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required for non-superadmin roles")
-		return
-	}
-
-	if err := r.ParseMultipartForm(20 << 20); err != nil {
-		common.WriteError(w, http.StatusBadRequest, "failed to parse multipart form")
-		return
-	}
-	file, _, err := r.FormFile("file")
-	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "file is required (multipart field 'file')")
-		return
-	}
-	defer file.Close()
-	f, err := excelize.OpenReader(file)
-	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "invalid .xlsx file")
-		return
-	}
-	defer f.Close()
-	rows, err := f.GetRows(f.GetSheetName(0))
-	if err != nil || len(rows) < 2 {
-		common.WriteError(w, http.StatusBadRequest, "sheet is empty or unreadable")
-		return
-	}
-
-	report := userImportReport{Errors: []userImportRowError{}}
-	for i, row := range rows[1:] {
-		rowNum := i + 2
-		name := strings.TrimSpace(cellAt(row, 0))
-		email := strings.TrimSpace(cellAt(row, 1))
-		phone := strings.TrimSpace(cellAt(row, 2))
-		if name == "" && email == "" {
-			continue
-		}
-		if name == "" || email == "" {
-			report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: "Nama dan Email wajib diisi"})
-			continue
-		}
-
-		rowRole := role
-		if rowRole == "" {
-			rowRole = strings.ToLower(strings.TrimSpace(cellAt(row, 3)))
-			if rowRole == "" {
-				report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: "Peran (Siswa/Guru) wajib diisi"})
-				continue
-			}
-			if rowRole != common.RoleGuru && rowRole != common.RoleSiswa {
-				report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: "Peran harus 'guru' atau 'siswa'"})
-				continue
-			}
-		}
-
-		tx, err := a.DB.Begin()
-		if err != nil {
-			report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: "gagal menyimpan"})
-			continue
-		}
-		userID, _, err := createImportedUser(tx, name, email, phone, "", "", "", "", nil)
-		if err != nil {
-			tx.Rollback()
-			issue := fmt.Sprintf("gagal membuat pengguna: %v", err)
-			if isUniqueViolation(err) {
-				issue = fmt.Sprintf("email %q sudah digunakan", email)
-			}
-			report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: issue})
-			continue
-		}
-		var schoolIDArg interface{}
-		if schoolID != "" {
-			schoolIDArg = schoolID
-		}
-		if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id, school_id, role) VALUES ($1,$2,$3)`, userID, schoolIDArg, rowRole); err != nil {
-			tx.Rollback()
-			report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: "gagal menetapkan peran"})
-			continue
-		}
-		if err := tx.Commit(); err != nil {
-			report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: "gagal menyimpan"})
-			continue
-		}
-		report.Created++
-	}
-
-	common.WriteJSON(w, http.StatusOK, report, nil)
-}
-
 func boolStr(b bool) string {
 	if b {
 		return "true"
@@ -1021,12 +892,14 @@ func (a *App) DownloadUsersTemplate(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 	sheetName := "Data Pengguna"
 	f.SetSheetName("Sheet1", sheetName)
-	// Nama/Email/Peran are validated as required by ImportUsers above;
-	// Telepon is optional. Marked with a red asterisk so the mandatory
-	// columns are visually obvious in the downloaded file.
-	headers := []string{"Nama *", "Email *", "Telepon", "Peran (guru/siswa) *"}
+	// Columns are matched by header (import_users.go / userimport), so
+	// order does not matter. Nama/Email/Peran are required (Peran may be
+	// omitted when importing from Data Siswa / Data Guru); Telepon and
+	// ID Sumber (the id in the previous system, kept for traceability) are
+	// optional. Mandatory columns are marked red. Max 1000 rows per file.
+	headers := []string{"Nama *", "Email *", "Telepon", "Peran (guru/siswa) *", "ID Sumber"}
 	f.SetSheetRow(sheetName, "A1", &headers)
-	f.SetSheetRow(sheetName, "A2", &[]string{"Budi Santoso", "budi@example.com", "08123456789", "siswa"})
+	f.SetSheetRow(sheetName, "A2", &[]string{"Budi Santoso", "budi@example.com", "08123456789", "siswa", "S-2024-001"})
 	mandatoryStyle, err := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true, Color: "C00000"}})
 	if err == nil {
 		for _, cellRef := range []string{"A1", "B1", "D1"} {

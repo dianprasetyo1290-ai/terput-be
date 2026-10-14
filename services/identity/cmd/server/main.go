@@ -206,6 +206,7 @@ func main() {
 		pr.Route("/users", func(ur chi.Router) {
 			ur.Post("/", app.CreateUser)
 			ur.Post("/import", app.ImportUsers)
+			ur.Post("/import-batches/{id}/rollback", app.RollbackImportBatch)
 			// GET /users/import-template is NOT registered here — see the
 			// /users/export precedence comment in the ir group below; it hits
 			// the exact same chi Mount-boundary bug (was 500ing with GetUser's
@@ -347,6 +348,7 @@ func main() {
 		// X-Internal-Key caller, same as every other route in this group).
 		ir.Get("/users/export", app.ExportUsers)
 		ir.Get("/users/import-template", app.DownloadUsersTemplate)
+		ir.Get("/users/import-batches", app.ListImportBatches)
 		ir.Get("/users/{id}", app.GetUser)
 		ir.Get("/users", app.ListUsers)
 		// Same handler as GET /users, reached when ids/exclude_ids is too large for
