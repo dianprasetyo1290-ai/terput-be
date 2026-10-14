@@ -71,7 +71,7 @@ func (a *App) referenceLabel(ctx context.Context, category, value, schoolID stri
 func (a *App) ListReferences(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "Sesi tidak ditemukan. Silakan masuk kembali")
 		return
 	}
 	school := claims.SchoolID

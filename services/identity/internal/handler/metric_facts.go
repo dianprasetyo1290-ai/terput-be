@@ -15,7 +15,7 @@ import (
 func (a *App) InternalMetricFacts(w http.ResponseWriter, r *http.Request) {
 	schoolID := strings.TrimSpace(r.URL.Query().Get("school_id"))
 	if schoolID == "" {
-		common.WriteError(w, http.StatusUnprocessableEntity, "school_id is required")
+		common.WriteError(w, http.StatusUnprocessableEntity, "Unit (school_id) wajib diisi")
 		return
 	}
 	metric := strings.TrimSpace(r.URL.Query().Get("metric"))
@@ -36,7 +36,7 @@ func (a *App) InternalMetricFacts(w http.ResponseWriter, r *http.Request) {
 	var count int64
 	err := a.DB.QueryRow(query, schoolID).Scan(&count)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to query metric facts")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat data statistik")
 		return
 	}
 
@@ -55,7 +55,7 @@ func (a *App) InternalMetricFacts(w http.ResponseWriter, r *http.Request) {
 func (a *App) InternalFoundationSchools(w http.ResponseWriter, r *http.Request) {
 	schoolID := chi.URLParam(r, "id")
 	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school id is required")
+		common.WriteError(w, http.StatusBadRequest, "Unit wajib diisi")
 		return
 	}
 
@@ -70,7 +70,7 @@ func (a *App) InternalFoundationSchools(w http.ResponseWriter, r *http.Request) 
 			common.WriteJSON(w, http.StatusOK, []any{}, nil)
 			return
 		}
-		common.WriteError(w, http.StatusInternalServerError, "failed to query foundation schools")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat unit yayasan")
 		return
 	}
 	defer rows.Close()
@@ -85,7 +85,7 @@ func (a *App) InternalFoundationSchools(w http.ResponseWriter, r *http.Request) 
 	for rows.Next() {
 		var s schoolInfo
 		if err := rows.Scan(&s.ID, &s.Name, &s.Level); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to scan school info")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal membaca data unit")
 			return
 		}
 		schools = append(schools, s)

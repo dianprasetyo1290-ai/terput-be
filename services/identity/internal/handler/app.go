@@ -111,7 +111,7 @@ func requireRole(w http.ResponseWriter, r *http.Request, allowed ...string) bool
 			// main.go, so bypassing the role check here is safe.
 			return true
 		}
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "Sesi tidak ditemukan. Silakan masuk kembali")
 		return false
 	}
 	if claims.ActiveRole == common.RoleSuperadmin {
@@ -122,7 +122,7 @@ func requireRole(w http.ResponseWriter, r *http.Request, allowed ...string) bool
 			return true
 		}
 	}
-	common.WriteError(w, http.StatusForbidden, "forbidden: requires role "+strings.Join(allowed, " or "))
+	common.WriteError(w, http.StatusForbidden, "Akses ditolak: hanya untuk peran "+strings.Join(allowed, " atau "))
 	return false
 }
 

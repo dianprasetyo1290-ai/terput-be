@@ -404,7 +404,7 @@ func (a *App) viewerClasses(ctx context.Context, userID, role, schoolID string) 
 func (a *App) ListVisibleAnnouncements(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "Sesi tidak ditemukan. Silakan masuk kembali")
 		return
 	}
 	if !a.permit(w, r, "announcements", "view") {
@@ -482,7 +482,7 @@ func (a *App) ListAllAnnouncements(w http.ResponseWriter, r *http.Request) {
 func (a *App) GetAnnouncement(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "Sesi tidak ditemukan. Silakan masuk kembali")
 		return
 	}
 	an, err := scanAnnouncement(a.DB.QueryRowContext(r.Context(), `SELECT `+announcementCols+` FROM announcements WHERE id::text=$1`, chi.URLParam(r, "id")))

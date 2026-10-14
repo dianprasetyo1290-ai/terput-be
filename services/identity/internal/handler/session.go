@@ -271,7 +271,7 @@ func (a *App) requireUserInScope(w http.ResponseWriter, r *http.Request, userID 
 		return false
 	}
 	if !ok {
-		common.WriteError(w, http.StatusNotFound, "user not found")
+		common.WriteError(w, http.StatusNotFound, "Pengguna tidak ditemukan")
 		return false
 	}
 	return true
@@ -345,7 +345,7 @@ func (a *App) UpdateSecurityPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	var p security.Policy
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		common.WriteError(w, http.StatusBadRequest, "invalid request body")
+		common.WriteError(w, http.StatusBadRequest, "Format data tidak valid")
 		return
 	}
 	if errs := security.ValidatePolicy(p, common.IsValidRole); len(errs) > 0 {
@@ -384,7 +384,7 @@ func (a *App) UpsertRoleConflict(w http.ResponseWriter, r *http.Request) {
 	}
 	var c security.RoleConflict
 	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
-		common.WriteError(w, http.StatusBadRequest, "invalid request body")
+		common.WriteError(w, http.StatusBadRequest, "Format data tidak valid")
 		return
 	}
 	errs := map[string]string{}

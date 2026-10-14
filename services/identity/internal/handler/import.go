@@ -3,6 +3,7 @@ package handler
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -366,20 +367,20 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 	}
 	academicYearLabel := strings.TrimSpace(r.FormValue("academic_year"))
 	if academicYearLabel == "" {
-		common.WriteError(w, http.StatusBadRequest, "academic_year is required")
+		common.WriteError(w, http.StatusBadRequest, "Tahun ajaran wajib diisi")
 		return
 	}
 
 	a.checkExistingEmails(pi)
 
 	if !pi.report.OK {
-		common.WriteValidationError(w, http.StatusUnprocessableEntity, "dry run found problems; fix them before importing", pi.report.Errors)
+		common.WriteValidationError(w, http.StatusUnprocessableEntity, "Pemeriksaan menemukan masalah; perbaiki file sebelum mengimpor", pi.report.Errors)
 		return
 	}
 
 	tx, err := a.DB.Begin()
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "import failed")
+		common.WriteError(w, http.StatusInternalServerError, "Impor gagal. Tidak ada data yang berubah")
 		return
 	}
 	defer tx.Rollback()
@@ -389,7 +390,7 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 	if pi.existingSchoolID != "" {
 		var currentYearID sql.NullString
 		if err := tx.QueryRow(`SELECT id, current_academic_year_id FROM schools WHERE id=$1`, pi.existingSchoolID).Scan(&schoolID, &currentYearID); err != nil {
-			common.WriteError(w, http.StatusBadRequest, "sekolah yang dipilih tidak ditemukan")
+			common.WriteError(w, http.StatusBadRequest, "Sekolah yang dipilih tidak ditemukan")
 			return
 		}
 		hadCurrentYear = currentYearID.Valid
@@ -403,7 +404,7 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 			pi.school.city, pi.school.province, pi.school.registrationNumber, pi.school.yearFounded,
 			pi.school.phoneNumber, pi.school.email, pi.school.logo).Scan(&schoolID)
 		if err != nil {
-			common.WriteDBError(w, err, "failed to create school")
+			common.WriteDBError(w, err, "Gagal membuat unit")
 			return
 		}
 	}
@@ -413,7 +414,7 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 	// to the same tahun akademik must not create a duplicate row).
 	academicYearID, err := findOrCreateAcademicYear(tx, schoolID, academicYearLabel)
 	if err != nil {
-		common.WriteDBError(w, err, "failed to resolve academic year")
+		common.WriteDBError(w, err, "Gagal menentukan tahun ajaran")
 		return
 	}
 	// Only (re)point "current academic year" for a brand-new school, or an
@@ -422,7 +423,7 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 	// which year the rest of the school is currently operating in.
 	if !hadCurrentYear {
 		if _, err := tx.Exec(`UPDATE schools SET current_academic_year_id=$1 WHERE id=$2`, academicYearID, schoolID); err != nil {
-			common.WriteDBError(w, err, "failed to link academic year")
+			common.WriteDBError(w, err, "Gagal menautkan tahun ajaran")
 			return
 		}
 	}
@@ -440,7 +441,7 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 		emailToUserID[g["email"]] = userID
 		if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id, school_id, role, academic_year_id) VALUES ($1,$2,'guru',$3)`,
 			userID, schoolID, academicYearID); err != nil {
-			common.WriteDBError(w, err, "failed to assign guru role")
+			common.WriteDBError(w, err, "Gagal menetapkan peran guru")
 			return
 		}
 		guruCreated++
@@ -457,7 +458,7 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id, school_id, role, academic_year_id) VALUES ($1,$2,'siswa',$3)`,
 			userID, schoolID, academicYearID); err != nil {
-			common.WriteDBError(w, err, "failed to assign siswa role")
+			common.WriteDBError(w, err, "Gagal menetapkan peran siswa")
 			return
 		}
 		siswaUserIDByEmail[s["email"]] = userID
@@ -474,7 +475,7 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id,school_id,role) VALUES ($1,$2,'orang_tua')`, userID, schoolID); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to assign guardian role")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal menetapkan peran orang tua")
 			return
 		}
 		guardianIDByName[strings.ToLower(strings.TrimSpace(g["name"]))] = userID
@@ -487,7 +488,7 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if _, err := tx.Exec(`INSERT INTO guardian_links (school_id,guardian_user_id,student_user_id,relationship,status,verified_at) VALUES ($1,$2,$3,'orang_tua','active',now()) ON CONFLICT DO NOTHING`, schoolID, guardianID, studentID); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to create guardian link")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal menghubungkan orang tua dengan siswa")
 			return
 		}
 		guardianLinked++
@@ -505,18 +506,18 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 		if err := tx.QueryRow(`INSERT INTO positions (school_id, name) VALUES ($1,$2)
 			ON CONFLICT (school_id, name) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
 			schoolID, o["jabatan"]).Scan(&positionID); err != nil {
-			common.WriteDBError(w, err, "failed to create position")
+			common.WriteDBError(w, err, "Gagal membuat jabatan")
 			return
 		}
 		if _, err := tx.Exec(`INSERT INTO position_assignments (position_id, user_id, school_id) VALUES ($1,$2,$3)
 			ON CONFLICT (position_id, user_id) DO NOTHING`, positionID, guruUserID, schoolID); err != nil {
-			common.WriteDBError(w, err, "failed to assign position")
+			common.WriteDBError(w, err, "Gagal menetapkan jabatan")
 			return
 		}
 		if role, ok := common.JabatanOnlyRoleForPosition(o["jabatan"]); ok {
 			if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id, school_id, role) VALUES ($1,$2,$3)
 				ON CONFLICT (user_id, school_id, role) DO NOTHING`, guruUserID, schoolID, role); err != nil {
-				common.WriteDBError(w, err, "failed to mirror jabatan role")
+				common.WriteDBError(w, err, "Gagal menyelaraskan peran jabatan")
 				return
 			}
 		}
@@ -541,7 +542,7 @@ func (a *App) Import(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := tx.Commit(); err != nil {
-		common.WriteDBError(w, err, "import failed to commit")
+		common.WriteDBError(w, err, "Impor gagal disimpan. Tidak ada data yang berubah")
 		return
 	}
 
@@ -743,17 +744,20 @@ func createImportedUser(tx *sql.Tx, name, email, phone, birthDate, birthPlace, a
 }
 
 func (a *App) readImportUpload(r *http.Request) (*parsedImport, error) {
+	// Only readable messages are returned: the caller shows err.Error() to
+	// the user, so parser internals are logged instead (BUG-045).
 	if err := r.ParseMultipartForm(20 << 20); err != nil {
-		return nil, fmt.Errorf("failed to parse multipart form: %w", err)
+		return nil, errors.New("Unggahan gagal dibaca. Ukuran file maksimal 20 MB")
 	}
 	file, _, err := r.FormFile("file")
 	if err != nil {
-		return nil, fmt.Errorf("file is required (multipart field 'file')")
+		return nil, errors.New("File impor wajib diunggah")
 	}
 	defer file.Close()
 	f, err := excelize.OpenReader(file)
 	if err != nil {
-		return nil, fmt.Errorf("invalid .xlsx file: %w", err)
+		common.CaptureError(err)
+		return nil, errors.New("File bukan .xlsx yang valid. Gunakan template impor sekolah")
 	}
 	defer f.Close()
 	schoolNameOverride := strings.TrimSpace(r.FormValue("school_name")) // the "Buat sekolah" field
@@ -885,7 +889,7 @@ func (a *App) DownloadTemplate(w http.ResponseWriter, r *http.Request) {
 
 	mandatoryStyle, err := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true, Color: "C00000"}})
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to build template style")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal membuat template")
 		return
 	}
 
@@ -916,6 +920,6 @@ func (a *App) DownloadTemplate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 	w.Header().Set("Content-Disposition", "attachment; filename=sekoci_import_template.xlsx")
 	if err := f.Write(w); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to generate template")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal membuat template")
 	}
 }

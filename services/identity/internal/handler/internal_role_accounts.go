@@ -31,7 +31,7 @@ var externalRoleWhitelist = map[string]bool{
 func (a *App) InternalCreateOrLinkRoleAccount(w http.ResponseWriter, r *http.Request) {
 	var req internalRoleAccountRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		common.WriteError(w, http.StatusBadRequest, "invalid request body")
+		common.WriteError(w, http.StatusBadRequest, "Format data tidak valid")
 		return
 	}
 	req.SchoolID = strings.TrimSpace(req.SchoolID)
@@ -39,18 +39,18 @@ func (a *App) InternalCreateOrLinkRoleAccount(w http.ResponseWriter, r *http.Req
 	req.FullName = strings.TrimSpace(req.FullName)
 	req.Role = strings.TrimSpace(req.Role)
 	if req.SchoolID == "" || req.Email == "" || req.FullName == "" || req.Role == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id, email, full_name, and role are required")
+		common.WriteError(w, http.StatusBadRequest, "school_id, email, nama lengkap, dan peran wajib diisi")
 		return
 	}
 	if !externalRoleWhitelist[req.Role] {
-		common.WriteError(w, http.StatusBadRequest, "role not allowed for external role accounts")
+		common.WriteError(w, http.StatusBadRequest, "Peran tidak diizinkan untuk akun eksternal")
 		return
 	}
 
 	ctx := r.Context()
 	tx, err := a.DB.BeginTx(ctx, nil)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to start transaction")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memulai penyimpanan. Coba lagi")
 		return
 	}
 	defer tx.Rollback()
@@ -66,18 +66,18 @@ func (a *App) InternalCreateOrLinkRoleAccount(w http.ResponseWriter, r *http.Req
 		defaultPassword = common.GenDefaultPassword()
 		hash, herr := common.HashPassword(defaultPassword)
 		if herr != nil {
-			common.WriteError(w, http.StatusInternalServerError, "password hashing failed")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal memproses kata sandi")
 			return
 		}
 		// External role accounts do NOT set managed_by_hr
 		err = tx.QueryRowContext(ctx, `INSERT INTO users (name, email, password_hash, password_changed, default_password)
 			VALUES ($1, $2, $3, false, $4) RETURNING id`, req.FullName, req.Email, hash, defaultPassword).Scan(&userID)
 		if err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to create user")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal membuat pengguna")
 			return
 		}
 	case err != nil:
-		common.WriteError(w, http.StatusInternalServerError, "database error")
+		common.WriteError(w, http.StatusInternalServerError, "Terjadi kesalahan pada basis data. Coba lagi")
 		return
 	default:
 		created = false
@@ -87,12 +87,12 @@ func (a *App) InternalCreateOrLinkRoleAccount(w http.ResponseWriter, r *http.Req
 		VALUES ($1, $2, $3, 'active')
 		ON CONFLICT (user_id, school_id, role) DO UPDATE SET status = 'active'`,
 		userID, req.SchoolID, req.Role); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to assign role")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menetapkan peran")
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to commit transaction")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menyimpan perubahan. Coba lagi")
 		return
 	}
 

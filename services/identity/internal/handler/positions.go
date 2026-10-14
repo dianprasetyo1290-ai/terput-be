@@ -24,13 +24,13 @@ type positionRequest struct {
 func (a *App) ListPositions(w http.ResponseWriter, r *http.Request) {
 	schoolID, filtered := resolveSchoolScope(r)
 	if !filtered {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+		common.WriteError(w, http.StatusBadRequest, "Unit (school_id) wajib diisi")
 		return
 	}
 	rows, err := a.DB.Query(`SELECT id, school_id, name, priority, created_at, updated_at FROM positions
 		WHERE school_id = $1 AND deleted_at IS NULL ORDER BY priority, name`, schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to list positions")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat daftar jabatan")
 		return
 	}
 	defer rows.Close()
@@ -38,7 +38,7 @@ func (a *App) ListPositions(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var p model.Position
 		if err := rows.Scan(&p.ID, &p.SchoolID, &p.Name, &p.Priority, &p.CreatedAt, &p.UpdatedAt); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to list positions")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal memuat daftar jabatan")
 			return
 		}
 		out = append(out, p)
@@ -53,7 +53,7 @@ func (a *App) CreatePosition(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	var req positionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-		common.WriteError(w, http.StatusBadRequest, "name is required")
+		common.WriteError(w, http.StatusBadRequest, "Nama wajib diisi")
 		return
 	}
 	schoolID := claims.SchoolID
@@ -61,7 +61,7 @@ func (a *App) CreatePosition(w http.ResponseWriter, r *http.Request) {
 		schoolID = req.SchoolID
 	}
 	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+		common.WriteError(w, http.StatusBadRequest, "Unit (school_id) wajib diisi")
 		return
 	}
 	var p model.Position
@@ -70,7 +70,7 @@ func (a *App) CreatePosition(w http.ResponseWriter, r *http.Request) {
 		RETURNING id, school_id, name, priority, created_at, updated_at`, schoolID, req.Name, req.Priority).
 		Scan(&p.ID, &p.SchoolID, &p.Name, &p.Priority, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
-		common.WriteDBError(w, err, "failed to create position")
+		common.WriteDBError(w, err, "Gagal membuat jabatan")
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, p, nil)
@@ -84,7 +84,7 @@ func (a *App) UpdatePosition(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var req positionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-		common.WriteError(w, http.StatusBadRequest, "name is required")
+		common.WriteError(w, http.StatusBadRequest, "Nama wajib diisi")
 		return
 	}
 	query := `UPDATE positions SET name=$1, priority=$2, updated_at=now() WHERE id=$3 AND deleted_at IS NULL`
@@ -97,10 +97,10 @@ func (a *App) UpdatePosition(w http.ResponseWriter, r *http.Request) {
 	var p model.Position
 	err := a.DB.QueryRow(query, args...).Scan(&p.ID, &p.SchoolID, &p.Name, &p.Priority, &p.CreatedAt, &p.UpdatedAt)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "position not found")
+		common.WriteError(w, http.StatusNotFound, "Jabatan tidak ditemukan")
 		return
 	} else if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to update position")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memperbarui jabatan")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, p, nil)
@@ -120,11 +120,11 @@ func (a *App) DeletePosition(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := a.DB.Exec(query, args...)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to delete position")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menghapus jabatan")
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "position not found")
+		common.WriteError(w, http.StatusNotFound, "Jabatan tidak ditemukan")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"id": id}, nil)
@@ -147,7 +147,7 @@ func (a *App) AssignPosition(w http.ResponseWriter, r *http.Request) {
 	positionID := chi.URLParam(r, "id")
 	var req assignPositionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.UserID == "" {
-		common.WriteError(w, http.StatusBadRequest, "user_id is required")
+		common.WriteError(w, http.StatusBadRequest, "Pengguna (user_id) wajib diisi")
 		return
 	}
 
@@ -159,16 +159,16 @@ func (a *App) AssignPosition(w http.ResponseWriter, r *http.Request) {
 		args = append(args, claims.SchoolID)
 	}
 	if err := a.DB.QueryRow(query, args...).Scan(&schoolID, &posName); err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "position not found")
+		common.WriteError(w, http.StatusNotFound, "Jabatan tidak ditemukan")
 		return
 	} else if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to assign position")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menetapkan jabatan")
 		return
 	}
 
 	tx, err := a.DB.Begin()
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to assign position")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menetapkan jabatan")
 		return
 	}
 	defer tx.Rollback()
@@ -179,20 +179,20 @@ func (a *App) AssignPosition(w http.ResponseWriter, r *http.Request) {
 		RETURNING id, position_id, user_id, school_id, created_at`,
 		positionID, req.UserID, schoolID).Scan(&pa.ID, &pa.PositionID, &pa.UserID, &pa.SchoolID, &pa.CreatedAt)
 	if err != nil {
-		common.WriteDBError(w, err, "failed to assign position")
+		common.WriteDBError(w, err, "Gagal menetapkan jabatan")
 		return
 	}
 
 	if role, ok := common.JabatanOnlyRoleForPosition(posName); ok {
 		if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id, school_id, role) VALUES ($1,$2,$3)
 			ON CONFLICT (user_id, school_id, role) DO NOTHING`, req.UserID, schoolID, role); err != nil {
-			common.WriteDBError(w, err, "failed to mirror jabatan role")
+			common.WriteDBError(w, err, "Gagal menyelaraskan peran jabatan")
 			return
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to assign position")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menetapkan jabatan")
 		return
 	}
 	pa.PositionName = posName
@@ -213,11 +213,11 @@ func (a *App) UnassignPosition(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := a.DB.Exec(query, args...)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to unassign position")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal mencabut jabatan")
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "assignment not found")
+		common.WriteError(w, http.StatusNotFound, "Penetapan tidak ditemukan")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"id": assignmentID}, nil)
@@ -228,7 +228,7 @@ func (a *App) UnassignPosition(w http.ResponseWriter, r *http.Request) {
 func (a *App) Organization(w http.ResponseWriter, r *http.Request) {
 	schoolID, filtered := resolveSchoolScope(r)
 	if !filtered {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+		common.WriteError(w, http.StatusBadRequest, "Unit (school_id) wajib diisi")
 		return
 	}
 	rows, err := a.DB.Query(`
@@ -239,7 +239,7 @@ func (a *App) Organization(w http.ResponseWriter, r *http.Request) {
 		WHERE pa.school_id = $1
 		ORDER BY p.priority, p.name, u.name`, schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to load organization")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat struktur organisasi")
 		return
 	}
 	defer rows.Close()
@@ -247,7 +247,7 @@ func (a *App) Organization(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var pa model.PositionAssignment
 		if err := rows.Scan(&pa.ID, &pa.PositionID, &pa.PositionName, &pa.UserID, &pa.UserName, &pa.SchoolID, &pa.CreatedAt); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to load organization")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal memuat struktur organisasi")
 			return
 		}
 		out = append(out, pa)

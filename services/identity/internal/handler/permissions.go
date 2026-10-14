@@ -161,7 +161,7 @@ func (a *App) permit(w http.ResponseWriter, r *http.Request, module, action stri
 		if common.IsInternal(r) {
 			return true
 		}
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "Sesi tidak ditemukan. Silakan masuk kembali")
 		return false
 	}
 	ok, err := a.allowedTo(r.Context(), claims.SchoolID, claims.ActiveRole, module, action)
@@ -332,7 +332,7 @@ func (a *App) UpdatePermissionMatrix(w http.ResponseWriter, r *http.Request) {
 func (a *App) MyPermissions(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "Sesi tidak ditemukan. Silakan masuk kembali")
 		return
 	}
 	rows, err := a.effectivePermissions(r.Context(), claims.SchoolID, claims.ActiveRole)

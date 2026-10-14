@@ -142,7 +142,7 @@ func (a *App) canFileFor(ctx context.Context, claimsUserID, claimsRole, claimsSc
 func (a *App) CreateDataSubjectRequest(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "Sesi tidak ditemukan. Silakan masuk kembali")
 		return
 	}
 	var in struct {
@@ -250,7 +250,7 @@ func (a *App) listDSR(w http.ResponseWriter, r *http.Request, where string, args
 func (a *App) MyDataSubjectRequests(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "Sesi tidak ditemukan. Silakan masuk kembali")
 		return
 	}
 	a.listDSR(w, r, `(d.requested_by::text=$1 OR d.subject_user_id::text=$1)`, claims.UserID)
@@ -569,7 +569,7 @@ func (a *App) anonymizeUser(ctx context.Context, userID string) error {
 func (a *App) DataSubjectRequestExport(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "Sesi tidak ditemukan. Silakan masuk kembali")
 		return
 	}
 	var subject, school sql.NullString

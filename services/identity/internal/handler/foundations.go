@@ -27,13 +27,13 @@ func (a *App) ListFoundations(w http.ResponseWriter, r *http.Request) {
 	page, perPage := common.ParsePage(r)
 	var total int
 	if err := a.DB.QueryRow(`SELECT count(*) FROM foundations WHERE deleted_at IS NULL`).Scan(&total); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to list foundations")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat daftar yayasan")
 		return
 	}
 	rows, err := a.DB.Query(`SELECT id, name, address, year_founded, year_joined, created_at, updated_at
 		FROM foundations WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT $1 OFFSET $2`, perPage, (page-1)*perPage)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to list foundations")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat daftar yayasan")
 		return
 	}
 	defer rows.Close()
@@ -41,7 +41,7 @@ func (a *App) ListFoundations(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var f model.Foundation
 		if err := rows.Scan(&f.ID, &f.Name, &f.Address, &f.YearFounded, &f.YearJoined, &f.CreatedAt, &f.UpdatedAt); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to list foundations")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal memuat daftar yayasan")
 			return
 		}
 		out = append(out, f)
@@ -55,7 +55,7 @@ func (a *App) CreateFoundation(w http.ResponseWriter, r *http.Request) {
 	}
 	var req foundationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-		common.WriteError(w, http.StatusBadRequest, "name is required")
+		common.WriteError(w, http.StatusBadRequest, "Nama wajib diisi")
 		return
 	}
 	var f model.Foundation
@@ -64,7 +64,7 @@ func (a *App) CreateFoundation(w http.ResponseWriter, r *http.Request) {
 		req.Name, req.Address, req.YearFounded, req.YearJoined).
 		Scan(&f.ID, &f.Name, &f.Address, &f.YearFounded, &f.YearJoined, &f.CreatedAt, &f.UpdatedAt)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to create foundation")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal membuat yayasan")
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, f, nil)
@@ -80,10 +80,10 @@ func (a *App) GetFoundation(w http.ResponseWriter, r *http.Request) {
 		FROM foundations WHERE id = $1 AND deleted_at IS NULL`, id).
 		Scan(&f.ID, &f.Name, &f.Address, &f.YearFounded, &f.YearJoined, &f.CreatedAt, &f.UpdatedAt)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "foundation not found")
+		common.WriteError(w, http.StatusNotFound, "Yayasan tidak ditemukan")
 		return
 	} else if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to get foundation")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat yayasan")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, f, nil)
@@ -96,7 +96,7 @@ func (a *App) UpdateFoundation(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var req foundationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-		common.WriteError(w, http.StatusBadRequest, "name is required")
+		common.WriteError(w, http.StatusBadRequest, "Nama wajib diisi")
 		return
 	}
 	var f model.Foundation
@@ -106,10 +106,10 @@ func (a *App) UpdateFoundation(w http.ResponseWriter, r *http.Request) {
 		req.Name, req.Address, req.YearFounded, req.YearJoined, id).
 		Scan(&f.ID, &f.Name, &f.Address, &f.YearFounded, &f.YearJoined, &f.CreatedAt, &f.UpdatedAt)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "foundation not found")
+		common.WriteError(w, http.StatusNotFound, "Yayasan tidak ditemukan")
 		return
 	} else if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to update foundation")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memperbarui yayasan")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, f, nil)
@@ -122,11 +122,11 @@ func (a *App) DeleteFoundation(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	res, err := a.DB.Exec(`UPDATE foundations SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to delete foundation")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menghapus yayasan")
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "foundation not found")
+		common.WriteError(w, http.StatusNotFound, "Yayasan tidak ditemukan")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"id": id}, nil)

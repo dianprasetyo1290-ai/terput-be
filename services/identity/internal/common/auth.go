@@ -70,12 +70,12 @@ func JWTSessionMiddleware(secret string, validate SessionValidator) func(http.Ha
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tokenStr := BearerToken(r)
 			if tokenStr == "" {
-				WriteError(w, http.StatusUnauthorized, "missing token")
+				WriteError(w, http.StatusUnauthorized, "Sesi tidak ditemukan. Silakan masuk kembali")
 				return
 			}
 			claims, err := ParseToken(tokenStr, secret)
 			if err != nil {
-				WriteError(w, http.StatusUnauthorized, "invalid token")
+				WriteError(w, http.StatusUnauthorized, "Sesi tidak valid atau kedaluwarsa. Silakan masuk kembali")
 				return
 			}
 			if validate != nil {
