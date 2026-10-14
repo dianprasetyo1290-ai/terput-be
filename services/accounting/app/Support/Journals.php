@@ -81,7 +81,7 @@ final class Journals
                 if (trim((string) $l->description) === '') {
                     $problems[] = "Baris {$l->trans_count}: keterangan wajib diisi.";
                 }
-                foreach (Accounts::postingProblems((string) $l->acc_code, ($head->source ?? 'manual') === 'manual') as $m) {
+                foreach (Accounts::postingProblems((string) $l->acc_code, ($head->source ?? 'manual') === 'manual', $l->div_code !== null ? (string) $l->div_code : null) as $m) {
                     $problems[] = "Baris {$l->trans_count}: $m";
                 }
             }
