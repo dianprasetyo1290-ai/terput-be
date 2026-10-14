@@ -34,16 +34,23 @@ const reqTypeFeeChange = "fee_change"
 type componentInput struct {
 	Code      string `json:"code"`
 	Name      string `json:"name"`
-	Kind      string `json:"kind"` // monthly | one_time
+	Kind      string `json:"kind"` // monthly | annual | one_time
 	AmountIDR int64  `json:"amount_idr"`
 	SortOrder int    `json:"sort_order"`
 	IsFree    bool   `json:"is_free"`
+	// Default installment plan (BUG-126): number of terms and months
+	// between them; 1 term = paid at once.
+	InstallmentTerms int `json:"installment_terms"`
+	IntervalMonths   int `json:"installment_interval_months"`
 }
 
 type schemeInput struct {
 	AcademicYearID string           `json:"academic_year_id"`
 	GradeLevel     string           `json:"grade_level"`
 	ClassroomID    string           `json:"classroom_id"`
+	Program        string           `json:"program"`         // BUG-125, optional
+	Cohort         string           `json:"cohort"`          // angkatan, optional
+	AdmissionTrack string           `json:"admission_track"` // jalur masuk, optional
 	Name           string           `json:"name"`
 	Installment    bool             `json:"installment"`
 	DueDay         int              `json:"due_day"`
@@ -57,7 +64,8 @@ type schemeInput struct {
 func (in schemeInput) modelComponents() []model.SchemeComponent {
 	out := make([]model.SchemeComponent, 0, len(in.Components))
 	for _, c := range in.Components {
-		out = append(out, model.SchemeComponent{Code: c.Code, Name: c.Name, Kind: c.Kind, AmountIDR: c.AmountIDR, IsFree: c.IsFree})
+		out = append(out, model.SchemeComponent{Code: c.Code, Name: c.Name, Kind: c.Kind, AmountIDR: c.AmountIDR, IsFree: c.IsFree,
+			InstallmentTerms: c.InstallmentTerms, IntervalMonths: c.IntervalMonths})
 	}
 	return out
 }
@@ -137,8 +145,13 @@ func (in schemeInput) normalized() schemeInput {
 	out.Status = schemeStatus(in)
 	out.DueDay = schemeDueDay(in)
 	out.Components = make([]componentInput, len(in.Components))
+	out.Program = strings.TrimSpace(in.Program)
+	out.Cohort = strings.TrimSpace(in.Cohort)
+	out.AdmissionTrack = strings.TrimSpace(in.AdmissionTrack)
 	for i, c := range in.Components {
 		c.Kind = componentKind(c)
+		c.InstallmentTerms = max(c.InstallmentTerms, 1)
+		c.IntervalMonths = max(c.IntervalMonths, 1)
 		if c.SortOrder == 0 {
 			c.SortOrder = i + 1
 		}
@@ -148,9 +161,12 @@ func (in schemeInput) normalized() schemeInput {
 }
 
 // tariffChanged reports whether moving from before to after changes what
-// students are billed: component amounts/lines or the validity window.
+// students are billed: component amounts/lines, the validity window or the
+// tariff dimensions.
 func tariffChanged(before, after schemeInput) bool {
 	return model.TariffChanged(before.modelComponents(), after.modelComponents()) ||
+		!strings.EqualFold(before.Program, after.Program) || !strings.EqualFold(before.Cohort, after.Cohort) ||
+		!strings.EqualFold(before.AdmissionTrack, after.AdmissionTrack) ||
 		strings.TrimSpace(before.EffectiveFrom) != strings.TrimSpace(after.EffectiveFrom) ||
 		strings.TrimSpace(before.EffectiveTo) != strings.TrimSpace(after.EffectiveTo)
 }
@@ -162,13 +178,14 @@ func loadScheme(ctx context.Context, q interface {
 }, schoolID, id string, lock bool) (schemeInput, error) {
 	var in schemeInput
 	query := `SELECT academic_year_id::text,COALESCE(grade_level,''),COALESCE(classroom_id::text,''),name,status,installment,due_day,
-	                 COALESCE(notes,''),COALESCE(to_char(effective_from,'YYYY-MM-DD'),''),COALESCE(to_char(effective_to,'YYYY-MM-DD'),'')
+	                 COALESCE(notes,''),COALESCE(to_char(effective_from,'YYYY-MM-DD'),''),COALESCE(to_char(effective_to,'YYYY-MM-DD'),''),
+	                 COALESCE(program,''),COALESCE(cohort,''),COALESCE(admission_track,'')
 	            FROM billing_schemes WHERE id::text=$1 AND school_id=$2`
 	if lock {
 		query += ` FOR UPDATE`
 	}
 	err := q.QueryRowContext(ctx, query, id, schoolID).Scan(&in.AcademicYearID, &in.GradeLevel, &in.ClassroomID, &in.Name,
-		&in.Status, &in.Installment, &in.DueDay, &in.Notes, &in.EffectiveFrom, &in.EffectiveTo)
+		&in.Status, &in.Installment, &in.DueDay, &in.Notes, &in.EffectiveFrom, &in.EffectiveTo, &in.Program, &in.Cohort, &in.AdmissionTrack)
 	if err == sql.ErrNoRows {
 		return in, &httpError{http.StatusNotFound, "scheme not found"}
 	}
@@ -176,7 +193,7 @@ func loadScheme(ctx context.Context, q interface {
 		return in, err
 	}
 	rows, err := q.QueryContext(ctx,
-		`SELECT code,name,kind,amount_idr,sort_order,is_free FROM billing_scheme_components
+		`SELECT code,name,kind,amount_idr,sort_order,is_free,installment_terms,installment_interval_months FROM billing_scheme_components
 		  WHERE scheme_id::text=$1 AND school_id=$2 ORDER BY sort_order,code`, id, schoolID)
 	if err != nil {
 		return in, err
@@ -185,7 +202,7 @@ func loadScheme(ctx context.Context, q interface {
 	in.Components = []componentInput{}
 	for rows.Next() {
 		var c componentInput
-		if err := rows.Scan(&c.Code, &c.Name, &c.Kind, &c.AmountIDR, &c.SortOrder, &c.IsFree); err != nil {
+		if err := rows.Scan(&c.Code, &c.Name, &c.Kind, &c.AmountIDR, &c.SortOrder, &c.IsFree, &c.InstallmentTerms, &c.IntervalMonths); err != nil {
 			return in, err
 		}
 		in.Components = append(in.Components, c)
@@ -207,12 +224,13 @@ func checkSchemeConflicts(ctx context.Context, tx *sql.Tx, schoolID, id string, 
 		return err
 	}
 	candidate := model.SchemeWindow{ID: id, Name: in.Name, AcademicYearID: in.AcademicYearID, GradeLevel: in.GradeLevel,
-		ClassroomID: in.ClassroomID, From: from, To: to}
+		ClassroomID: in.ClassroomID, Program: in.Program, Cohort: in.Cohort, Track: in.AdmissionTrack, From: from, To: to}
 	for _, c := range in.Components {
 		candidate.Codes = append(candidate.Codes, c.Code)
 	}
 	rows, err := tx.QueryContext(ctx,
 		`SELECT s.id::text,s.name,s.academic_year_id::text,COALESCE(s.grade_level,''),COALESCE(s.classroom_id::text,''),
+		        COALESCE(s.program,''),COALESCE(s.cohort,''),COALESCE(s.admission_track,''),
 		        s.effective_from,s.effective_to,COALESCE(string_agg(c.code, chr(31)),'')
 		   FROM billing_schemes s LEFT JOIN billing_scheme_components c ON c.scheme_id=s.id
 		  WHERE s.school_id=$1 AND s.status<>'archived' AND s.academic_year_id::text=$2 AND s.id::text<>$3
@@ -225,7 +243,8 @@ func checkSchemeConflicts(ctx context.Context, tx *sql.Tx, schoolID, id string, 
 		var other model.SchemeWindow
 		var codes string
 		var f, t sql.NullTime
-		if err := rows.Scan(&other.ID, &other.Name, &other.AcademicYearID, &other.GradeLevel, &other.ClassroomID, &f, &t, &codes); err != nil {
+		if err := rows.Scan(&other.ID, &other.Name, &other.AcademicYearID, &other.GradeLevel, &other.ClassroomID,
+			&other.Program, &other.Cohort, &other.Track, &f, &t, &codes); err != nil {
 			return err
 		}
 		if f.Valid {
@@ -239,7 +258,7 @@ func checkSchemeConflicts(ctx context.Context, tx *sql.Tx, schoolID, id string, 
 		}
 		if shared := model.SchemeConflict(candidate, other); len(shared) > 0 {
 			return &httpError{http.StatusConflict, "tarif ganda: komponen " + strings.Join(shared, ", ") +
-				" sudah ditagihkan skema \"" + other.Name + "\" untuk tahun ajaran, tingkat/kelas dan periode berlaku yang sama"}
+				" sudah ditagihkan skema \"" + other.Name + "\" untuk tahun ajaran, tingkat/kelas, program, angkatan, jalur dan periode berlaku yang sama"}
 		}
 	}
 	return rows.Err()
@@ -252,9 +271,10 @@ func insertComponents(ctx context.Context, tx *sql.Tx, schoolID, schemeID string
 			order = i + 1
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO billing_scheme_components(school_id,scheme_id,code,name,kind,amount_idr,sort_order,is_free)
-			 VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
-			schoolID, schemeID, strings.TrimSpace(c.Code), strings.TrimSpace(c.Name), componentKind(c), c.AmountIDR, order, c.IsFree); err != nil {
+			`INSERT INTO billing_scheme_components(school_id,scheme_id,code,name,kind,amount_idr,sort_order,is_free,installment_terms,installment_interval_months)
+			 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+			schoolID, schemeID, strings.TrimSpace(c.Code), strings.TrimSpace(c.Name), componentKind(c), c.AmountIDR, order, c.IsFree,
+			max(c.InstallmentTerms, 1), max(c.IntervalMonths, 1)); err != nil {
 			return err
 		}
 	}
@@ -266,10 +286,12 @@ func applyScheme(ctx context.Context, tx *sql.Tx, schoolID, id string, in scheme
 	res, err := tx.ExecContext(ctx,
 		`UPDATE billing_schemes SET academic_year_id=$1,grade_level=NULLIF($2,''),classroom_id=NULLIF($3,'')::uuid,
 		        name=$4,status=$5,installment=$6,due_day=$7,notes=NULLIF($8,''),
-		        effective_from=NULLIF($9,'')::date,effective_to=NULLIF($10,'')::date,updated_at=now()
+		        effective_from=NULLIF($9,'')::date,effective_to=NULLIF($10,'')::date,
+		        program=NULLIF($13,''),cohort=NULLIF($14,''),admission_track=NULLIF($15,''),updated_at=now()
 		 WHERE id::text=$11 AND school_id=$12`,
 		in.AcademicYearID, in.GradeLevel, in.ClassroomID, in.Name, schemeStatus(in),
-		in.Installment, schemeDueDay(in), in.Notes, in.EffectiveFrom, in.EffectiveTo, id, schoolID)
+		in.Installment, schemeDueDay(in), in.Notes, in.EffectiveFrom, in.EffectiveTo, id, schoolID,
+		in.Program, in.Cohort, in.AdmissionTrack)
 	if err != nil {
 		return err
 	}
@@ -311,11 +333,13 @@ func (a *App) CreateScheme(w http.ResponseWriter, r *http.Request) {
 
 	var id string
 	err = tx.QueryRowContext(r.Context(),
-		`INSERT INTO billing_schemes(school_id,academic_year_id,grade_level,classroom_id,name,status,installment,due_day,notes,effective_from,effective_to)
-		 VALUES($1,$2,NULLIF($3,''),NULLIF($4,'')::uuid,$5,$6,$7,$8,NULLIF($9,''),NULLIF($10,'')::date,NULLIF($11,'')::date)
+		`INSERT INTO billing_schemes(school_id,academic_year_id,grade_level,classroom_id,name,status,installment,due_day,notes,effective_from,effective_to,
+		                            program,cohort,admission_track)
+		 VALUES($1,$2,NULLIF($3,''),NULLIF($4,'')::uuid,$5,$6,$7,$8,NULLIF($9,''),NULLIF($10,'')::date,NULLIF($11,'')::date,
+		        NULLIF($12,''),NULLIF($13,''),NULLIF($14,''))
 		 RETURNING id`,
 		schoolID, in.AcademicYearID, in.GradeLevel, in.ClassroomID, in.Name, in.Status,
-		in.Installment, in.DueDay, in.Notes, in.EffectiveFrom, in.EffectiveTo).Scan(&id)
+		in.Installment, in.DueDay, in.Notes, in.EffectiveFrom, in.EffectiveTo, in.Program, in.Cohort, in.AdmissionTrack).Scan(&id)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -622,7 +646,8 @@ func (a *App) ArchiveScheme(w http.ResponseWriter, r *http.Request) {
 
 const schemeColumns = `id,academic_year_id::text,COALESCE(grade_level,''),COALESCE(classroom_id::text,''),name,status,installment,due_day,
 	COALESCE(notes,''),COALESCE(to_char(effective_from,'YYYY-MM-DD'),''),COALESCE(to_char(effective_to,'YYYY-MM-DD'),''),created_at,updated_at,
-	(SELECT ch.id::text FROM billing_scheme_changes ch WHERE ch.scheme_id=billing_schemes.id AND ch.status='pending_approval')`
+	(SELECT ch.id::text FROM billing_scheme_changes ch WHERE ch.scheme_id=billing_schemes.id AND ch.status='pending_approval'),
+	COALESCE(program,''),COALESCE(cohort,''),COALESCE(admission_track,'')`
 
 // ListSchemes is GET /admin/schemes.
 func (a *App) ListSchemes(w http.ResponseWriter, r *http.Request) {
@@ -635,6 +660,14 @@ func (a *App) ListSchemes(w http.ResponseWriter, r *http.Request) {
 	grade := strings.TrimSpace(r.URL.Query().Get("grade_level"))
 	page, perPage := common.Page(r)
 
+	var total int
+	if err := a.DB.QueryRowContext(r.Context(),
+		`SELECT count(*) FROM billing_schemes
+		 WHERE school_id=$1 AND ($2='' OR academic_year_id::text=$2) AND ($3='' OR status=$3) AND ($4='' OR grade_level=$4)`,
+		schoolID, year, status, grade).Scan(&total); err != nil {
+		writeErr(w, err)
+		return
+	}
 	rows, err := a.DB.QueryContext(r.Context(),
 		`SELECT `+schemeColumns+`
 		 FROM billing_schemes
@@ -669,7 +702,7 @@ func (a *App) ListSchemes(w http.ResponseWriter, r *http.Request) {
 		}
 		m["components"] = components
 	}
-	common.WriteJSON(w, http.StatusOK, items, nil)
+	common.WriteJSON(w, http.StatusOK, items, &common.Meta{Page: page, PerPage: perPage, Total: total})
 }
 
 // GetScheme is GET /admin/schemes/{id}.
@@ -703,26 +736,28 @@ type rowScanner interface{ Scan(dest ...any) error }
 func scanScheme(row rowScanner) (map[string]any, error) {
 	var (
 		id, year, grade, classroom, name, status, notes, from, to string
+		program, cohort, track                                    string
 		installment                                               bool
 		dueDay                                                    int
 		createdAt, updatedAt                                      time.Time
 		pending                                                   sql.NullString
 	)
 	if err := row.Scan(&id, &year, &grade, &classroom, &name, &status, &installment, &dueDay, &notes, &from, &to,
-		&createdAt, &updatedAt, &pending); err != nil {
+		&createdAt, &updatedAt, &pending, &program, &cohort, &track); err != nil {
 		return nil, err
 	}
 	return map[string]any{
 		"id": id, "academic_year_id": year, "grade_level": grade, "classroom_id": classroom,
 		"name": name, "status": status, "installment": installment, "due_day": dueDay,
 		"notes": notes, "effective_from": from, "effective_to": to,
+		"program": program, "cohort": cohort, "admission_track": track,
 		"pending_change_id": pending.String, "created_at": createdAt, "updated_at": updatedAt,
 	}, nil
 }
 
 func (a *App) schemeComponents(ctx context.Context, schoolID, schemeID string) ([]map[string]any, error) {
 	rows, err := a.DB.QueryContext(ctx,
-		`SELECT id,code,name,kind,amount_idr,sort_order,is_free FROM billing_scheme_components
+		`SELECT id,code,name,kind,amount_idr,sort_order,is_free,installment_terms,installment_interval_months FROM billing_scheme_components
 		 WHERE scheme_id::text=$1 AND school_id=$2 ORDER BY sort_order,code`, schemeID, schoolID)
 	if err != nil {
 		return nil, err
@@ -731,17 +766,18 @@ func (a *App) schemeComponents(ctx context.Context, schoolID, schemeID string) (
 	out := []map[string]any{}
 	for rows.Next() {
 		var (
-			id, code, name, kind string
-			amount               int64
-			order                int
-			free                 bool
+			id, code, name, kind   string
+			amount                 int64
+			order, terms, interval int
+			free                   bool
 		)
-		if err := rows.Scan(&id, &code, &name, &kind, &amount, &order, &free); err != nil {
+		if err := rows.Scan(&id, &code, &name, &kind, &amount, &order, &free, &terms, &interval); err != nil {
 			return nil, err
 		}
 		out = append(out, map[string]any{
 			"id": id, "code": code, "name": name, "kind": kind,
 			"amount_idr": amount, "sort_order": order, "is_free": free,
+			"installment_terms": terms, "installment_interval_months": interval,
 		})
 	}
 	return out, rows.Err()

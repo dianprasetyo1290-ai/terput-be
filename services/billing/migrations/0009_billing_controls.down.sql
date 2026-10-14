@@ -1,3 +1,13 @@
+DROP TABLE IF EXISTS bill_change_requests;
+UPDATE bill_adjustments SET kind = 'adjust' WHERE kind = 'cancel';
+ALTER TABLE bill_adjustments DROP CONSTRAINT IF EXISTS bill_adjustments_kind_check;
+ALTER TABLE bill_adjustments ADD CONSTRAINT bill_adjustments_kind_check CHECK (kind IN ('prorate','adjust'));
+DROP TABLE IF EXISTS bill_installments;
+ALTER TABLE billing_schemes DROP COLUMN IF EXISTS program, DROP COLUMN IF EXISTS cohort, DROP COLUMN IF EXISTS admission_track;
+ALTER TABLE billing_scheme_components DROP COLUMN IF EXISTS installment_terms, DROP COLUMN IF EXISTS installment_interval_months;
+UPDATE billing_scheme_components SET kind = 'one_time' WHERE kind = 'annual';
+ALTER TABLE billing_scheme_components DROP CONSTRAINT IF EXISTS billing_scheme_components_kind_check;
+ALTER TABLE billing_scheme_components ADD CONSTRAINT billing_scheme_components_kind_check CHECK (kind IN ('monthly','one_time'));
 ALTER TABLE gateway_settings DROP COLUMN IF EXISTS receipt_resend_cooldown_minutes;
 UPDATE reconciliation_exceptions SET status = 'open' WHERE status = 'pending_approval';
 ALTER TABLE reconciliation_exceptions DROP CONSTRAINT IF EXISTS reconciliation_exceptions_status_check;

@@ -144,3 +144,62 @@ ALTER TABLE reconciliation_exceptions
 -- BUG-163: per-school minimum gap between two resends of the same receipt.
 ALTER TABLE gateway_settings ADD COLUMN receipt_resend_cooldown_minutes integer NOT NULL DEFAULT 10
     CHECK (receipt_resend_cooldown_minutes >= 0);
+
+-- FR-18-001 / BUG-125/126: component frequency includes 'annual'; a default
+-- installment plan per component; tariff dimensions program, cohort
+-- (angkatan) and admission track (jalur) on the scheme.
+ALTER TABLE billing_scheme_components DROP CONSTRAINT IF EXISTS billing_scheme_components_kind_check;
+ALTER TABLE billing_scheme_components ADD CONSTRAINT billing_scheme_components_kind_check
+    CHECK (kind IN ('monthly','annual','one_time'));
+ALTER TABLE billing_scheme_components
+    ADD COLUMN installment_terms integer NOT NULL DEFAULT 1 CHECK (installment_terms BETWEEN 1 AND 12),
+    ADD COLUMN installment_interval_months integer NOT NULL DEFAULT 1 CHECK (installment_interval_months BETWEEN 1 AND 12);
+ALTER TABLE billing_schemes
+    ADD COLUMN program text NULL,
+    ADD COLUMN cohort text NULL,
+    ADD COLUMN admission_track text NULL;
+
+-- BUG-052: a bill split into terms, each with its own due date. The terms
+-- always sum to the bill's net; the bill's due_at follows the first term
+-- that is not fully paid.
+CREATE TABLE bill_installments (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id   uuid NOT NULL,
+    bill_id     uuid NOT NULL REFERENCES student_bills(id),
+    seq         integer NOT NULL CHECK (seq >= 1),
+    due_at      timestamptz NOT NULL,
+    amount_idr  bigint NOT NULL CHECK (amount_idr > 0),
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (bill_id, seq)
+);
+CREATE INDEX bill_installments_school_idx ON bill_installments (school_id, bill_id);
+
+-- BUG-053: cancelling or re-pricing an issued bill goes through the
+-- Approval Center (request_type bill_adjustment). A cancelled bill keeps its
+-- original base/discount/net; the reversal is an adjustment line.
+ALTER TABLE bill_adjustments DROP CONSTRAINT IF EXISTS bill_adjustments_kind_check;
+ALTER TABLE bill_adjustments ADD CONSTRAINT bill_adjustments_kind_check CHECK (kind IN ('prorate','adjust','cancel'));
+CREATE TABLE bill_change_requests (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id       uuid NOT NULL,
+    bill_id         uuid NOT NULL REFERENCES student_bills(id),
+    kind            text NOT NULL CHECK (kind IN ('cancel','adjust')),
+    new_net_idr     bigint NULL CHECK (new_net_idr IS NULL OR new_net_idr > 0),
+    reason          text NOT NULL CHECK (btrim(reason) <> ''),
+    status          text NOT NULL DEFAULT 'pending_approval'
+                    CHECK (status IN ('pending_approval','applied','rejected','failed')),
+    before_data     jsonb NOT NULL,
+    approval_id     text NULL,
+    adjustment_id   uuid NULL REFERENCES bill_adjustments(id),
+    requested_by    uuid NOT NULL,
+    requested_role  text NOT NULL DEFAULT '',
+    decided_by      text NULL,
+    decision_note   text NULL,
+    failure_reason  text NULL,
+    idempotency_key text NOT NULL,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    decided_at      timestamptz NULL,
+    UNIQUE (school_id, idempotency_key)
+);
+CREATE UNIQUE INDEX bill_change_requests_one_pending ON bill_change_requests (bill_id) WHERE status = 'pending_approval';
+CREATE INDEX bill_change_requests_school_idx ON bill_change_requests (school_id, created_at DESC);

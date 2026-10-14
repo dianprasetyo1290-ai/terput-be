@@ -15,6 +15,10 @@ type SchemeComponent struct {
 	Kind      string `json:"kind"`
 	AmountIDR int64  `json:"amount_idr"`
 	IsFree    bool   `json:"is_free"`
+	// InstallmentTerms/IntervalMonths are the component's default
+	// installment plan (BUG-126); 0 means 1 term / every month.
+	InstallmentTerms int `json:"installment_terms"`
+	IntervalMonths   int `json:"installment_interval_months"`
 }
 
 // ValidateComponents enforces the tariff rules: unique codes per scheme
@@ -35,8 +39,14 @@ func ValidateComponents(comps []SchemeComponent) error {
 			return fmt.Errorf("tarif komponen %s Rp0 hanya boleh bila komponen ditandai gratis", code)
 		case c.IsFree && c.AmountIDR != 0:
 			return fmt.Errorf("komponen gratis %s harus bertarif Rp0", code)
-		case c.Kind != "" && c.Kind != "monthly" && c.Kind != "one_time":
-			return fmt.Errorf("jenis komponen %s harus monthly atau one_time", code)
+		case c.Kind != "" && !ValidKind(c.Kind):
+			return fmt.Errorf("frekuensi komponen %s harus monthly, annual atau one_time", code)
+		case c.InstallmentTerms < 0 || c.InstallmentTerms > 12:
+			return fmt.Errorf("jumlah termin komponen %s harus 1 sampai 12", code)
+		case c.IntervalMonths < 0 || c.IntervalMonths > 12:
+			return fmt.Errorf("jarak termin komponen %s harus 1 sampai 12 bulan", code)
+		case c.InstallmentTerms > 1 && c.IsFree:
+			return fmt.Errorf("komponen gratis %s tidak dapat dicicil", code)
 		}
 		seen[code] = true
 	}
@@ -48,12 +58,16 @@ func componentKey(c SchemeComponent) string {
 	if kind == "" {
 		kind = "one_time"
 	}
-	return fmt.Sprintf("%s|%s|%d|%t", strings.ToUpper(strings.TrimSpace(c.Code)), kind, c.AmountIDR, c.IsFree)
+	terms, interval := max(c.InstallmentTerms, 1), max(c.IntervalMonths, 1)
+	if terms == 1 {
+		interval = 1
+	}
+	return fmt.Sprintf("%s|%s|%d|%t|%d|%d", strings.ToUpper(strings.TrimSpace(c.Code)), kind, c.AmountIDR, c.IsFree, terms, interval)
 }
 
 // TariffChanged reports whether two component lists bill different
-// amounts (a code, kind, amount or free flag differs, or a line is added or
-// removed). Renaming a component or reordering lines is not a tariff change.
+// amounts (a code, kind, amount, free flag or installment plan differs, or
+// a line is added or removed). Renaming a component or reordering lines is not a tariff change.
 func TariffChanged(before, after []SchemeComponent) bool {
 	if len(before) != len(after) {
 		return true
@@ -82,8 +96,11 @@ type SchemeWindow struct {
 	AcademicYearID string
 	GradeLevel     string
 	ClassroomID    string
-	From, To       *time.Time // inclusive dates; nil = open
-	Codes          []string
+	// Program, Cohort (angkatan) and Track (jalur masuk) are the further
+	// tariff dimensions (BUG-125); empty = all.
+	Program, Cohort, Track string
+	From, To               *time.Time // inclusive dates; nil = open
+	Codes                  []string
 }
 
 func sameDim(a, b string) bool {
@@ -108,7 +125,8 @@ func SchemeConflict(a, b SchemeWindow) []string {
 	if a.ID != "" && a.ID == b.ID {
 		return nil
 	}
-	if !sameDim(a.AcademicYearID, b.AcademicYearID) || !sameDim(a.GradeLevel, b.GradeLevel) || !sameDim(a.ClassroomID, b.ClassroomID) {
+	if !sameDim(a.AcademicYearID, b.AcademicYearID) || !sameDim(a.GradeLevel, b.GradeLevel) || !sameDim(a.ClassroomID, b.ClassroomID) ||
+		!sameDim(a.Program, b.Program) || !sameDim(a.Cohort, b.Cohort) || !sameDim(a.Track, b.Track) {
 		return nil
 	}
 	if !WindowsOverlap(a.From, a.To, b.From, b.To) {

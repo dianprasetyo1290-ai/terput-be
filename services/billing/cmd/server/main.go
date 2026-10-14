@@ -167,6 +167,11 @@ func main() {
 		ad.Get("/admin/billing/followups", app.ListFollowups)
 		ad.Post("/admin/billing/followups", app.CreateFollowup)
 		ad.Get("/admin/bills", app.ListBills)
+		ad.Post("/admin/bills/generate-annual", app.GenerateAnnualBills)
+		ad.Get("/admin/bills/{id}", app.GetBill)
+		ad.Put("/admin/bills/{id}/installments", app.SetBillInstallments)
+		ad.Post("/admin/bills/{id}/change-requests", app.CreateBillChangeRequest)
+		ad.Get("/admin/bill-change-requests", app.ListBillChangeRequests)
 		ad.Get("/admin/arrears", app.ListArrears)
 
 		ad.Get("/admin/payments", app.PaymentQueue)
@@ -250,6 +255,8 @@ func main() {
 		in.Use(common.InternalAuth(cfg.InternalKey))
 
 		in.Post("/internal/bills/generate", app.InternalGenerateBills)
+		in.Post("/internal/bills/generate-annual", app.InternalGenerateAnnualBills)
+		in.Post("/internal/bills/change-requests/{id}/callback", app.BillChangeCallback)
 		in.Get("/internal/students/{studentUserId}/outstanding", app.InternalStudentOutstanding)
 		in.Post("/internal/corrections/{id}/callback", app.CorrectionCallback)
 		in.Post("/internal/schemes/changes/{id}/callback", app.SchemeChangeCallback)

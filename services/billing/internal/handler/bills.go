@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"skci/billing/internal/client"
+	"skci/billing/internal/common"
 	"skci/billing/internal/model"
 )
 
@@ -48,6 +50,7 @@ type generateResult struct {
 type queryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
 // billTotalsQ returns the snapshot net, verified allocation total, reversal
@@ -87,10 +90,12 @@ func recomputeBillStatusQ(ctx context.Context, q queryer, schoolID, billID strin
 		return err
 	}
 	status := model.DeriveBillStatus(net, verified-reversed)
-	_, err = q.ExecContext(ctx,
+	if _, err = q.ExecContext(ctx,
 		`UPDATE student_bills SET status=$1,updated_at=now() WHERE id=$2 AND school_id=$3 AND status<>'void'`,
-		status, billID, schoolID)
-	return err
+		status, billID, schoolID); err != nil {
+		return err
+	}
+	return syncInstallmentDue(ctx, q, schoolID, billID, verified-reversed)
 }
 
 // discountRule is a stored bill_discount plus its scope metadata.
@@ -189,12 +194,13 @@ func (a *App) generateBills(ctx context.Context, schoolID string, in generateReq
 		gradeLevel     string
 		dueDay         int
 		schemeState    string
+		academicYear   string
 		effFrom, effTo sql.NullTime
 	)
 	err := a.DB.QueryRowContext(ctx,
-		`SELECT COALESCE(grade_level,''),due_day,status,effective_from,effective_to
+		`SELECT COALESCE(grade_level,''),due_day,status,effective_from,effective_to,academic_year_id::text
 		 FROM billing_schemes WHERE id::text=$1 AND school_id=$2`, in.SchemeID, schoolID).
-		Scan(&gradeLevel, &dueDay, &schemeState, &effFrom, &effTo)
+		Scan(&gradeLevel, &dueDay, &schemeState, &effFrom, &effTo, &academicYear)
 	if err == sql.ErrNoRows {
 		return result, &httpError{http.StatusNotFound, "scheme not found"}
 	}
@@ -220,20 +226,21 @@ func (a *App) generateBills(ctx context.Context, schoolID string, in generateReq
 
 	// Line items from the scheme's components.
 	itemRows, err := a.DB.QueryContext(ctx,
-		`SELECT code,name,amount_idr FROM billing_scheme_components
+		`SELECT code,name,kind,amount_idr,installment_terms,installment_interval_months FROM billing_scheme_components
 		 WHERE scheme_id=$1 AND school_id=$2 ORDER BY sort_order,code`, in.SchemeID, schoolID)
 	if err != nil {
 		return result, err
 	}
 	var items []model.BillItem
+	var comps []model.PlannedComponent
 	for itemRows.Next() {
-		var code, name string
-		var amount int64
-		if err := itemRows.Scan(&code, &name, &amount); err != nil {
+		var pc model.PlannedComponent
+		if err := itemRows.Scan(&pc.Code, &pc.Name, &pc.Kind, &pc.AmountIDR, &pc.InstallmentTerms, &pc.IntervalMonths); err != nil {
 			itemRows.Close()
 			return result, err
 		}
-		items = append(items, model.BillItem{Name: name, ComponentCode: code, AmountIDR: amount})
+		comps = append(comps, pc)
+		items = append(items, model.BillItem{Name: pc.Name, ComponentCode: pc.Code, AmountIDR: pc.AmountIDR})
 	}
 	itemRows.Close()
 	if err := itemRows.Err(); err != nil {
@@ -242,8 +249,7 @@ func (a *App) generateBills(ctx context.Context, schoolID string, in generateReq
 	if len(items) == 0 {
 		return result, &httpError{http.StatusUnprocessableEntity, "scheme has no bill components"}
 	}
-	base, err := model.TotalBase(items)
-	if err != nil {
+	if _, err := model.TotalBase(items); err != nil {
 		return result, &httpError{http.StatusUnprocessableEntity, err.Error()}
 	}
 	// BUG-050: a bill whose components cannot be journaled is never issued.
@@ -325,6 +331,13 @@ func (a *App) generateBills(ctx context.Context, schoolID string, in generateReq
 
 	dueAt := model.DueDate(in.PeriodYear, in.PeriodMonth, dueDay)
 
+	// FR-18-001: annual components once per academic year, one-time
+	// components once per student.
+	billedYear, billedEver, err := a.billedComponentCodes(ctx, schoolID, academicYear, plan)
+	if err != nil {
+		return result, err
+	}
+
 	tx, err := a.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return result, err
@@ -335,6 +348,17 @@ func (a *App) generateBills(ctx context.Context, schoolID string, in generateReq
 
 	for _, c := range plan {
 		studentID := c.Key.StudentUserID
+		studentComps := model.ComponentsForStudent(comps, billedYear[studentID], billedEver[studentID])
+		if len(studentComps) == 0 {
+			result.Skipped++
+			result.Rejected = append(result.Rejected, model.RejectedRecipient{StudentUserID: studentID,
+				Reason: "semua komponen skema (tahunan/sekali bayar) sudah pernah ditagihkan ke siswa ini"})
+			continue
+		}
+		var base int64
+		for _, pc := range studentComps {
+			base += pc.AmountIDR
+		}
 		studentGrade := enrollments[studentID].GradeLevel
 		if studentGrade == "" {
 			studentGrade = gradeLevel
@@ -359,13 +383,17 @@ func (a *App) generateBills(ctx context.Context, schoolID string, in generateReq
 		if err != nil {
 			return result, err
 		}
-		for _, it := range items {
+		for _, it := range studentComps {
 			if _, err = tx.ExecContext(ctx,
 				`INSERT INTO bill_items(school_id,bill_id,name,component_code,amount_idr,discount_idr,net_idr)
 				 VALUES($1,$2,$3,NULLIF($4,''),$5,0,$5)`,
-				schoolID, billID, it.Name, it.ComponentCode, it.AmountIDR); err != nil {
+				schoolID, billID, it.Name, it.Code, it.AmountIDR); err != nil {
 				return result, err
 			}
+		}
+		// BUG-052/126: the components' default installment plans split the bill.
+		if err = saveInstallments(ctx, tx, schoolID, billID, model.DefaultInstallments(net, dueAt, studentComps)); err != nil {
+			return result, err
 		}
 		for i, step := range steps {
 			if _, err = tx.ExecContext(ctx,
@@ -412,6 +440,44 @@ func (a *App) generateBills(ctx context.Context, schoolID string, in generateReq
 	}
 
 	return result, nil
+}
+
+// billedComponentCodes returns, per planned student, the component codes
+// already billed on a live bill in the scheme's academic year and ever.
+func (a *App) billedComponentCodes(ctx context.Context, schoolID, academicYear string, plan []model.BillCandidate) (map[string]map[string]bool, map[string]map[string]bool, error) {
+	year, ever := map[string]map[string]bool{}, map[string]map[string]bool{}
+	if len(plan) == 0 {
+		return year, ever, nil
+	}
+	students := make([]string, len(plan))
+	for i, c := range plan {
+		students[i] = c.Key.StudentUserID
+	}
+	rows, err := a.DB.QueryContext(ctx,
+		`SELECT DISTINCT b.student_user_id::text, upper(btrim(bi.component_code)), COALESCE(s.academic_year_id::text,'') = $3
+		   FROM bill_items bi JOIN student_bills b ON b.id = bi.bill_id
+		   LEFT JOIN billing_schemes s ON s.id = b.scheme_id
+		  WHERE b.school_id = $1 AND b.status <> 'void' AND bi.adjustment_id IS NULL AND bi.component_code IS NOT NULL
+		    AND b.student_user_id::text = ANY($2::text[])`, schoolID, students, academicYear)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var student, code string
+		var sameYear bool
+		if err := rows.Scan(&student, &code, &sameYear); err != nil {
+			return nil, nil, err
+		}
+		if ever[student] == nil {
+			ever[student], year[student] = map[string]bool{}, map[string]bool{}
+		}
+		ever[student][code] = true
+		if sameYear {
+			year[student][code] = true
+		}
+	}
+	return year, ever, rows.Err()
 }
 
 // enrollmentChecker is the part of academic-service generation needs; the
@@ -631,4 +697,118 @@ func normalizeStudentIDs(ids []string, single string) []string {
 	}
 	add(single)
 	return out
+}
+
+// annualRequest is the payload of the annual generation routes (BUG-128):
+// every month from..to ("YYYY-MM"; default = the scheme's validity window).
+type annualRequest struct {
+	SchemeID       string   `json:"scheme_id"`
+	StudentUserIDs []string `json:"student_user_ids"`
+	StudentUserID  string   `json:"student_user_id"`
+	From           string   `json:"from"`
+	To             string   `json:"to"`
+}
+
+type annualPeriodResult struct {
+	PeriodYear  int `json:"period_year"`
+	PeriodMonth int `json:"period_month"`
+	generateResult
+}
+
+type annualResult struct {
+	Generated         int                  `json:"generated"`
+	Skipped           int                  `json:"skipped"`
+	DepositAppliedIDR int64                `json:"deposit_applied_idr"`
+	BillIDs           []string             `json:"bill_ids"`
+	Periods           []annualPeriodResult `json:"periods"`
+}
+
+// generateAnnual issues a whole academic year of bills at once by running
+// the (idempotent) monthly generation for each period in the range.
+func (a *App) generateAnnual(ctx context.Context, schoolID string, in annualRequest, actorType, actorID string) (annualResult, error) {
+	out := annualResult{BillIDs: []string{}, Periods: []annualPeriodResult{}}
+	if strings.TrimSpace(in.SchemeID) == "" {
+		return out, &httpError{http.StatusUnprocessableEntity, "scheme_id is required"}
+	}
+	var effFrom, effTo sql.NullTime
+	err := a.DB.QueryRowContext(ctx, `SELECT effective_from,effective_to FROM billing_schemes WHERE id::text=$1 AND school_id=$2`,
+		in.SchemeID, schoolID).Scan(&effFrom, &effTo)
+	if err == sql.ErrNoRows {
+		return out, &httpError{http.StatusNotFound, "scheme not found"}
+	}
+	if err != nil {
+		return out, err
+	}
+	var from, to *time.Time
+	if effFrom.Valid {
+		from = &effFrom.Time
+	}
+	if effTo.Valid {
+		to = &effTo.Time
+	}
+	periods, err := model.AnnualPeriods(in.From, in.To, from, to)
+	if err != nil {
+		return out, &httpError{http.StatusUnprocessableEntity, err.Error()}
+	}
+	for _, p := range periods {
+		res, err := a.generateBills(ctx, schoolID, generateRequest{
+			SchemeID: in.SchemeID, PeriodYear: p[0], PeriodMonth: p[1],
+			StudentUserIDs: in.StudentUserIDs, StudentUserID: in.StudentUserID, ActorType: actorType, ActorID: actorID,
+		})
+		if err != nil {
+			var he *httpError
+			if errors.As(err, &he) && len(out.Periods) > 0 {
+				he.msg = fmt.Sprintf("periode %02d/%d: %s (periode sebelumnya sudah terbit)", p[1], p[0], he.msg)
+			}
+			return out, err
+		}
+		out.Generated += res.Generated
+		out.Skipped += res.Skipped
+		out.DepositAppliedIDR += res.DepositAppliedIDR
+		out.BillIDs = append(out.BillIDs, res.BillIDs...)
+		out.Periods = append(out.Periods, annualPeriodResult{PeriodYear: p[0], PeriodMonth: p[1], generateResult: res})
+	}
+	return out, nil
+}
+
+// GenerateAnnualBills is POST /admin/bills/generate-annual.
+func (a *App) GenerateAnnualBills(w http.ResponseWriter, r *http.Request) {
+	c, schoolID := common.RequireFinanceStaff(w, r)
+	if c == nil {
+		return
+	}
+	var in annualRequest
+	if !common.Decode(w, r, &in) {
+		return
+	}
+	res, err := a.generateAnnual(r.Context(), schoolID, in, c.ActiveRole, c.UserID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, res, nil)
+}
+
+// InternalGenerateAnnualBills is POST /internal/bills/generate-annual
+// {school_id, scheme_id, student_user_id(s), from?, to?}: used when a new
+// student is activated mid-year (academic-service contract, BUG-128).
+func (a *App) InternalGenerateAnnualBills(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		SchoolID string `json:"school_id"`
+		annualRequest
+	}
+	if !common.Decode(w, r, &in) {
+		return
+	}
+	schoolID := strings.TrimSpace(in.SchoolID)
+	if schoolID == "" {
+		common.WriteError(w, http.StatusUnprocessableEntity, "school_id is required")
+		return
+	}
+	res, err := a.generateAnnual(r.Context(), schoolID, in.annualRequest, "internal", "")
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, res, nil)
 }
