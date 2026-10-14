@@ -180,6 +180,8 @@ func main() {
 		ad.Get("/admin/arrears", app.ListArrears)
 
 		ad.Get("/admin/payments", app.PaymentQueue)
+		ad.Post("/admin/payments/import", app.ImportPayments)
+		ad.Get("/admin/payments/imports", app.ListPaymentImports)
 		ad.Post("/admin/payments/{id}/review", app.ReviewPayment)
 		ad.Post("/admin/payments/{id}/reversal", app.ReversePayment)
 		ad.Get("/admin/payments/{id}/proof", app.AdminPaymentProof)
