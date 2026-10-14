@@ -343,42 +343,90 @@ func (a *App) AdminResendReceipt(w http.ResponseWriter, r *http.Request) {
 	schoolID := common.EffectiveSchoolID(r)
 	id := param(r, "id")
 
-	var receiptNo string
-	var payerUserID string
+	if a.Notification == nil || !a.Notification.Configured() {
+		common.WriteError(w, http.StatusServiceUnavailable, "layanan notifikasi belum dikonfigurasi (NOTIFICATION_URL); kuitansi tidak dapat dikirim ulang")
+		return
+	}
+	ctx := r.Context()
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	var receiptNo, source, payerUserID string
 	var totalIDR int64
-	var source string
-
-	err := a.DB.QueryRowContext(r.Context(),
-		`SELECT r.receipt_no, r.source, COALESCE(t.payer_user_id, c.student_user_id), COALESCE(t.total_idr, c.amount_idr)
+	var resendCount int
+	var sentAt sql.NullTime
+	err = tx.QueryRowContext(ctx,
+		`SELECT r.receipt_no, r.source, COALESCE(t.payer_user_id::text, c.student_user_id::text, ''), COALESCE(t.total_idr, c.amount_idr, 0),
+		        r.resend_count, r.sent_at
 		 FROM receipts r
 		 LEFT JOIN gateway_transactions t ON t.id = r.source_id AND r.source = 'gateway'
 		 LEFT JOIN cashier_payments c ON c.id = r.source_id AND r.source = 'cashier'
-		 WHERE r.id = $1 AND r.school_id = $2`, id, schoolID).Scan(&receiptNo, &source, &payerUserID, &totalIDR)
-	if err != nil {
+		 WHERE (r.id::text = $1 OR r.source_id::text = $1) AND r.school_id = $2 FOR UPDATE OF r`, id, schoolID).
+		Scan(&receiptNo, &source, &payerUserID, &totalIDR, &resendCount, &sentAt)
+	if err == sql.ErrNoRows {
 		common.WriteError(w, http.StatusNotFound, "kuitansi tidak ditemukan")
 		return
 	}
-
-	// Update resend count and sent_at
-	_, _ = a.DB.ExecContext(r.Context(),
-		`UPDATE receipts SET resend_count = resend_count + 1, sent_at = now() WHERE id = $1`, id)
-
-	if a.Notification != nil {
-		_ = a.Notification.Notify(r.Context(), fmt.Sprintf("receipt-resend:%s:%d", id, time.Now().Unix()), client.Notification{
-			SchoolID: schoolID,
-			UserID:   payerUserID,
-			Type:     "receipt",
-			Title:    "Kuitansi Pembayaran " + receiptNo + " (Kirim Ulang)",
-			Body:     fmt.Sprintf("Salinan kuitansi pembayaran sebesar Rp %d telah dikirim ulang.", totalIDR),
-			Data:     map[string]any{"receipt_no": receiptNo, "resend": true},
-			Channels: []string{"in_app", "email"},
-		})
+	if err != nil {
+		writeErr(w, err)
+		return
 	}
-
-	common.WriteSuccess(w, map[string]string{
-		"id":         id,
-		"receipt_no": receiptNo,
-		"status":     "sent",
-		"message":    "Kuitansi berhasil dikirim ulang",
+	if payerUserID == "" {
+		common.WriteError(w, http.StatusUnprocessableEntity, "kuitansi tidak memiliki penerima")
+		return
+	}
+	cooldown := model.DefaultReceiptResendCooldown
+	var minutes int
+	switch err := tx.QueryRowContext(ctx, `SELECT receipt_resend_cooldown_minutes FROM gateway_settings WHERE school_id = $1`, schoolID).Scan(&minutes); {
+	case err == nil:
+		cooldown = time.Duration(minutes) * time.Minute
+	case err != sql.ErrNoRows:
+		writeErr(w, err)
+		return
+	}
+	var last *time.Time
+	if sentAt.Valid {
+		last = &sentAt.Time
+	}
+	if wait := model.ReceiptResendWait(last, cooldown, a.now()); wait > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds()+0.999)))
+		common.WriteError(w, http.StatusTooManyRequests,
+			fmt.Sprintf("kuitansi %s baru saja dikirim; kirim ulang dapat dilakukan lagi dalam %d menit", receiptNo, int(wait.Minutes())+1))
+		return
+	}
+	// The same receipt number is resent; the key is stable per attempt so a
+	// retried request never produces a second notification.
+	if err := a.Notification.Notify(ctx, fmt.Sprintf("receipt-resend:%s:%d", id, resendCount+1), client.Notification{
+		SchoolID: schoolID,
+		UserID:   payerUserID,
+		Type:     "receipt",
+		Title:    "Kuitansi Pembayaran " + receiptNo + " (Kirim Ulang)",
+		Body:     fmt.Sprintf("Salinan kuitansi pembayaran sebesar %s telah dikirim ulang.", formatRupiah(totalIDR)),
+		Data:     map[string]any{"receipt_no": receiptNo, "resend": true},
+		Channels: []string{"in_app", "email"},
+	}); err != nil {
+		common.WriteError(w, http.StatusBadGateway, "layanan notifikasi gagal mengirim kuitansi; coba lagi")
+		return
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE receipts SET resend_count = resend_count + 1, sent_at = now() WHERE id::text = $1`, id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeErr(w, err)
+		return
+	}
+	a.audit(ctx, schoolID, "receipt", id, "receipt_resent", claims.ActiveRole, claims.UserID, "", "",
+		map[string]any{"resend_count": resendCount}, map[string]any{"resend_count": resendCount + 1, "receipt_no": receiptNo, "source": source})
+	common.WriteSuccess(w, map[string]any{
+		"id":           id,
+		"receipt_no":   receiptNo,
+		"status":       "sent",
+		"resend_count": resendCount + 1,
+		"message":      "Kuitansi berhasil dikirim ulang",
 	}, nil)
 }

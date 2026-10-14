@@ -100,7 +100,7 @@ func (a *App) InternalStudentFinancialSummary(w http.ResponseWriter, r *http.Req
 			totalRefundable += refundable
 		}
 
-		bSummary := billSummary(id, scheme, schemeName, status, y, m, base, discount, net, verified, reversed, outstanding, dueAt, createdAt)
+		bSummary := a.billSummary(id, scheme, schemeName, status, y, m, base, discount, net, verified, reversed, outstanding, dueAt, createdAt)
 		bSummary["refundable_idr"] = refundable
 		bills = append(bills, bSummary)
 	}

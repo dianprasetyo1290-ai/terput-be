@@ -6,18 +6,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
 	"skci/billing/internal/client"
 	"skci/billing/internal/common"
+	"skci/billing/internal/model"
 )
 
 type PaymentCorrectionInput struct {
-	Source              string  `json:"source"` // 'gateway', 'cashier', 'manual'
+	Source              string  `json:"source"` // only 'cashier'; online payments are returned via refund
 	SourceID            string  `json:"source_id"`
-	Kind                string  `json:"kind"` // 'reassign', 'cancel'
+	Kind                string  `json:"kind"` // only 'cancel' (reverse; re-record for the right student)
 	TargetStudentUserID *string `json:"target_student_user_id,omitempty"`
 	Reason              string  `json:"reason"`
 }
@@ -43,11 +43,9 @@ func (a *App) AdminCreateCorrection(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "source_id and reason are required")
 		return
 	}
-	if req.Source != "gateway" && req.Source != "cashier" && req.Source != "manual" {
-		req.Source = "cashier"
-	}
-	if req.Kind != "reassign" && req.Kind != "cancel" {
-		req.Kind = "cancel"
+	if msg := model.CorrectionRequestError(req.Source, req.Kind); msg != "" {
+		common.WriteError(w, http.StatusUnprocessableEntity, msg)
+		return
 	}
 
 	// The correction row and its core approval are created together: when
@@ -58,6 +56,21 @@ func (a *App) AdminCreateCorrection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+	var payStatus string
+	err = tx.QueryRowContext(r.Context(),
+		`SELECT status FROM cashier_payments WHERE id::text = $1 AND school_id = $2 FOR UPDATE`, req.SourceID, schoolID).Scan(&payStatus)
+	if err == sql.ErrNoRows {
+		common.WriteError(w, http.StatusNotFound, "pembayaran kasir tidak ditemukan")
+		return
+	}
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if payStatus == "corrected" {
+		common.WriteError(w, http.StatusUnprocessableEntity, "pembayaran kasir ini sudah dikoreksi")
+		return
+	}
 	var corrID string
 	err = tx.QueryRowContext(r.Context(),
 		`INSERT INTO payment_corrections (
@@ -65,50 +78,43 @@ func (a *App) AdminCreateCorrection(w http.ResponseWriter, r *http.Request) {
 		) VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, now(), now())
 		RETURNING id`,
 		schoolID, req.Source, req.SourceID, req.Kind, req.TargetStudentUserID, req.Reason, claims.UserID).Scan(&corrID)
+	if isUniqueViolation(err) {
+		common.WriteError(w, http.StatusConflict, "koreksi untuk pembayaran ini masih menunggu approval")
+		return
+	}
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-
-	// Submit approval request to Core if available (T1 §3). Core reaches the
-	// callback over BILLING_INTERNAL_URL (docker service name), never localhost.
-	if a.Core != nil {
-		resp, appErr := a.Core.RequestApproval(r.Context(), client.ApprovalRequest{
-			SchoolID:       schoolID,
-			RequestType:    "payment_correction",
-			SourceService:  "billing",
-			SourceID:       corrID,
-			Title:          fmt.Sprintf("Koreksi Pembayaran (%s %s)", req.Source, req.Kind),
-			Summary:        map[string]any{"source": req.Source, "source_id": req.SourceID, "reason": req.Reason},
-			MakerUserID:    claims.UserID,
-			CallbackURL:    a.Config.Gateway.BillingInternalURL + "/internal/corrections/" + corrID + "/callback",
-			CorrelationID:  corrID,
-			IdempotencyKey: fmt.Sprintf("corr-appr:%s", corrID),
-		})
-		if appErr != nil {
-			log.Printf("payment correction %s: request approval: %v", corrID, appErr)
-			var he *client.HTTPError
-			if errors.As(appErr, &he) && he.Status >= 400 && he.Status < 500 {
-				common.WriteError(w, http.StatusUnprocessableEntity, "Approval Center menolak pengajuan: "+he.Body)
-				return
-			}
-			common.WriteError(w, http.StatusBadGateway, "Approval Center tidak dapat dihubungi, pengajuan belum tersimpan")
-			return
-		}
-		if _, err := tx.ExecContext(r.Context(),
-			`UPDATE payment_corrections SET approval_id = $1 WHERE id = $2`, resp.ID, corrID); err != nil {
-			writeErr(w, err)
-			return
-		}
+	// The correction row and its core approval are created together: there
+	// is no path that applies a correction without a second person.
+	resp, appErr := a.submitApproval(r.Context(), client.ApprovalRequest{
+		SchoolID:       schoolID,
+		RequestType:    "payment_correction",
+		SourceService:  "billing",
+		SourceID:       corrID,
+		Title:          "Pembatalan pembayaran kasir",
+		Summary:        map[string]any{"source": req.Source, "source_id": req.SourceID, "kind": req.Kind, "reason": req.Reason},
+		MakerUserID:    claims.UserID,
+		CallbackURL:    a.Config.Gateway.BillingInternalURL + "/internal/corrections/" + corrID + "/callback",
+		CorrelationID:  corrID,
+		IdempotencyKey: fmt.Sprintf("corr-appr:%s", corrID),
+	})
+	if appErr != nil {
+		writeErr(w, appErr)
+		return
+	}
+	if _, err := tx.ExecContext(r.Context(),
+		`UPDATE payment_corrections SET approval_id = $1 WHERE id = $2`, resp.ID, corrID); err != nil {
+		writeErr(w, err)
+		return
 	}
 	if err := tx.Commit(); err != nil {
 		writeErr(w, err)
 		return
 	}
-	if a.Core == nil && (claims.ActiveRole == common.RoleFinanceManager || claims.ActiveRole == common.RoleAdmin || claims.ActiveRole == common.RoleSuperadmin) {
-		// If finance_manager submits directly without Core, apply correction (AC-29-04)
-		_ = a.applyPaymentCorrection(r.Context(), schoolID, corrID, claims.UserID)
-	}
+	a.auditBoth(r.Context(), schoolID, "billing", "payment_correction", corrID, "payment_correction_requested", claims.ActiveRole, claims.UserID,
+		req.Reason, nil, map[string]any{"source": req.Source, "source_id": req.SourceID, "kind": req.Kind, "approval_id": resp.ID})
 
 	common.WriteSuccess(w, map[string]string{
 		"id":      corrID,
@@ -236,7 +242,9 @@ func (a *App) applyPaymentCorrection(ctx context.Context, schoolID, corrID, acto
 			if err != nil && !isUniqueViolation(err) {
 				return err
 			}
-			recomputeBillStatusInTx(ctx, tx, r.billID)
+			if err := recomputeBillStatusInTx(ctx, tx, r.billID); err != nil {
+				return err
+			}
 		}
 	}
 

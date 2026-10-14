@@ -184,29 +184,38 @@ func (c *Client) TeacherStudentIDs(ctx context.Context, schoolID, teacherUserID 
 	return out, nil
 }
 
-// StudentGradeLevel asks academic-service for a student's active classroom grade level.
-func (c *Client) StudentGradeLevel(ctx context.Context, schoolID, studentUserID string) (string, error) {
+// StudentEnrollment reports whether the user has an active class enrollment
+// in the school's active academic year and, if so, that classroom's grade
+// level. A user with no active enrollment (not a student, not yet placed, or
+// no longer active) returns enrolled=false.
+func (c *Client) StudentEnrollment(ctx context.Context, schoolID, studentUserID string) (bool, string, error) {
 	if !c.Configured() {
-		return "", ErrNotConfigured
+		return false, "", ErrNotConfigured
 	}
 	var res struct {
 		ClassroomID string `json:"classroom_id"`
 	}
 	path := "/students/" + url.PathEscape(studentUserID) + "/classroom?school_id=" + url.QueryEscape(schoolID)
 	if err := c.Get(ctx, path, &res); err != nil {
-		return "", err
+		return false, "", err
 	}
 	if res.ClassroomID == "" {
-		return "", nil
+		return false, "", nil
 	}
 	var classroom struct {
 		GradeLevel string `json:"grade_level"`
 	}
 	clPath := "/classrooms/" + url.PathEscape(res.ClassroomID) + "?school_id=" + url.QueryEscape(schoolID)
 	if err := c.Get(ctx, clPath, &classroom); err != nil {
-		return "", err
+		return false, "", err
 	}
-	return classroom.GradeLevel, nil
+	return true, strings.TrimSpace(classroom.GradeLevel), nil
+}
+
+// StudentGradeLevel asks academic-service for a student's active classroom grade level.
+func (c *Client) StudentGradeLevel(ctx context.Context, schoolID, studentUserID string) (string, error) {
+	_, grade, err := c.StudentEnrollment(ctx, schoolID, studentUserID)
+	return grade, err
 }
 
 // SchoolGradeLevels asks academic-service for distinct grade levels in a school.

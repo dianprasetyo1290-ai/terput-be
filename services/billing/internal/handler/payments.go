@@ -155,12 +155,8 @@ func (a *App) SubmitPayment(w http.ResponseWriter, r *http.Request) {
 
 // PaymentQueue is GET /admin/payments.
 func (a *App) PaymentQueue(w http.ResponseWriter, r *http.Request) {
-	if common.RequireAdmin(w, r) == nil {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+	c, schoolID := common.RequireFinanceStaff(w, r)
+	if c == nil {
 		return
 	}
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
@@ -271,12 +267,8 @@ func (a *App) PaymentQueue(w http.ResponseWriter, r *http.Request) {
 
 // AdminPaymentProof is GET /admin/payments/{id}/proof.
 func (a *App) AdminPaymentProof(w http.ResponseWriter, r *http.Request) {
-	if common.RequireAdmin(w, r) == nil {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+	c, schoolID := common.RequireFinanceStaff(w, r)
+	if c == nil {
 		return
 	}
 	var key, mime, checksum string
@@ -299,13 +291,8 @@ func (a *App) AdminPaymentProof(w http.ResponseWriter, r *http.Request) {
 // immutable allocation ledger; rejecting records a note. Neither ever edits a
 // verified payment.
 func (a *App) ReviewPayment(w http.ResponseWriter, r *http.Request) {
-	claims := common.RequireAdmin(w, r)
+	claims, schoolID := common.RequireFinanceStaff(w, r)
 	if claims == nil {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
 		return
 	}
 	var in struct {
@@ -422,13 +409,8 @@ func (a *App) ReviewPayment(w http.ResponseWriter, r *http.Request) {
 // immutable; a correction is an append-only reversal that restores exactly the
 // amount it reverses to the bill's outstanding balance.
 func (a *App) ReversePayment(w http.ResponseWriter, r *http.Request) {
-	claims := common.RequireAdmin(w, r)
+	claims, schoolID := common.RequireFinanceStaff(w, r)
 	if claims == nil {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
 		return
 	}
 	var in struct {

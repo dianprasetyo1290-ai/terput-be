@@ -160,6 +160,45 @@ func Allocate(amount int64, openBills []OpenBill, rule string) ([]BillAllocation
 	return allocations, deposit, nil
 }
 
+// ValidateManualAllocations checks a cashier's manual split of one payment
+// across bills (AC-29-03). open must hold only the paying student's open
+// bills in the acting school, so membership proves both ownership and
+// tenancy. Each bill may appear once with a positive amount no larger than
+// its outstanding balance, and the split may not exceed the payment. The
+// unallocated remainder is returned as deposit (BR-FIN-04).
+func ValidateManualAllocations(amount int64, allocs []BillAllocationResult, open []OpenBill) (int64, error) {
+	if amount <= 0 {
+		return 0, errors.New("nominal pembayaran harus positif")
+	}
+	outstanding := make(map[string]int64, len(open))
+	for _, b := range open {
+		outstanding[b.BillID] = b.OutstandingIDR
+	}
+	seen := make(map[string]bool, len(allocs))
+	var total int64
+	for _, al := range allocs {
+		if al.AmountIDR <= 0 {
+			return 0, fmt.Errorf("alokasi tagihan %s harus positif", al.BillID)
+		}
+		if seen[al.BillID] {
+			return 0, fmt.Errorf("tagihan %s dialokasikan lebih dari sekali", al.BillID)
+		}
+		seen[al.BillID] = true
+		out, ok := outstanding[al.BillID]
+		if !ok {
+			return 0, fmt.Errorf("tagihan %s bukan tagihan terbuka milik siswa ini di sekolah ini", al.BillID)
+		}
+		if al.AmountIDR > out {
+			return 0, fmt.Errorf("alokasi tagihan %s (%d) melebihi sisa tagihan (%d)", al.BillID, al.AmountIDR, out)
+		}
+		total += al.AmountIDR
+	}
+	if total > amount {
+		return 0, fmt.Errorf("total alokasi (%d) melebihi nominal pembayaran (%d)", total, amount)
+	}
+	return amount - total, nil
+}
+
 // FormatReceiptNo returns standard formatted receipt string.
 func FormatReceiptNo(year int, seq int) string {
 	return fmt.Sprintf("RCP-%d-%05d", year, seq)
@@ -448,4 +487,20 @@ func ValidateJournal(lines []JournalLine) error {
 		return fmt.Errorf("jurnal tidak seimbang: debit %d, kredit %d", debit, credit)
 	}
 	return nil
+}
+
+// SettlementBatchStatus is a settlement batch's status after a
+// reconciliation run: matched when every item of the batch matched a
+// successful transaction and its provider has no exception that day,
+// mismatch otherwise.
+func SettlementBatchStatus(itemMatched []bool, providerExceptions int) string {
+	if providerExceptions > 0 {
+		return "mismatch"
+	}
+	for _, m := range itemMatched {
+		if !m {
+			return "mismatch"
+		}
+	}
+	return "matched"
 }

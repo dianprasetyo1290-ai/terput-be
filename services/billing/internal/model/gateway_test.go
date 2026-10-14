@@ -382,3 +382,30 @@ func TestValidateJournal(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateManualAllocations(t *testing.T) {
+	open := []OpenBill{{BillID: "b1", OutstandingIDR: 100}, {BillID: "b2", OutstandingIDR: 50}}
+	cases := []struct {
+		name    string
+		amount  int64
+		allocs  []BillAllocationResult
+		deposit int64
+		wantErr bool
+	}{
+		{"exact split", 150, []BillAllocationResult{{"b1", 100}, {"b2", 50}}, 0, false},
+		{"partial plus deposit", 200, []BillAllocationResult{{"b1", 60}}, 140, false},
+		{"total exceeds payment", 100, []BillAllocationResult{{"b1", 80}, {"b2", 40}}, 0, true},
+		{"exceeds outstanding", 500, []BillAllocationResult{{"b2", 51}}, 0, true},
+		{"foreign or closed bill", 100, []BillAllocationResult{{"other", 10}}, 0, true},
+		{"duplicate bill", 100, []BillAllocationResult{{"b1", 10}, {"b1", 10}}, 0, true},
+		{"zero amount line", 100, []BillAllocationResult{{"b1", 0}}, 0, true},
+		{"negative line", 100, []BillAllocationResult{{"b1", -5}}, 0, true},
+		{"non-positive payment", 0, nil, 0, true},
+	}
+	for _, tc := range cases {
+		dep, err := ValidateManualAllocations(tc.amount, tc.allocs, open)
+		if (err != nil) != tc.wantErr || (!tc.wantErr && dep != tc.deposit) {
+			t.Errorf("%s: deposit=%d err=%v", tc.name, dep, err)
+		}
+	}
+}

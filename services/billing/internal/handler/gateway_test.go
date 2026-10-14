@@ -504,14 +504,18 @@ func TestAdminCreateCorrection(t *testing.T) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		t.Fatalf("correction status=%d want 200/201, body=%s", resp.StatusCode, body)
+	// Without core's Approval Center a correction is never stored nor
+	// self-applied (maker-checker); the user is told what is missing.
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("correction status=%d want 503, body=%s", resp.StatusCode, body)
 	}
 
 	var count int
 	_ = db.QueryRow("SELECT COUNT(*) FROM payment_corrections WHERE school_id=$1 AND source_id=$2", schoolID, cashierPaymentID).Scan(&count)
-	if count != 1 {
-		t.Fatalf("expected 1 payment correction, got %d", count)
+	var status string
+	_ = db.QueryRow("SELECT status FROM cashier_payments WHERE id=$1", cashierPaymentID).Scan(&status)
+	if count != 0 || status != "recorded" {
+		t.Fatalf("corrections=%d payment status=%s, want 0/recorded", count, status)
 	}
 }
 

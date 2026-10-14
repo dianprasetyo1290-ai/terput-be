@@ -50,14 +50,14 @@ var dailyKinds = []dailyKind{
 		kind: "bill_issued", prefix: "bil:issue", source: sourceBilling,
 		days: `SELECT DISTINCT bi.school_id::text, to_char(bi.created_at AT TIME ZONE $3, 'YYYY-MM-DD')
 		         FROM bill_items bi JOIN student_bills b ON b.id = bi.bill_id
-		        WHERE b.status <> 'void' AND bi.created_at >= $1 AND bi.created_at < $2`,
+		        WHERE ` + journalBillLive + ` AND bi.created_at >= $1 AND bi.created_at < $2`,
 		build: (*App).buildBillIssued,
 	},
 	{
 		kind: "discount", prefix: "bil:disc", source: sourceBilling,
 		days: `SELECT DISTINCT st.school_id::text, to_char(st.created_at AT TIME ZONE $3, 'YYYY-MM-DD')
 		         FROM bill_discount_steps st JOIN student_bills b ON b.id = st.bill_id
-		        WHERE b.status <> 'void' AND st.applied_idr > 0 AND st.created_at >= $1 AND st.created_at < $2`,
+		        WHERE ` + journalBillLive + ` AND st.applied_idr > 0 AND st.created_at >= $1 AND st.created_at < $2`,
 		build: (*App).buildDiscount,
 	},
 	{
@@ -332,6 +332,11 @@ func collectIDs(ctx context.Context, db *sql.DB, q string, args ...any) ([]strin
 
 // componentKey: scheme items carry component_code; ad-hoc bills are keyed
 // by their source module (library, transport, ...).
+// journalBillLive keeps a bill in the daily journals: live bills, and bills
+// cancelled through an approved change request (BUG-053), whose original
+// lines were journaled and whose cancellation lines reverse them.
+const journalBillLive = `(b.status <> 'void' OR EXISTS (SELECT 1 FROM bill_adjustments xa WHERE xa.bill_id = b.id AND xa.kind = 'cancel'))`
+
 const componentKey = `COALESCE(NULLIF(bi.component_code, ''), b.source_module, '')`
 
 // ---- builders ------------------------------------------------------------
@@ -340,7 +345,7 @@ func (a *App) buildBillIssued(ctx context.Context, schoolID string, start, end t
 	rows, err := a.DB.QueryContext(ctx,
 		`SELECT `+componentKey+`, min(bi.name), sum(bi.amount_idr)
 		   FROM bill_items bi JOIN student_bills b ON b.id = bi.bill_id
-		  WHERE bi.school_id = $1 AND b.status <> 'void' AND bi.created_at >= $2 AND bi.created_at < $3
+		  WHERE bi.school_id = $1 AND `+journalBillLive+` AND bi.created_at >= $2 AND bi.created_at < $3
 		  GROUP BY 1 ORDER BY 1`, schoolID, start, end)
 	if err != nil {
 		return nil, err
@@ -358,7 +363,7 @@ func (a *App) buildBillIssued(ctx context.Context, schoolID string, start, end t
 	var deposit int64
 	if err := a.DB.QueryRowContext(ctx,
 		`SELECT COALESCE(sum(ad.deposit_idr), 0) FROM bill_adjustments ad JOIN student_bills b ON b.id = ad.bill_id
-		  WHERE ad.school_id = $1 AND b.status <> 'void' AND ad.created_at >= $2 AND ad.created_at < $3`,
+		  WHERE ad.school_id = $1 AND `+journalBillLive+` AND ad.created_at >= $2 AND ad.created_at < $3`,
 		schoolID, start, end).Scan(&deposit); err != nil {
 		return nil, err
 	}
@@ -376,7 +381,7 @@ func (a *App) buildBillIssued(ctx context.Context, schoolID string, start, end t
 	}
 	ids, err := collectIDs(ctx, a.DB,
 		`SELECT DISTINCT bi.bill_id::text FROM bill_items bi JOIN student_bills b ON b.id = bi.bill_id
-		  WHERE bi.school_id = $1 AND b.status <> 'void' AND bi.created_at >= $2 AND bi.created_at < $3 ORDER BY 1`, schoolID, start, end)
+		  WHERE bi.school_id = $1 AND `+journalBillLive+` AND bi.created_at >= $2 AND bi.created_at < $3 ORDER BY 1`, schoolID, start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -389,7 +394,7 @@ func (a *App) buildDiscount(ctx context.Context, schoolID string, start, end tim
 		`SELECT COALESCE(d.scholarship, st.source = 'scholarship'), st.label, sum(st.applied_idr)
 		   FROM bill_discount_steps st JOIN student_bills b ON b.id = st.bill_id
 		   LEFT JOIN bill_discounts d ON d.id = st.discount_id
-		  WHERE st.school_id = $1 AND b.status <> 'void' AND st.applied_idr > 0 AND st.created_at >= $2 AND st.created_at < $3
+		  WHERE st.school_id = $1 AND `+journalBillLive+` AND st.applied_idr > 0 AND st.created_at >= $2 AND st.created_at < $3
 		  GROUP BY 1, 2 ORDER BY 1, 2`, schoolID, start, end)
 	if err != nil {
 		return nil, err
@@ -419,7 +424,7 @@ func (a *App) buildDiscount(ctx context.Context, schoolID string, start, end tim
 	}
 	ids, err := collectIDs(ctx, a.DB,
 		`SELECT DISTINCT st.bill_id::text FROM bill_discount_steps st JOIN student_bills b ON b.id = st.bill_id
-		  WHERE st.school_id = $1 AND b.status <> 'void' AND st.applied_idr > 0 AND st.created_at >= $2 AND st.created_at < $3 ORDER BY 1`,
+		  WHERE st.school_id = $1 AND `+journalBillLive+` AND st.applied_idr > 0 AND st.created_at >= $2 AND st.created_at < $3 ORDER BY 1`,
 		schoolID, start, end)
 	if err != nil {
 		return nil, err

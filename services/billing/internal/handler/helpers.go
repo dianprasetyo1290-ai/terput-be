@@ -99,6 +99,15 @@ func isUniqueViolation(err error) bool {
 	return strings.Contains(msg, "duplicate key") || strings.Contains(msg, "SQLSTATE 23505")
 }
 
+// isLockNotAvailable reports a NOWAIT lock conflict (SQLSTATE 55P03).
+func isLockNotAvailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "SQLSTATE 55P03") || strings.Contains(msg, "could not obtain lock")
+}
+
 // jsonRaw marshals a value for a jsonb column, returning nil for nil input.
 func jsonRaw(v any) any {
 	if v == nil {

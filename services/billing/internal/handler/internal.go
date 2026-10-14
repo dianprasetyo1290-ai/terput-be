@@ -98,7 +98,7 @@ func (a *App) InternalStudentOutstanding(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		total += outstanding
-		bills = append(bills, billSummary(id, scheme, schemeName, status, y, m, base, discount, net, verified, reversed, outstanding, dueAt, createdAt))
+		bills = append(bills, a.billSummary(id, scheme, schemeName, status, y, m, base, discount, net, verified, reversed, outstanding, dueAt, createdAt))
 	}
 	if err := rows.Err(); err != nil {
 		writeErr(w, err)

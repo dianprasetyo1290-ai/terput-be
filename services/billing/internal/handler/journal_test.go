@@ -162,7 +162,7 @@ func TestJournalOutboxRetriesWithBackoffThenRaisesException(t *testing.T) {
 	exc := f.core.get("/internal/exceptions")[len(f.core.get("/internal/exceptions"))-1]
 	var ev client.ExceptionEvent
 	_ = json.Unmarshal([]byte(exc), &ev)
-	if ev.Kind != "journal_posting" || ev.MaxAttempts != 5 || ev.RetryURL != internal.URL+"/internal/journal-postings/"+id+"/retry" {
+	if ev.Kind != "journal_posting" || ev.Severity != "critical" || ev.MaxAttempts != 5 || ev.RetryURL != internal.URL+"/internal/journal-postings/"+id+"/retry" {
 		t.Fatalf("exception %+v", ev)
 	}
 	if f.scalar(`SELECT exception_raised_at IS NOT NULL FROM gateway_journal_postings WHERE id = $1`, id) != "true" {
@@ -174,6 +174,23 @@ func TestJournalOutboxRetriesWithBackoffThenRaisesException(t *testing.T) {
 	}
 	if len(fa.calls(f.schoolID)) != 5 {
 		t.Fatal("failed row must not be retried automatically after max attempts")
+	}
+
+	// BUG-118: a retry while the row is locked by another post is refused
+	// with 409 instead of waiting and posting twice.
+	lockTx, err := f.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockTx.Exec(`SELECT 1 FROM gateway_journal_postings WHERE id = $1 FOR UPDATE`, id); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := postStatus(t, ev.RetryURL); code != http.StatusConflict {
+		t.Fatalf("retry while locked=%d want 409", code)
+	}
+	_ = lockTx.Rollback()
+	if len(fa.calls(f.schoolID)) != 5 {
+		t.Fatal("locked retry must not post")
 	}
 
 	// Retry from the exception queue while accounting is still down: 502, still failed.
