@@ -56,3 +56,24 @@ CREATE TABLE bill_followups (
     created_at         timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX bill_followups_student_idx ON bill_followups (school_id, student_user_id, created_at DESC);
+
+-- BUG-008: re-derive every stored bill status from the ledger (verified
+-- allocations minus reversals vs net), the same rule as
+-- model.DeriveBillStatus. Void bills are never touched. This is a data
+-- repair; the down migration does not restore stale values.
+WITH ledger AS (
+    SELECT b.id, b.net_idr,
+           COALESCE((SELECT sum(al.amount_idr) FROM bill_payment_allocations al JOIN bill_payments p ON p.id = al.payment_id
+                      WHERE p.student_bill_id = b.id AND p.school_id = b.school_id AND p.status = 'verified'), 0)
+         - COALESCE((SELECT sum(rv.amount_idr) FROM bill_payment_reversals rv JOIN bill_payments p ON p.id = rv.payment_id
+                      WHERE p.student_bill_id = b.id AND p.school_id = b.school_id), 0) AS paid_idr
+      FROM student_bills b
+     WHERE b.status <> 'void'
+), derived AS (
+    SELECT id, CASE WHEN paid_idr <= 0 THEN 'unpaid' WHEN paid_idr >= net_idr THEN 'paid' ELSE 'partial' END AS status
+      FROM ledger
+)
+UPDATE student_bills b
+   SET status = d.status, updated_at = now()
+  FROM derived d
+ WHERE b.id = d.id AND b.status <> d.status;

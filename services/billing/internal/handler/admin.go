@@ -428,7 +428,7 @@ func (a *App) ListBills(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, err)
 			return
 		}
-		item := billSummary(id, scheme, schemeName, billStatus, y, m, base, discount, net, verified, reversed, outstanding, dueAt, createdAt)
+		item := a.billSummary(id, scheme, schemeName, billStatus, y, m, base, discount, net, verified, reversed, outstanding, dueAt, createdAt)
 		item["student_user_id"] = student
 		items = append(items, item)
 	}
@@ -459,7 +459,7 @@ func (a *App) ListArrears(w http.ResponseWriter, r *http.Request) {
 		          COALESCE((SELECT sum(rv.amount_idr) FROM bill_payment_reversals rv JOIN bill_payments p ON p.id=rv.payment_id
 		                    WHERE p.student_bill_id=b.id AND p.school_id=b.school_id),0) AS reversed
 		   FROM student_bills b LEFT JOIN billing_schemes s ON s.id=b.scheme_id
-		   WHERE b.school_id=$1 AND b.status IN('unpaid','partial')
+		   WHERE b.school_id=$1 AND b.status<>'void'
 		     AND ($2=0 OR b.period_year=$2) AND ($3=0 OR b.period_month=$3) AND ($4='' OR b.scheme_id::text=$4)
 		 ) t
 		 WHERE (t.net_idr - t.verified + t.reversed) > 0
@@ -491,7 +491,7 @@ func (a *App) ListArrears(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, err)
 			return
 		}
-		item := billSummary(id, scheme, schemeName, billStatus, y, m, base, discount, net, verified, reversed, outstanding, dueAt, createdAt)
+		item := a.billSummary(id, scheme, schemeName, billStatus, y, m, base, discount, net, verified, reversed, outstanding, dueAt, createdAt)
 		item["student_user_id"] = student
 		items = append(items, item)
 	}

@@ -236,7 +236,9 @@ func (a *App) applyPaymentCorrection(ctx context.Context, schoolID, corrID, acto
 			if err != nil && !isUniqueViolation(err) {
 				return err
 			}
-			recomputeBillStatusInTx(ctx, tx, r.billID)
+			if err := recomputeBillStatusInTx(ctx, tx, r.billID); err != nil {
+				return err
+			}
 		}
 	}
 
