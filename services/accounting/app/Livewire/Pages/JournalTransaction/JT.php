@@ -15,10 +15,11 @@ use App\Models\JournalTransaction;
 use App\Livewire\Traits\WithListFilters;
 use App\Livewire\Traits\WithTransactionHeader;
 use App\Livewire\Traits\WithTransactionDetail;
+use App\Livewire\Traits\WithJournalWorkflow;
 
 class JT extends Component
 {
-    use WithPagination, WithListFilters, WithTransactionHeader, WithTransactionDetail;
+    use WithPagination, WithListFilters, WithTransactionHeader, WithTransactionDetail, WithJournalWorkflow;
 
     protected $paginationTheme = 'bootstrap';
 
@@ -31,7 +32,7 @@ class JT extends Component
 
     public $jtdetail = [];
     public $jteditdetail = [];
-    public $search, $order = "DESC", $limit = 10, $filter = 'a';
+    public $search, $order = "DESC", $limit = 10, $filter = 'a', $statusFilter = '';
 
     public function mount()
     {
@@ -85,11 +86,19 @@ class JT extends Component
             $query->orderBy('trans_head.trans_date', $this->order);
         }
 
+        if (in_array($this->statusFilter, \App\Support\Journals::STATUSES, true)) {
+            $query->where('trans_head.status', $this->statusFilter);
+        }
+
         $data = $query->paginate($this->limit);
 
         return view('livewire.pages.journal-transaction.j-t', [
             'data' => $data,
             'acc' => ChartOfAccount::orderBy('acc_name', 'ASC')->get(),
+            // Only accounts a manual line may hit (QA BUG-143/145/146).
+            'postableAcc' => ChartOfAccount::where('is_active', true)->where('is_control', false)
+                ->whereNotIn('acc_code', ChartOfAccount::whereNotNull('parent_code')->select('parent_code'))
+                ->orderBy('acc_code')->get(),
             'div' => Division::all(),
             'cur' => Currency::all(),
             'transaction_code' => TransactionType::all(),

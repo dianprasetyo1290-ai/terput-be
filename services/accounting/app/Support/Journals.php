@@ -65,6 +65,31 @@ final class Journals
             throw ValidationException::withMessages(['status' => "Aksi ini hanya untuk jurnal berstatus $from (status sekarang: {$head->status})."]);
         }
 
+        // Segregation of duties (PRD §NFR "pembuat dan penyetuju dipisahkan"):
+        // whoever made or submitted the journal cannot approve or reject it.
+        if (in_array($action, ['approve', 'reject'], true)
+            && in_array($userId, array_filter([(string) $head->trans_user, (string) $head->status_by]), true)) {
+            throw ValidationException::withMessages(['status' => 'Penyetuju harus berbeda dengan pembuat/pengaju jurnal (maker-checker).']);
+        }
+
+        if ($action === 'submit' || $action === 'approve') {
+            $problems = [];
+            foreach (DB::table('trans_detail')->where('trans_no', $transNo)->orderBy('trans_count')->get() as $l) {
+                if ((float) $l->debet < 0 || (float) $l->credit < 0) {
+                    $problems[] = "Baris {$l->trans_count}: nilai tidak boleh negatif.";
+                }
+                if (trim((string) $l->description) === '') {
+                    $problems[] = "Baris {$l->trans_count}: keterangan wajib diisi.";
+                }
+                foreach (Accounts::postingProblems((string) $l->acc_code, ($head->source ?? 'manual') === 'manual') as $m) {
+                    $problems[] = "Baris {$l->trans_count}: $m";
+                }
+            }
+            if ($problems) {
+                throw ValidationException::withMessages(['status' => array_values(array_unique($problems))]);
+            }
+        }
+
         if ($to !== 'draft') {
             $t = self::totals($transNo);
             if ($t['lines'] === 0) {
@@ -80,6 +105,7 @@ final class Journals
 
         DB::table('trans_head')->where('trans_no', $transNo)
             ->update(['status' => $to, 'status_by' => $userId, 'status_at' => now()]);
+        AuditLog::record("journal.$action", $transNo, ['from' => $from, 'to' => $to]);
     }
 
     /**
@@ -115,6 +141,12 @@ final class Journals
         }
         if ($head->status !== 'posted') {
             throw ValidationException::withMessages(['status' => "Hanya jurnal berstatus posted yang dapat dibalik (status sekarang: {$head->status})."]);
+        }
+        if (! empty($head->reversal_of)) {
+            throw ValidationException::withMessages(['status' => "Jurnal $transNo adalah jurnal pembalik; koreksi lewat jurnal baru."]);
+        }
+        if ((string) $head->trans_user === $userId) {
+            throw ValidationException::withMessages(['status' => 'Pembalik jurnal harus dibuat oleh pengguna yang berbeda dengan pembuat jurnal asal (maker-checker).']);
         }
 
         $a = Ledger::active();
@@ -160,6 +192,7 @@ final class Journals
                 $q->whereDate('trans_date', $head->trans_date);
             }
             $q->update(['status' => 'reversed', 'status_by' => $userId, 'status_at' => now()]);
+            AuditLog::record('journal.reverse', $transNo, ['reversal' => $no, 'date' => $revDate]);
 
             return $no;
         });
