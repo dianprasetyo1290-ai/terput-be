@@ -306,6 +306,17 @@ func (a *App) FinanceSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	rr.Close()
 
+	// BUG-118: journals that exhausted their attempts stay visible on the
+	// dashboard until posted (besides the critical exception in core).
+	var journalFailed int
+	var journalFailedSince *time.Time
+	if err := a.DB.QueryRowContext(r.Context(),
+		`SELECT count(*), min(updated_at) FROM gateway_journal_postings WHERE school_id=$1 AND status='failed'`, schoolID).
+		Scan(&journalFailed, &journalFailedSince); err != nil {
+		writeErr(w, err)
+		return
+	}
+
 	// Collection rate in basis points (paid / billed), integer only.
 	var rateBP int64
 	if billed > 0 {
@@ -319,6 +330,7 @@ func (a *App) FinanceSummary(w http.ResponseWriter, r *http.Request) {
 		"bill_status": status, "aging": aging, "trend": trend, "top_outstanding": top,
 		"components": components, "methods": methods, "payment_status": payStatus, "payment_trend": payTrends,
 		"refunds": refunds, "discount_idr": discountIDR, "scholarship_idr": scholarshipIDR, "recent_payments": recent,
+		"journal_failed_count": journalFailed, "journal_failed_since": journalFailedSince,
 	}, nil)
 }
 

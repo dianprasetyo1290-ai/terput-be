@@ -154,13 +154,18 @@ func (a *App) postOutboxRow(ctx context.Context, id string, now time.Time, manua
 		return outboxRow{}, nil, err
 	}
 	defer tx.Rollback()
+	// BUG-118: a manual retry never waits behind (and then repeats) a post
+	// already in flight for the same row; it is told the row is busy.
 	lock := "FOR UPDATE SKIP LOCKED"
 	if manual {
-		lock = "FOR UPDATE"
+		lock = "FOR UPDATE NOWAIT"
 	}
 	r, err := loadOutboxRow(ctx, tx, id, lock)
 	if err == sql.ErrNoRows && !manual {
 		return r, nil, nil // taken by a concurrent sender
+	}
+	if manual && isLockNotAvailable(err) {
+		return r, nil, errJournalBusy
 	}
 	if err != nil {
 		return r, nil, err
@@ -209,6 +214,9 @@ func (a *App) postOutboxRow(ctx context.Context, id string, now time.Time, manua
 	return r, postErr, nil
 }
 
+// errJournalBusy: another retry or the sender is posting this row now.
+var errJournalBusy = errors.New("posting jurnal ini sedang diproses, coba lagi sebentar")
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
@@ -231,7 +239,8 @@ func (a *App) raisePostingException(ctx context.Context, id string) {
 		total += l.DebitIDR
 	}
 	ev := client.ExceptionEvent{
-		SchoolID: r.SchoolID, Kind: "journal_posting", Severity: "normal",
+		// BUG-118: the last attempt failed, so the accountant must act: critical.
+		SchoolID: r.SchoolID, Kind: "journal_posting", Severity: "critical",
 		CorrelationID: r.Reference, ErrorMessage: "posting jurnal gagal: " + r.LastError,
 		PayloadSummary: map[string]any{"reference": r.Reference, "source": r.Source, "trans_date": r.TransDate,
 			"description": r.Description, "total_idr": total, "attempts": r.Attempts},
@@ -267,6 +276,10 @@ func (a *App) retryJournalPosting(w http.ResponseWriter, r *http.Request, school
 	row, postErr, err := a.postOutboxRow(r.Context(), id, time.Now(), true)
 	if err == sql.ErrNoRows {
 		common.WriteError(w, http.StatusNotFound, "posting jurnal tidak ditemukan")
+		return
+	}
+	if errors.Is(err, errJournalBusy) {
+		common.WriteError(w, http.StatusConflict, err.Error())
 		return
 	}
 	if err != nil {
