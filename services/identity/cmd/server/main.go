@@ -120,7 +120,7 @@ func main() {
 		// QA-IDN putaran 2: tata kelola (pengecualian SoD, break-glass,
 		// permintaan data pribadi, referensi, matriks hak akses) dan
 		// pengumuman (jadwal terbit) harus langsung terlihat setelah diubah.
-		for _, p := range []string{"/security/", "/privacy/", "/references", "/me/permissions", "/announcements", "/migration-runs", "/archive"} {
+		for _, p := range []string{"/security/", "/privacy/", "/references", "/me/permissions", "/announcements", "/migration-runs", "/archive", "/users/import-batches"} {
 			if strings.HasPrefix(r.URL.Path, p) {
 				return true
 			}
@@ -202,6 +202,20 @@ func main() {
 		pr.Get("/references", app.ListReferences)
 		pr.Post("/references", app.CreateReference)
 		pr.Put("/references/{id}", app.UpdateReference)
+
+		// Migrasi data sistem lama: control total + sign-off, percobaan,
+		// arsip historis read-only (BUG-019/078/079).
+		pr.Get("/migration-runs", app.ListMigrationRuns)
+		pr.Post("/migration-runs", app.CreateMigrationRun)
+		pr.Get("/migration-runs/{id}", app.GetMigrationRun)
+		pr.Put("/migration-runs/{id}/totals", app.UpsertMigrationTotals)
+		pr.Post("/migration-runs/{id}/recompute", app.RecomputeMigrationRun)
+		pr.Post("/migration-runs/{id}/sign-off", app.SignOffMigrationRun)
+		pr.Post("/migration-runs/{id}/discard", app.DiscardMigrationRun)
+		pr.Post("/archive/import", app.ImportArchive)
+		pr.Get("/archive/categories", app.ListArchiveCategories)
+		pr.Get("/archive", app.SearchArchive)
+		pr.Get("/archive/{id}", app.GetArchiveRecord)
 
 		pr.Post("/auth/switch-role", app.SwitchRole)
 		pr.Get("/auth/me", app.Me)
