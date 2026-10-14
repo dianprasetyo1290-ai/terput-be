@@ -10,11 +10,14 @@ import (
 
 	"skci/hr/internal/client"
 	"skci/hr/internal/common"
+	"skci/hr/internal/storage"
 )
 
 type Handler struct {
 	Store     *Store
 	Approvals *client.Client
+	// Files stores candidate CVs; nil disables CV upload/download.
+	Files storage.Storage
 }
 
 func NewHandler(s *Store, approvals *client.Client) *Handler {
@@ -215,23 +218,23 @@ func (h *Handler) PublicApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body struct {
-		FullName          string `json:"full_name"`
-		Email             string `json:"email"`
-		CVObjectKey       string `json:"cv_object_key"`
-		ConsentTalentPool bool   `json:"consent_talent_pool"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		common.WriteError(w, http.StatusBadRequest, "format json tidak valid")
+	body, err := readApplyBody(r)
+	if err != nil {
+		common.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if body.FullName == "" || body.Email == "" {
 		common.WriteError(w, http.StatusBadRequest, "nama lengkap dan email wajib diisi")
 		return
 	}
+	cvKey, err := h.storeCV(r.Context(), p.SchoolID, body)
+	if err != nil {
+		common.InternalError(w, "gagal menyimpan CV", err)
+		return
+	}
 
 	app, token, err := h.Store.ApplyCandidate(
-		r.Context(), schoolID, p.ID, body.FullName, body.Email, body.CVObjectKey, body.ConsentTalentPool,
+		r.Context(), schoolID, p.ID, body.FullName, body.Email, cvKey, body.ConsentTalentPool,
 	)
 	if err != nil {
 		if err == ErrConflict {

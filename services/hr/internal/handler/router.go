@@ -41,6 +41,7 @@ func (a *App) Router() http.Handler {
 		atsStore.DecryptAmount = a.Crypto.DecryptAmount
 	}
 	atsHandler := ats.NewHandler(atsStore, a.Client)
+	atsHandler.Files = a.Storage
 	payStore := payroll.NewStore(a.DB)
 	if a.Crypto != nil {
 		payStore.DecryptAmount = a.Crypto.DecryptAmount
@@ -271,6 +272,7 @@ func (a *App) Router() http.Handler {
 		api.Group(func(ats chi.Router) {
 			ats.Use(common.RequireAnyRole(rolesCandidateRead...))
 			ats.Get("/ats/applications", atsHandler.ListApplications)
+			ats.Get("/ats/applications/{id}/cv", atsHandler.DownloadCV)
 			ats.Get("/ats/offers", atsHandler.ListOffers)
 		})
 		api.Group(func(ats chi.Router) {
