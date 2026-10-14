@@ -52,80 +52,153 @@ func (a *App) AdminRunReconciliation(w http.ResponseWriter, r *http.Request) {
 		provider = req.Provider
 	}
 
+	out, err := a.runReconciliation(r.Context(), schoolID, dateStr, provider, "user", claims.UserID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	common.WriteSuccess(w, out, nil)
+}
+
+type reconProviderResult struct {
+	Provider       string                     `json:"provider"`
+	MatchedCount   int                        `json:"matched_count"`
+	ExceptionCount int                        `json:"exception_count"`
+	Exceptions     []model.ReconcileException `json:"exceptions"`
+}
+
+type reconRunResult struct {
+	Date           string                     `json:"date"`
+	MatchedCount   int                        `json:"matched_count"`
+	ExceptionCount int                        `json:"exception_count"`
+	Exceptions     []model.ReconcileException `json:"exceptions"`
+	Providers      []reconProviderResult      `json:"providers"`
+	// Batches is the settlement batch status set by this run.
+	Batches []reconBatchStatus `json:"batches"`
+}
+
+type reconBatchStatus struct {
+	ID       string `json:"id"`
+	Provider string `json:"provider"`
+	Channel  string `json:"channel"`
+	Status   string `json:"status"`
+}
+
+// runReconciliation matches one day's successful gateway transactions
+// against the settlement items of that day, per provider, records the
+// exceptions and marks each settlement batch of the day matched or
+// mismatch (AC-31-01). Used by the admin button and the daily job.
+func (a *App) runReconciliation(ctx context.Context, schoolID, dateStr, provider, actorType, actorID string) (reconRunResult, error) {
+	out := reconRunResult{Date: dateStr, Exceptions: []model.ReconcileException{}, Providers: []reconProviderResult{}, Batches: []reconBatchStatus{}}
 	// 1. Successful transactions paid on this date, tagged with provider.
-	txRows, err := a.DB.QueryContext(r.Context(),
+	txRows, err := a.DB.QueryContext(ctx,
 		`SELECT provider, tx_no, COALESCE(provider_ref, ''), total_idr, fee_idr
 		 FROM gateway_transactions
 		 WHERE school_id = $1 AND status = 'success' AND (DATE(paid_at) = $2 OR DATE(created_at) = $2)
 		   AND ($3 = '' OR provider = $3)`,
 		schoolID, dateStr, provider)
 	if err != nil {
-		writeErr(w, err)
-		return
+		return out, err
 	}
-	defer txRows.Close()
-
 	var successTxs []gateway.ProviderTx
 	for txRows.Next() {
 		var it gateway.ProviderTx
-		if err := txRows.Scan(&it.Provider, &it.TXNo, &it.ProviderRef, &it.AmountIDR, &it.FeeIDR); err == nil {
-			successTxs = append(successTxs, it)
+		if err := txRows.Scan(&it.Provider, &it.TXNo, &it.ProviderRef, &it.AmountIDR, &it.FeeIDR); err != nil {
+			txRows.Close()
+			return out, err
 		}
+		successTxs = append(successTxs, it)
 	}
+	txRows.Close()
 
 	// 2. Settlement items of this date, tagged with their batch's provider.
-	itemRows, err := a.DB.QueryContext(r.Context(),
-		`SELECT b.provider, i.provider_ref, i.amount_idr, i.fee_idr
+	itemRows, err := a.DB.QueryContext(ctx,
+		`SELECT b.provider, i.provider_ref, i.amount_idr, i.fee_idr, b.id::text
 		 FROM settlement_items i
 		 JOIN settlement_batches b ON b.id = i.batch_id
 		 WHERE i.school_id = $1 AND b.settled_on = $2 AND ($3 = '' OR b.provider = $3)`,
 		schoolID, dateStr, provider)
 	if err != nil {
-		writeErr(w, err)
-		return
+		return out, err
 	}
-	defer itemRows.Close()
-
 	var settleItems []gateway.ProviderItem
+	batchRefs := map[string][]string{}
 	for itemRows.Next() {
 		var it gateway.ProviderItem
-		if err := itemRows.Scan(&it.Provider, &it.ProviderRef, &it.AmountIDR, &it.FeeIDR); err == nil {
-			settleItems = append(settleItems, it)
+		var batchID string
+		if err := itemRows.Scan(&it.Provider, &it.ProviderRef, &it.AmountIDR, &it.FeeIDR, &batchID); err != nil {
+			itemRows.Close()
+			return out, err
 		}
+		settleItems = append(settleItems, it)
+		batchRefs[batchID] = append(batchRefs[batchID], it.ProviderRef)
 	}
+	itemRows.Close()
 
 	// 3. Reconcile per provider (FR-150-004, AC-31-01): a transaction of
 	// provider A is never matched against provider B's settlement.
-	type providerResult struct {
-		Provider       string                     `json:"provider"`
-		MatchedCount   int                        `json:"matched_count"`
-		ExceptionCount int                        `json:"exception_count"`
-		Exceptions     []model.ReconcileException `json:"exceptions"`
-	}
-	var perProvider []providerResult
-	var reconResult model.ReconcileResult
+	matchedRefs := map[string]bool{}
+	providerExceptions := map[string]int{}
 	for _, g := range gateway.GroupForReconcile(successTxs, settleItems) {
 		res := model.Reconcile(g.Txs, g.Items)
-		perProvider = append(perProvider, providerResult{g.Provider, len(res.Matched), len(res.Exceptions), res.Exceptions})
-		reconResult.Matched = append(reconResult.Matched, res.Matched...)
-		reconResult.Exceptions = append(reconResult.Exceptions, res.Exceptions...)
+		out.Providers = append(out.Providers, reconProviderResult{g.Provider, len(res.Matched), len(res.Exceptions), res.Exceptions})
+		out.MatchedCount += len(res.Matched)
+		out.ExceptionCount += len(res.Exceptions)
+		out.Exceptions = append(out.Exceptions, res.Exceptions...)
+		providerExceptions[g.Provider] += len(res.Exceptions)
+		for _, m := range res.Matched {
+			matchedRefs[g.Provider+"\x00"+m.ProviderRef] = true
+		}
 		// 4. Save exceptions per provider; a re-run refreshes the detail.
 		for _, ex := range res.Exceptions {
-			_, _ = a.DB.ExecContext(r.Context(),
+			if _, err := a.DB.ExecContext(ctx,
 				`INSERT INTO reconciliation_exceptions (school_id, provider, kind, ref, detail, status, created_at, updated_at)
 				 VALUES ($1, $2, $3, $4, $5, 'open', now(), now())
 				 ON CONFLICT (school_id, provider, kind, ref) DO UPDATE SET detail = EXCLUDED.detail, updated_at = now()`,
-				schoolID, g.Provider, string(ex.Kind), ex.Ref, jsonRaw(ex.Detail))
+				schoolID, g.Provider, string(ex.Kind), ex.Ref, jsonRaw(ex.Detail)); err != nil {
+				return out, err
+			}
 		}
 	}
 
-	common.WriteSuccess(w, map[string]any{
-		"date":            dateStr,
-		"matched_count":   len(reconResult.Matched),
-		"exception_count": len(reconResult.Exceptions),
-		"exceptions":      reconResult.Exceptions,
-		"providers":       perProvider,
-	}, nil)
+	// 5. Settlement batch status of the day: matched when every item of the
+	// batch matched and its provider has no open difference that day.
+	bRows, err := a.DB.QueryContext(ctx,
+		`SELECT id::text, provider, channel, status FROM settlement_batches
+		  WHERE school_id = $1 AND settled_on = $2 AND ($3 = '' OR provider = $3) ORDER BY provider, channel`,
+		schoolID, dateStr, provider)
+	if err != nil {
+		return out, err
+	}
+	type batch struct{ id, provider, channel, status string }
+	var batches []batch
+	for bRows.Next() {
+		var b batch
+		if err := bRows.Scan(&b.id, &b.provider, &b.channel, &b.status); err != nil {
+			bRows.Close()
+			return out, err
+		}
+		batches = append(batches, b)
+	}
+	bRows.Close()
+	for _, b := range batches {
+		matched := make([]bool, len(batchRefs[b.id]))
+		for i, ref := range batchRefs[b.id] {
+			matched[i] = matchedRefs[b.provider+"\x00"+ref]
+		}
+		next := model.SettlementBatchStatus(matched, providerExceptions[b.provider])
+		out.Batches = append(out.Batches, reconBatchStatus{b.id, b.provider, b.channel, next})
+		if next == b.status {
+			continue
+		}
+		if _, err := a.DB.ExecContext(ctx,
+			`UPDATE settlement_batches SET status = $1, updated_at = now() WHERE id = $2::uuid`, next, b.id); err != nil {
+			return out, err
+		}
+		a.audit(ctx, schoolID, "settlement_batch", b.id, "settlement_batch_reconciled", actorType, actorID, "", "",
+			map[string]any{"status": b.status}, map[string]any{"status": next, "date": dateStr})
+	}
+	return out, nil
 }
 
 // AdminImportBankStatement imports a bank mutation file (AC-31-02). The

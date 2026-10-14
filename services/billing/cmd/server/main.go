@@ -79,6 +79,8 @@ func main() {
 	gwRunner := jobs.NewRunner(db, cfg.Gateway.JobInterval)
 	gwRunner.Register("autodebit_schedule", app.JobAutodebitSchedule)
 	gwRunner.Register("retail_expiry", app.JobRetailExpiry)
+	gwRunner.Register("gateway_expiry", app.JobGatewayExpiry)
+	gwRunner.Register("settlement_reconciliation", app.JobSettlementReconciliation)
 	gwRunner.Register("provider_health", app.JobProviderHealth)
 	gwRunner.Register("gateway_journal", app.JobGatewayJournal)
 	// P3A: billing/wallet/canteen auto-journals, then the accounting sender.

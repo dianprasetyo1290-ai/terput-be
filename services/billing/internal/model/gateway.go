@@ -488,3 +488,19 @@ func ValidateJournal(lines []JournalLine) error {
 	}
 	return nil
 }
+
+// SettlementBatchStatus is a settlement batch's status after a
+// reconciliation run: matched when every item of the batch matched a
+// successful transaction and its provider has no exception that day,
+// mismatch otherwise.
+func SettlementBatchStatus(itemMatched []bool, providerExceptions int) string {
+	if providerExceptions > 0 {
+		return "mismatch"
+	}
+	for _, m := range itemMatched {
+		if !m {
+			return "mismatch"
+		}
+	}
+	return "matched"
+}

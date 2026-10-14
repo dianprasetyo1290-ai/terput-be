@@ -22,6 +22,7 @@ type fakeCore struct {
 	approvals []client.ApprovalRequest
 	audits    []client.AuditEvent
 	notified  []client.Notification
+	excs      []client.ExceptionEvent
 	guardians []string // returned for every student
 }
 
@@ -56,6 +57,11 @@ func (f *fakeCore) handler() http.Handler {
 		common.WriteJSON(w, http.StatusCreated, map[string]string{"id": "n1"}, nil)
 	})
 	r.Post("/internal/exceptions", func(w http.ResponseWriter, r *http.Request) {
+		var e client.ExceptionEvent
+		_ = json.NewDecoder(r.Body).Decode(&e)
+		f.mu.Lock()
+		f.excs = append(f.excs, e)
+		f.mu.Unlock()
 		common.WriteJSON(w, http.StatusCreated, map[string]string{"id": "x1"}, nil)
 	})
 	r.Get("/internal/students/{id}/guardians", func(w http.ResponseWriter, r *http.Request) {
