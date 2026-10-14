@@ -5,7 +5,6 @@ import (
 	"database/sql/driver"
 	"encoding/csv"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -14,6 +13,9 @@ import (
 
 	"skci/identity/internal/common"
 	"skci/identity/internal/model"
+	"skci/identity/internal/rules"
+	"skci/identity/internal/security"
+	"skci/identity/internal/store"
 )
 
 // Data Pengguna: superadmin-scoped user directory (list/filter by role and
@@ -26,11 +28,11 @@ import (
 // "admin can reset a student's password" for both, rather than duplicating
 // separate edit/reset handlers per entity (see README Assumptions).
 
-const userCols = `u.id, u.name, u.email, u.phone, u.default_password, u.password_changed, u.photo, u.birth_date, u.birth_place, u.address, u.religion, u.nisn, u.is_superadmin, u.created_at, u.updated_at, u.managed_by_hr, u.deactivate_at`
+const userCols = `u.id, u.name, u.email, u.phone, u.default_password, u.password_changed, u.photo, u.birth_date, u.birth_place, u.address, u.religion, u.nisn, u.is_superadmin, u.created_at, u.updated_at, u.managed_by_hr, u.deactivate_at, u.nik`
 
 func scanUser(row interface{ Scan(...interface{}) error }) (model.User, error) {
 	var u model.User
-	err := row.Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.DefaultPassword, &u.PasswordChanged, &u.Photo, &u.BirthDate, &u.BirthPlace, &u.Address, &u.Religion, &u.NISN, &u.IsSuperadmin, &u.CreatedAt, &u.UpdatedAt, &u.ManagedByHR, &u.DeactivateAt)
+	err := row.Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.DefaultPassword, &u.PasswordChanged, &u.Photo, &u.BirthDate, &u.BirthPlace, &u.Address, &u.Religion, &u.NISN, &u.IsSuperadmin, &u.CreatedAt, &u.UpdatedAt, &u.ManagedByHR, &u.DeactivateAt, &u.NIK)
 	if err == nil && u.PasswordChanged {
 		u.DefaultPassword = nil // hide once the user has changed it from the default
 	}
@@ -198,7 +200,7 @@ func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role strin
 
 	var total int
 	if err := a.DB.QueryRow(`SELECT count(*) FROM users u WHERE `+where, args...).Scan(&total); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to list users: "+err.Error())
+		common.WriteDBError(w, err, "failed to list users")
 		return
 	}
 
@@ -216,7 +218,7 @@ func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role strin
 
 	rows, err := a.DB.Query(query, args2...)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to list users: "+err.Error())
+		common.WriteDBError(w, err, "failed to list users")
 		return
 	}
 	defer rows.Close()
@@ -239,12 +241,12 @@ func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role strin
 		byID[out[i].ID] = &out[i]
 	}
 	if len(ids) > 0 {
-		roleRows, err := a.DB.Query(`SELECT id, user_id, school_id, role, status, academic_year_id FROM user_school_roles WHERE user_id = ANY($1::uuid[])`, pqStringArray(ids))
+		roleRows, err := a.DB.Query(`SELECT id, user_id, school_id, role, status, academic_year_id, student_status FROM user_school_roles WHERE user_id = ANY($1::uuid[])`, pqStringArray(ids))
 		if err == nil {
 			defer roleRows.Close()
 			for roleRows.Next() {
 				var ro model.UserSchoolRole
-				if err := roleRows.Scan(&ro.ID, &ro.UserID, &ro.SchoolID, &ro.Role, &ro.Status, &ro.AcademicYearID); err == nil {
+				if err := roleRows.Scan(&ro.ID, &ro.UserID, &ro.SchoolID, &ro.Role, &ro.Status, &ro.AcademicYearID, &ro.StudentStatus); err == nil {
 					if u, ok := byID[ro.UserID]; ok {
 						u.Roles = append(u.Roles, ro)
 					}
@@ -262,6 +264,7 @@ func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role strin
 			out[i].BirthPlace = nil
 			out[i].Religion = nil
 			out[i].NISN = nil
+			out[i].NIK = nil
 			out[i].Photo = nil
 			out[i].Roles = []model.UserSchoolRole{}
 		}
@@ -301,6 +304,17 @@ func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" || req.Email == "" || req.Role == "" {
 		common.WriteError(w, http.StatusBadRequest, "name, email, and role are required")
 		return
+	}
+	req.Email = strings.TrimSpace(req.Email)
+	if !rules.ValidEmail(req.Email) { // BUG-084
+		common.WriteValidationError(w, http.StatusBadRequest, "Format email tidak valid", map[string]string{"email": "Format email tidak valid"})
+		return
+	}
+	if req.Password != "" {
+		if msg := security.ValidPassword(req.Password); msg != "" {
+			common.WriteValidationError(w, http.StatusBadRequest, msg, map[string]string{"password": msg})
+			return
+		}
 	}
 	if !common.IsValidRole(req.Role) {
 		common.WriteError(w, http.StatusBadRequest, "invalid role")
@@ -347,15 +361,16 @@ func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 		req.Name, req.Email, req.Phone, hash, req.Role == common.RoleSuperadmin)
 	u, err = scanUser(row)
 	if err != nil {
-		common.WriteError(w, http.StatusConflict, "failed to create user (email may already be in use): "+err.Error())
+		common.WriteDBError(w, err, "failed to create user (email may already be in use)")
 		return
 	}
 	var schoolIDArg interface{}
 	if schoolID != "" {
 		schoolIDArg = schoolID
 	}
-	if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id, school_id, role) VALUES ($1,$2,$3)`, u.ID, schoolIDArg, req.Role); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to assign role: "+err.Error())
+	if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id, school_id, role, student_status)
+		VALUES ($1,$2,$3, CASE WHEN $3 = 'siswa' THEN 'aktif' END)`, u.ID, schoolIDArg, req.Role); err != nil {
+		common.WriteDBError(w, err, "failed to assign role")
 		return
 	}
 	if err := tx.Commit(); err != nil {
@@ -385,7 +400,7 @@ func (a *App) GetUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func aRolesFor(a *App, userID string) ([]model.UserSchoolRole, error) {
-	rows, err := a.DB.Query(`SELECT id, user_id, school_id, role, status, academic_year_id FROM user_school_roles WHERE user_id=$1`, userID)
+	rows, err := a.DB.Query(`SELECT id, user_id, school_id, role, status, academic_year_id, student_status FROM user_school_roles WHERE user_id=$1`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +408,7 @@ func aRolesFor(a *App, userID string) ([]model.UserSchoolRole, error) {
 	out := []model.UserSchoolRole{}
 	for rows.Next() {
 		var ro model.UserSchoolRole
-		if err := rows.Scan(&ro.ID, &ro.UserID, &ro.SchoolID, &ro.Role, &ro.Status, &ro.AcademicYearID); err != nil {
+		if err := rows.Scan(&ro.ID, &ro.UserID, &ro.SchoolID, &ro.Role, &ro.Status, &ro.AcademicYearID, &ro.StudentStatus); err != nil {
 			return nil, err
 		}
 		out = append(out, ro)
@@ -410,15 +425,34 @@ type updateUserRequest struct {
 	Address    *string `json:"address"`
 	Religion   *string `json:"religion"`
 	NISN       *string `json:"nisn"`
+	// NIK (migration 0020): omitted keeps the stored value, "" clears it.
+	NIK *string `json:"nik"`
+	// ConfirmDuplicate saves despite a possible-duplicate warning (BUG-016).
+	ConfirmDuplicate bool `json:"confirm_duplicate"`
+}
+
+func trimPtr(p *string) *string {
+	if p == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*p)
+	return &v
+}
+
+func deref(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 // UpdateUser: "admin can edit account data" for Data Siswa / Data Guru /
 // Data Pengguna alike.
 func (a *App) UpdateUser(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	id := chi.URLParam(r, "id")
+	if !a.requireUserInScope(w, r, id) {
 		return
 	}
-	id := chi.URLParam(r, "id")
 	var req updateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 		common.WriteError(w, http.StatusBadRequest, "name is required")
@@ -427,12 +461,12 @@ func (a *App) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	// AC-83-02: while HRIS is on for one of the user's schools, the name of an
 	// HR-managed account is owned by the hr service, not Data Guru/Pengguna.
 	var hrLocked bool
-	var currentName string
+	var currentName, curNISN, curNIK, curPhone string
 	err := a.DB.QueryRow(`SELECT u.managed_by_hr AND EXISTS (
 			SELECT 1 FROM user_school_roles usr
 			JOIN school_features sf ON sf.school_id = usr.school_id AND sf.feature_key = 'hris' AND sf.enabled
-			WHERE usr.user_id = u.id), u.name
-		FROM users u WHERE u.id = $1 AND u.deleted_at IS NULL`, id).Scan(&hrLocked, &currentName)
+			WHERE usr.user_id = u.id), u.name, COALESCE(u.nisn,''), COALESCE(u.nik,''), COALESCE(u.phone,'')
+		FROM users u WHERE u.id = $1 AND u.deleted_at IS NULL`, id).Scan(&hrLocked, &currentName, &curNISN, &curNIK, &curPhone)
 	if err == sql.ErrNoRows {
 		common.WriteError(w, http.StatusNotFound, "user not found")
 		return
@@ -444,16 +478,50 @@ func (a *App) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusConflict, "Data dikelola dari HRIS")
 		return
 	}
-	row := a.DB.QueryRow(`UPDATE users AS u SET name=$1, phone=$2, photo=$3, birth_date=$4, birth_place=$5, address=$6, religion=$7, nisn=$8, updated_at=now()
+	req.NISN, req.NIK = trimPtr(req.NISN), trimPtr(req.NIK)
+	if errs := rules.ValidateIdentityNumbers(req.NISN, req.NIK); len(errs) > 0 { // BUG-074
+		msg := errs["nisn"]
+		if msg == "" {
+			msg = errs["nik"]
+		}
+		common.WriteValidationError(w, http.StatusBadRequest, msg, errs)
+		return
+	}
+	// Only values that change are checked, so editing an unrelated field of
+	// an existing record never trips over a known shared number.
+	newIfChanged := func(v, cur string) string {
+		if v == cur {
+			return ""
+		}
+		return v
+	}
+	nikCheck := ""
+	if req.NIK != nil {
+		nikCheck = newIfChanged(*req.NIK, curNIK)
+	}
+	phoneCheck := ""
+	if rules.NormalizePhone(deref(req.Phone)) != rules.NormalizePhone(curPhone) {
+		phoneCheck = rules.NormalizePhone(deref(req.Phone))
+	}
+	if !req.ConfirmDuplicate && !a.checkDuplicates(w, r, id, newIfChanged(deref(req.NISN), curNISN), nikCheck, phoneCheck) {
+		return
+	}
+	row := a.DB.QueryRow(`UPDATE users AS u SET name=$1, phone=$2, photo=$3, birth_date=$4, birth_place=$5, address=$6, religion=$7, nisn=NULLIF($8,''),
+			nik = CASE WHEN $10::text IS NULL THEN nik ELSE NULLIF($10,'') END, updated_at=now()
 		WHERE id=$9 AND deleted_at IS NULL RETURNING `+userCols,
-		req.Name, req.Phone, req.Photo, req.BirthDate, req.BirthPlace, req.Address, req.Religion, req.NISN, id)
+		req.Name, req.Phone, req.Photo, req.BirthDate, req.BirthPlace, req.Address, req.Religion, req.NISN, id, req.NIK)
 	u, err := scanUser(row)
 	if err == sql.ErrNoRows {
 		common.WriteError(w, http.StatusNotFound, "user not found")
 		return
 	} else if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to update user")
+		common.WriteDBError(w, err, "failed to update user")
 		return
+	}
+	if req.ConfirmDuplicate {
+		claims := common.FromCtx(r)
+		a.RecordSecurityAudit(nil, "duplicate_warning_overridden", id, &claims.UserID, &claims.ActiveRole, nil,
+			map[string]any{"nisn": deref(req.NISN), "nik_set": deref(req.NIK) != ""}, "saved despite duplicate warning", r.Header.Get("X-Correlation-ID"))
 	}
 	common.WriteJSON(w, http.StatusOK, u, nil)
 }
@@ -468,10 +536,12 @@ func (a *App) UpdateUser(w http.ResponseWriter, r *http.Request) {
 // cross-service) and keeps inflating DashboardCountsFor's siswa count even
 // though Data Siswa now shows the student gone. See Report sekoci V3.docx.
 func (a *App) DeleteUser(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	id := chi.URLParam(r, "id")
+	// An admin may only delete accounts of their own unit (by-ID reach
+	// across units was possible before).
+	if !a.requireUserInScope(w, r, id) {
 		return
 	}
-	id := chi.URLParam(r, "id")
 	var siswaSchoolIDs []string
 	roleRows, err := a.DB.Query(`SELECT school_id FROM user_school_roles WHERE user_id = $1 AND role = 'siswa' AND school_id IS NOT NULL`, id)
 	if err == nil {
@@ -495,6 +565,10 @@ func (a *App) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	for _, schoolID := range siswaSchoolIDs {
 		_ = a.Academic.RemoveStudentEnrollments(schoolID, id)
 	}
+	// BUG-022: a deleted account's tokens stop working immediately.
+	a.revokeAll(r, id, "user_deleted", "")
+	c := common.FromCtx(r)
+	a.RecordSecurityAudit(nil, "user_deleted", id, &c.UserID, &c.ActiveRole, nil, nil, "user soft-deleted", r.Header.Get("X-Correlation-ID"))
 	common.WriteJSON(w, http.StatusOK, map[string]string{"id": id}, nil)
 }
 
@@ -530,6 +604,8 @@ func (a *App) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusNotFound, "user not found")
 		return
 	}
+	a.revokeAll(r, id, "password_reset_by_admin", "")
+	a.RecordSecurityAudit(nil, "password_reset_by_admin", id, &claims.UserID, &claims.ActiveRole, nil, nil, "admin reset password", r.Header.Get("X-Correlation-ID"))
 	common.WriteJSON(w, http.StatusOK, map[string]string{"id": id, "new_password": newPassword}, nil)
 }
 
@@ -576,13 +652,23 @@ func (a *App) AssignUserRole(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "school_id is required for non-superadmin roles")
 		return
 	}
+	if claims.ActiveRole != common.RoleSuperadmin {
+		if ok, err := a.userInScope(r, id); err != nil || !ok {
+			common.WriteError(w, http.StatusNotFound, "user not found")
+			return
+		}
+	}
+	// BUG-023 / AC-RBAC-08: refuse a forbidden role combination.
+	if !a.checkRoleConflicts(w, r, id, req.Role) {
+		return
+	}
 	var schoolIDArg interface{}
 	if schoolID != "" {
 		schoolIDArg = schoolID
 	}
 	if _, err := a.DB.Exec(`INSERT INTO user_school_roles (user_id, school_id, role) VALUES ($1,$2,$3)
 		ON CONFLICT (user_id, school_id, role) DO NOTHING`, id, schoolIDArg, req.Role); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to assign role: "+err.Error())
+		common.WriteDBError(w, err, "gagal menambahkan peran")
 		return
 	}
 	var sID *string
@@ -754,134 +840,6 @@ func (a *App) ExportUsers(w http.ResponseWriter, r *http.Request) {
 	cw.Flush()
 }
 
-type userImportRowError struct {
-	Row   int    `json:"row"`
-	Issue string `json:"issue"`
-}
-
-type userImportReport struct {
-	Created int                  `json:"created"`
-	Errors  []userImportRowError `json:"errors"`
-}
-
-// ImportUsers: "Import Excel" button on Data Siswa / Data Guru. Columns:
-// Nama, Email, No Telepon (optional). Role + school come from the caller's
-// context (role is required — Data Pengguna's own "Tambah Pengguna" already
-// covers ad hoc single-role creation, so bulk import here is deliberately
-// scoped to the role the admin is currently viewing, same as
-// listUsersByRole's role parameter).
-func (a *App) ImportUsers(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
-		return
-	}
-	claims := common.FromCtx(r)
-	role := r.FormValue("role")
-	// If role is provided in the request (Data Siswa/Data Guru), validate it.
-	// If empty (Data Pengguna), we will read it per-row from the 4th column.
-	if role != "" {
-		if !common.IsValidRole(role) {
-			common.WriteError(w, http.StatusBadRequest, "valid role is required")
-			return
-		}
-		if claims.ActiveRole == common.RoleAdmin && role != common.RoleGuru && role != common.RoleSiswa {
-			common.WriteError(w, http.StatusForbidden, "admin may only import guru or siswa accounts")
-			return
-		}
-	}
-	schoolID := claims.SchoolID
-	if claims.ActiveRole == common.RoleSuperadmin {
-		if sid := r.FormValue("school_id"); sid != "" {
-			schoolID = sid
-		}
-	}
-	if role != common.RoleSuperadmin && schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required for non-superadmin roles")
-		return
-	}
-
-	if err := r.ParseMultipartForm(20 << 20); err != nil {
-		common.WriteError(w, http.StatusBadRequest, "failed to parse multipart form")
-		return
-	}
-	file, _, err := r.FormFile("file")
-	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "file is required (multipart field 'file')")
-		return
-	}
-	defer file.Close()
-	f, err := excelize.OpenReader(file)
-	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "invalid .xlsx file")
-		return
-	}
-	defer f.Close()
-	rows, err := f.GetRows(f.GetSheetName(0))
-	if err != nil || len(rows) < 2 {
-		common.WriteError(w, http.StatusBadRequest, "sheet is empty or unreadable")
-		return
-	}
-
-	report := userImportReport{Errors: []userImportRowError{}}
-	for i, row := range rows[1:] {
-		rowNum := i + 2
-		name := strings.TrimSpace(cellAt(row, 0))
-		email := strings.TrimSpace(cellAt(row, 1))
-		phone := strings.TrimSpace(cellAt(row, 2))
-		if name == "" && email == "" {
-			continue
-		}
-		if name == "" || email == "" {
-			report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: "Nama dan Email wajib diisi"})
-			continue
-		}
-
-		rowRole := role
-		if rowRole == "" {
-			rowRole = strings.ToLower(strings.TrimSpace(cellAt(row, 3)))
-			if rowRole == "" {
-				report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: "Peran (Siswa/Guru) wajib diisi"})
-				continue
-			}
-			if rowRole != common.RoleGuru && rowRole != common.RoleSiswa {
-				report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: "Peran harus 'guru' atau 'siswa'"})
-				continue
-			}
-		}
-
-		tx, err := a.DB.Begin()
-		if err != nil {
-			report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: "gagal menyimpan"})
-			continue
-		}
-		userID, _, err := createImportedUser(tx, name, email, phone, "", "", "", "", nil)
-		if err != nil {
-			tx.Rollback()
-			issue := fmt.Sprintf("gagal membuat pengguna: %v", err)
-			if isUniqueViolation(err) {
-				issue = fmt.Sprintf("email %q sudah digunakan", email)
-			}
-			report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: issue})
-			continue
-		}
-		var schoolIDArg interface{}
-		if schoolID != "" {
-			schoolIDArg = schoolID
-		}
-		if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id, school_id, role) VALUES ($1,$2,$3)`, userID, schoolIDArg, rowRole); err != nil {
-			tx.Rollback()
-			report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: "gagal menetapkan peran"})
-			continue
-		}
-		if err := tx.Commit(); err != nil {
-			report.Errors = append(report.Errors, userImportRowError{Row: rowNum, Issue: "gagal menyimpan"})
-			continue
-		}
-		report.Created++
-	}
-
-	common.WriteJSON(w, http.StatusOK, report, nil)
-}
-
 func boolStr(b bool) string {
 	if b {
 		return "true"
@@ -934,12 +892,14 @@ func (a *App) DownloadUsersTemplate(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 	sheetName := "Data Pengguna"
 	f.SetSheetName("Sheet1", sheetName)
-	// Nama/Email/Peran are validated as required by ImportUsers above;
-	// Telepon is optional. Marked with a red asterisk so the mandatory
-	// columns are visually obvious in the downloaded file.
-	headers := []string{"Nama *", "Email *", "Telepon", "Peran (guru/siswa) *"}
+	// Columns are matched by header (import_users.go / userimport), so
+	// order does not matter. Nama/Email/Peran are required (Peran may be
+	// omitted when importing from Data Siswa / Data Guru); Telepon and
+	// ID Sumber (the id in the previous system, kept for traceability) are
+	// optional. Mandatory columns are marked red. Max 1000 rows per file.
+	headers := []string{"Nama *", "Email *", "Telepon", "Peran (guru/siswa) *", "ID Sumber"}
 	f.SetSheetRow(sheetName, "A1", &headers)
-	f.SetSheetRow(sheetName, "A2", &[]string{"Budi Santoso", "budi@example.com", "08123456789", "siswa"})
+	f.SetSheetRow(sheetName, "A2", &[]string{"Budi Santoso", "budi@example.com", "08123456789", "siswa", "S-2024-001"})
 	mandatoryStyle, err := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true, Color: "C00000"}})
 	if err == nil {
 		for _, cellRef := range []string{"A1", "B1", "D1"} {
@@ -950,4 +910,43 @@ func (a *App) DownloadUsersTemplate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 	w.Header().Set("Content-Disposition", "attachment; filename=template_data_pengguna.xlsx")
 	_ = f.Write(w)
+}
+
+// checkDuplicates answers 409 with the possible duplicates (BUG-016) and
+// returns false, or returns true when there are none. Names of accounts
+// outside the caller's unit are withheld (tenant isolation).
+func (a *App) checkDuplicates(w http.ResponseWriter, r *http.Request, userID, nisn, nik, phoneNorm string) bool {
+	matches, err := store.FindDuplicateUsers(r.Context(), a.DB, userID, nisn, nik, phoneNorm)
+	if err != nil {
+		common.CaptureError(err) // a failed lookup must not block saving
+		return true
+	}
+	if len(matches) == 0 {
+		return true
+	}
+	claims := common.FromCtx(r)
+	type dup struct {
+		Field  string `json:"field"`
+		UserID string `json:"user_id,omitempty"`
+		Name   string `json:"name"`
+	}
+	out := make([]dup, 0, len(matches))
+	fields := map[string]string{}
+	for _, m := range matches {
+		d := dup{Field: m.Field, Name: "(pengguna di unit lain)"}
+		visible := claims != nil && claims.ActiveRole == common.RoleSuperadmin
+		for _, sid := range m.SchoolIDs {
+			if claims != nil && sid == claims.SchoolID {
+				visible = true
+			}
+		}
+		if visible {
+			d.UserID, d.Name = m.UserID, m.Name
+		}
+		out = append(out, d)
+		fields[m.Field] = map[string]string{"nisn": "NISN", "nik": "NIK", "phone": "Nomor ponsel"}[m.Field] + " sama dengan data lain: kemungkinan duplikat"
+	}
+	common.WriteJSONMsg(w, http.StatusConflict, map[string]any{"requires_confirmation": true, "duplicates": out, "fields": fields}, nil,
+		"Kemungkinan data duplikat. Periksa daftar berikut; kirim ulang dengan confirm_duplicate=true bila memang orang yang berbeda.")
+	return false
 }

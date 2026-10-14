@@ -11,6 +11,7 @@ import (
 
 	"skci/identity/internal/client"
 	"skci/identity/internal/common"
+	"skci/identity/internal/security"
 )
 
 // App holds shared dependencies for all handlers.
@@ -21,6 +22,16 @@ type App struct {
 	Exam        *client.ExamClient
 	Academic    *client.AcademicClient
 	CoreURL     string
+	// MFAKey encrypts TOTP secrets at rest (MFA_ENCRYPTION_KEY).
+	MFAKey []byte
+	// NotificationURL delivers password-reset emails (notification-service).
+	NotificationURL string
+	// PublicAppURL is the SPA base used to build the reset link.
+	PublicAppURL string
+	// MFAIssuer is the label authenticator apps show.
+	MFAIssuer string
+
+	policyCache policyCache
 }
 
 func NewApp(db *sql.DB, jwtSecret, internalKey string) *App {
@@ -31,6 +42,8 @@ func NewApp(db *sql.DB, jwtSecret, internalKey string) *App {
 		Exam:        client.NewExamClient(),
 		Academic:    client.NewAcademicClient(),
 		CoreURL:     "http://localhost:8091",
+		MFAKey:      security.DeriveKey(jwtSecret),
+		MFAIssuer:   "SEKOCI",
 	}
 }
 

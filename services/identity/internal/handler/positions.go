@@ -70,7 +70,7 @@ func (a *App) CreatePosition(w http.ResponseWriter, r *http.Request) {
 		RETURNING id, school_id, name, priority, created_at, updated_at`, schoolID, req.Name, req.Priority).
 		Scan(&p.ID, &p.SchoolID, &p.Name, &p.Priority, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to create position: "+err.Error())
+		common.WriteDBError(w, err, "failed to create position")
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, p, nil)
@@ -179,14 +179,14 @@ func (a *App) AssignPosition(w http.ResponseWriter, r *http.Request) {
 		RETURNING id, position_id, user_id, school_id, created_at`,
 		positionID, req.UserID, schoolID).Scan(&pa.ID, &pa.PositionID, &pa.UserID, &pa.SchoolID, &pa.CreatedAt)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to assign position: "+err.Error())
+		common.WriteDBError(w, err, "failed to assign position")
 		return
 	}
 
 	if role, ok := common.JabatanOnlyRoleForPosition(posName); ok {
 		if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id, school_id, role) VALUES ($1,$2,$3)
 			ON CONFLICT (user_id, school_id, role) DO NOTHING`, req.UserID, schoolID, role); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to mirror jabatan role: "+err.Error())
+			common.WriteDBError(w, err, "failed to mirror jabatan role")
 			return
 		}
 	}

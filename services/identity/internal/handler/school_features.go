@@ -79,7 +79,7 @@ func (a *App) SetSchoolFeature(w http.ResponseWriter, r *http.Request) {
 		updatedBy = c.UserID
 	}
 	if err := store.SetSchoolFeature(a.DB, schoolID, key, req.Enabled, updatedBy); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to save school feature: "+err.Error())
+		common.WriteDBError(w, err, "failed to save school feature")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, store.FeatureStatus{FeatureKey: key, Enabled: req.Enabled}, nil)

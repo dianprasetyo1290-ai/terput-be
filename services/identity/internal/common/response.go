@@ -44,3 +44,10 @@ func WriteError(w http.ResponseWriter, status int, msg string) {
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(Envelope{Data: nil, Message: msg, Errors: map[string]string{"message": msg}})
 }
+
+// WriteJSONMsg is WriteJSON with a human-readable message.
+func WriteJSONMsg(w http.ResponseWriter, status int, data interface{}, meta interface{}, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(Envelope{Data: normalizeNilSlice(data), Meta: meta, Message: msg, Errors: nil})
+}

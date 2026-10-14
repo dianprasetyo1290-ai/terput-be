@@ -68,6 +68,9 @@ services:
       SENTRY_DSN: ${SENTRY_DSN}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
       CORE_URL: http://core:${CORE_PORT:-8091}
+      NOTIFICATION_URL: http://notification:${NOTIFICATION_PORT:-8089}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:5173}
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:-}
     ports: ["${IDENTITY_PORT}:${IDENTITY_PORT}"]
 
   # ---------- academic ----------

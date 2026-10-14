@@ -12,7 +12,7 @@ var ErrNotFound = errors.New("not found")
 // UserRoles returns every role row the user holds (dashboard roles +
 // jabatan-only tags), across all schools.
 func UserRoles(db *sql.DB, userID string) ([]model.UserSchoolRole, error) {
-	rows, err := db.Query(`SELECT id, user_id, school_id, role, status, academic_year_id FROM user_school_roles WHERE user_id = $1 ORDER BY created_at`, userID)
+	rows, err := db.Query(`SELECT id, user_id, school_id, role, status, academic_year_id, student_status FROM user_school_roles WHERE user_id = $1 ORDER BY created_at`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -20,7 +20,7 @@ func UserRoles(db *sql.DB, userID string) ([]model.UserSchoolRole, error) {
 	var out []model.UserSchoolRole
 	for rows.Next() {
 		var r model.UserSchoolRole
-		if err := rows.Scan(&r.ID, &r.UserID, &r.SchoolID, &r.Role, &r.Status, &r.AcademicYearID); err != nil {
+		if err := rows.Scan(&r.ID, &r.UserID, &r.SchoolID, &r.Role, &r.Status, &r.AcademicYearID, &r.StudentStatus); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

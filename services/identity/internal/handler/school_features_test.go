@@ -12,7 +12,7 @@ import (
 )
 
 func withClaims(r *http.Request, role, schoolID string) *http.Request {
-	c := &common.Claims{UserID: "u1", SchoolID: schoolID, ActiveRole: role}
+	c := &common.Claims{UserID: "00000000-0000-4000-8000-000000000001", SchoolID: schoolID, ActiveRole: role}
 	return r.WithContext(context.WithValue(r.Context(), common.ClaimsCtxKey, c))
 }
 

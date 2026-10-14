@@ -145,7 +145,7 @@ func (a *App) CreateAnnouncement(w http.ResponseWriter, r *http.Request) {
 		published, claims.UserID)
 	an, err := scanAnnouncement(row)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to create announcement: "+err.Error())
+		common.WriteDBError(w, err, "failed to create announcement")
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, an, nil)
