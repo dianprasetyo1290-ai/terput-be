@@ -112,7 +112,7 @@ type Handler struct {
 
 	// BUG-113: failed external deliveries go to core's exception queue.
 	// InternalURL (this service as core reaches it) builds the retry_url.
-	Exceptions  func(ctx context.Context, e client.ExceptionReport) error
+	Exceptions  func(ctx context.Context, e common.ExceptionReport) error
 	InternalURL string
 	wg          sync.WaitGroup
 }

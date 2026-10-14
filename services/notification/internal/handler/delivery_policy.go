@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"time"
 
-	"skci/notification/internal/client"
 	"skci/notification/internal/common"
 	"skci/notification/internal/model"
 	"skci/notification/internal/store"
@@ -86,8 +85,8 @@ func (h *Handler) reportDeliveryFailure(ctx context.Context, n *model.Notificati
 	if corr == "" {
 		corr = "notification:" + n.ID
 	}
-	rep := client.ExceptionReport{
-		SchoolID: n.SchoolID, Kind: "notification", Severity: "normal", CorrelationID: corr,
+	rep := common.ExceptionReport{
+		SchoolID: n.SchoolID, Kind: common.ExceptionKindNotification, Severity: common.ExceptionSeverityNormal, CorrelationID: corr,
 		ErrorMessage: "notifikasi " + channel + " gagal: " + cause, MaxAttempts: 3,
 		PayloadSummary: map[string]any{"notification_id": n.ID, "type": n.Type, "channel": channel, "user_id": n.UserID},
 	}

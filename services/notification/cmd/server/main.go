@@ -93,7 +93,8 @@ func main() {
 	h.Relations = client.Relations{Identity: identity, Academic: academic}
 	h.Attachments = storage.NewLocal(cfg.StorageRoot, maxAttachmentCeiling)
 	h.Audit = audit
-	h.Exceptions = core.ReportException
+	exceptions := common.NewExceptionReporter(cfg.CoreURL, cfg.InternalKey, "notification")
+	h.Exceptions = exceptions.Report
 	h.InternalURL = cfg.InternalURL
 	h.Location = loc
 	h.PushProvider = provider.NewWebPushProvider(provider.WebPushConfig{
@@ -109,6 +110,7 @@ func main() {
 		Source: campaign.ClientSource{Identity: identity, Academic: academic, Admission: client.New(cfg.AdmissionURL, cfg.InternalKey)},
 		Email:  delivery, WhatsApp: whatsapp, Audit: audit,
 		UnsubscribeSecret: cfg.UnsubscribeSecret, PublicURL: cfg.PublicURL, Loc: loc,
+		Exceptions: exceptions.Report,
 	}
 	runner := jobs.NewRunner(db, cfg.CampaignJobInterval)
 	runner.Register("campaign_dispatch", func(ctx context.Context, _ *sql.DB) error { return campaignSvc.RunDue(ctx) })
