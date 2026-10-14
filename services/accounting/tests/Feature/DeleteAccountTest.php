@@ -11,6 +11,16 @@ use Tests\TestCase;
 
 class DeleteAccountTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+        // Unmodified Jetstream scaffold: assumes a `users` table with `name`,
+        // a password login and a `dashboard` route. Sekoci Accounting uses
+        // mst_user, SSO-only login and refuses authenticated requests without
+        // a tenant (TenantSchema), so these cases do not apply.
+        $this->markTestSkipped('Jetstream scaffold test; not applicable to SSO-only, tenant-scoped Sekoci Accounting.');
+    }
+
     use RefreshDatabase;
 
     public function test_user_accounts_can_be_deleted(): void
