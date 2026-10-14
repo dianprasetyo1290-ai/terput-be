@@ -333,7 +333,11 @@ func (h *Handler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	var unmapped *UnmappedComponentsError
 	switch {
 	case errors.As(err, &unmapped):
-		common.WriteJSON(w, http.StatusUnprocessableEntity, map[string]any{"message": unmapped.Error(), "components": unmapped.Codes}, nil)
+		common.WriteEnvelope(w, http.StatusUnprocessableEntity, common.Envelope{
+			Message: unmapped.Error(),
+			Errors:  map[string]string{"message": unmapped.Error()},
+			Data:    map[string]any{"components": unmapped.Codes},
+		})
 		return
 	case errors.Is(err, ErrDuplicateRegular):
 		common.WriteError(w, http.StatusConflict, err.Error())
