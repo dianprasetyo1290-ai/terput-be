@@ -12,12 +12,8 @@ import (
 // discount/scholarship rules (bill_discounts) with how much each has actually
 // been applied (bill_discount_steps). ?scholarship=true limits to beasiswa.
 func (a *App) ListDiscounts(w http.ResponseWriter, r *http.Request) {
-	if common.RequireAdmin(w, r) == nil {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+	c, schoolID := common.RequireFinanceStaff(w, r)
+	if c == nil {
 		return
 	}
 	scholarship := strings.TrimSpace(r.URL.Query().Get("scholarship")) == "true"
@@ -25,6 +21,8 @@ func (a *App) ListDiscounts(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.DB.QueryContext(r.Context(),
 		`SELECT d.id,d.name,d.kind,d.value,d.cap_idr,d.priority,d.scope,COALESCE(s.name,''),COALESCE(d.grade_level,''),
 		        COALESCE(d.student_user_id::text,''),d.scholarship,d.active,d.created_at,
+		        d.status,COALESCE(to_char(d.valid_from,'YYYY-MM-DD'),''),COALESCE(to_char(d.valid_to,'YYYY-MM-DD'),''),
+		        COALESCE(d.reason,''),COALESCE(d.decision_note,''),
 		        count(DISTINCT b.student_user_id),count(DISTINCT b.id),COALESCE(sum(st.applied_idr) FILTER (WHERE b.id IS NOT NULL),0)
 		 FROM bill_discounts d
 		 LEFT JOIN billing_schemes s ON s.id=d.scheme_id
@@ -32,7 +30,7 @@ func (a *App) ListDiscounts(w http.ResponseWriter, r *http.Request) {
 		 LEFT JOIN student_bills b ON b.id=st.bill_id AND b.status<>'void'
 		 WHERE d.school_id=$1 AND (NOT $2 OR d.scholarship)
 		 GROUP BY d.id,s.name
-		 ORDER BY d.active DESC,d.priority,d.created_at`,
+		 ORDER BY d.active DESC,(d.status='pending_approval') DESC,d.priority,d.created_at`,
 		schoolID, scholarship)
 	if err != nil {
 		writeErr(w, err)
@@ -49,9 +47,10 @@ func (a *App) ListDiscounts(w http.ResponseWriter, r *http.Request) {
 			priority, students, bills                         int
 			isScholarship, active                             bool
 			createdAt                                         time.Time
+			status, validFrom, validTo, reason, note          string
 		)
 		if err := rows.Scan(&id, &name, &kind, &value, &capIDR, &priority, &scope, &schemeName, &grade,
-			&student, &isScholarship, &active, &createdAt, &students, &bills, &applied); err != nil {
+			&student, &isScholarship, &active, &createdAt, &status, &validFrom, &validTo, &reason, &note, &students, &bills, &applied); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -59,6 +58,7 @@ func (a *App) ListDiscounts(w http.ResponseWriter, r *http.Request) {
 			"id": id, "name": name, "kind": kind, "value": value, "cap_idr": capIDR, "priority": priority,
 			"scope": scope, "scheme_name": schemeName, "grade_level": grade, "student_user_id": student,
 			"scholarship": isScholarship, "active": active, "created_at": createdAt,
+			"status": status, "valid_from": validFrom, "valid_to": validTo, "reason": reason, "decision_note": note,
 			"student_count": students, "bill_count": bills, "applied_idr": applied,
 		})
 	}
@@ -73,12 +73,8 @@ func (a *App) ListDiscounts(w http.ResponseWriter, r *http.Request) {
 // discount, the total actually applied to non-void bills (from the immutable
 // bill_discount_steps snapshot). Filters: ?student_user_id=, ?scholarship=true.
 func (a *App) ListDiscountRecipients(w http.ResponseWriter, r *http.Request) {
-	if common.RequireAdmin(w, r) == nil {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+	c, schoolID := common.RequireFinanceStaff(w, r)
+	if c == nil {
 		return
 	}
 	studentID := strings.TrimSpace(r.URL.Query().Get("student_user_id"))

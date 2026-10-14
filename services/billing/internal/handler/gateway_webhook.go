@@ -17,7 +17,6 @@ import (
 
 	"skci/billing/internal/client"
 	"skci/billing/internal/gateway"
-	"skci/billing/internal/model"
 )
 
 // SNAP-style webhook answers (every provider gets the same shape).
@@ -356,7 +355,9 @@ func allocateGatewayBills(ctx context.Context, dbTx *sql.Tx, t *gatewayTxState, 
 			t.SchoolID, pID, ba.amount, now); err != nil {
 			return err
 		}
-		recomputeBillStatusInTx(ctx, dbTx, ba.billID)
+		if err := recomputeBillStatusInTx(ctx, dbTx, ba.billID); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -399,31 +400,15 @@ func (a *App) issueGatewayReceipt(ctx context.Context, t *gatewayTxState, now ti
 	}
 }
 
-func recomputeBillStatusInTx(ctx context.Context, tx *sql.Tx, billID string) {
-	var netIDR int64
-	err := tx.QueryRowContext(ctx,
-		`SELECT net_idr FROM student_bills WHERE id = $1`, billID).Scan(&netIDR)
-	if err != nil {
-		return
+// recomputeBillStatusInTx re-derives a bill's status inside tx using the
+// same school-scoped ledger rule as every other payment path
+// (recomputeBillStatusQ); void bills are left alone and errors abort the tx.
+func recomputeBillStatusInTx(ctx context.Context, tx *sql.Tx, billID string) error {
+	var schoolID string
+	if err := tx.QueryRowContext(ctx, `SELECT school_id::text FROM student_bills WHERE id = $1`, billID).Scan(&schoolID); err != nil {
+		return err
 	}
-
-	var verifiedSum, reversalSum int64
-	_ = tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(a.amount_idr), 0)
-		 FROM bill_payment_allocations a
-		 JOIN bill_payments p ON p.id = a.payment_id
-		 WHERE p.student_bill_id = $1 AND p.status = 'verified'`, billID).Scan(&verifiedSum)
-	_ = tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(r.amount_idr), 0)
-		 FROM bill_payment_reversals r
-		 JOIN bill_payments p ON p.id = r.payment_id
-		 WHERE p.student_bill_id = $1`, billID).Scan(&reversalSum)
-
-	paid := verifiedSum - reversalSum
-	st := model.DeriveBillStatus(netIDR, paid)
-
-	_, _ = tx.ExecContext(ctx,
-		`UPDATE student_bills SET status = $1, updated_at = now() WHERE id = $2`, string(st), billID)
+	return recomputeBillStatusQ(ctx, tx, schoolID, billID)
 }
 
 func maskJSON(b []byte) map[string]any {

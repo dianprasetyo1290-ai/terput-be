@@ -1,35 +1,33 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"skci/billing/internal/client"
 	"skci/billing/internal/common"
 	"skci/billing/internal/model"
 )
 
+const reqTypeRefund = "refund"
+
 // Refund (PRD menu 25): requested -> approved|rejected -> processed.
-// The approver must differ from the requester (segregation of duties);
-// processing reverses verified payments of the bill (bill_payment_reversals
+// The decision is made in core's Approval Center (maker != checker, stages
+// by amount) and arrives through RefundCallback; processing reverses verified payments of the bill (bill_payment_reversals
 // tagged with refund_id), lowering the bill's paid balance.
 
-// adminSchool is the shared admin + tenant guard for the refund routes.
+// adminSchool is the shared finance-staff + tenant guard (Finance Admin and
+// Finance Manager, PRD menus 18–25).
 func adminSchool(w http.ResponseWriter, r *http.Request) (*common.Claims, string) {
-	c := common.RequireAdmin(w, r)
-	if c == nil {
-		return nil, ""
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
-		return nil, ""
-	}
-	return c, schoolID
+	return common.RequireFinanceStaff(w, r)
 }
 
-// ListRefunds is GET /admin/refunds?status=&student_user_id=.
+// ListRefunds is GET /admin/refunds?status=&student_user_id=&page=&per_page=.
+// meta carries the pagination plus the per-status summary of the filter.
 func (a *App) ListRefunds(w http.ResponseWriter, r *http.Request) {
 	c, schoolID := adminSchool(w, r)
 	if c == nil {
@@ -37,6 +35,7 @@ func (a *App) ListRefunds(w http.ResponseWriter, r *http.Request) {
 	}
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
 	studentID := strings.TrimSpace(r.URL.Query().Get("student_user_id"))
+	page, perPage := common.Page(r)
 
 	summary := map[string]any{}
 	sumRows, err := a.DB.QueryContext(r.Context(),
@@ -46,6 +45,7 @@ func (a *App) ListRefunds(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	total := 0
 	for sumRows.Next() {
 		var st string
 		var n int
@@ -56,19 +56,25 @@ func (a *App) ListRefunds(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		summary[st] = map[string]any{"count": n, "amount_idr": amt}
+		if status == "" || status == st {
+			total += n
+		}
 	}
 	sumRows.Close()
 
+	// Student-level refunds (no bill, e.g. withdrawal credit) are listed too.
 	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT f.id,f.student_bill_id::text,f.student_user_id::text,f.amount_idr,f.reason,f.status,
+		`SELECT f.id,COALESCE(f.student_bill_id::text,''),f.student_user_id::text,f.amount_idr,f.reason,f.status,
 		        f.requested_by::text,COALESCE(f.decided_by::text,''),f.decided_at,COALESCE(f.decision_note,''),
 		        COALESCE(f.processed_by::text,''),f.processed_at,f.created_at,
-		        b.period_year,b.period_month,b.net_idr,COALESCE(s.name,'')
+		        COALESCE(b.period_year,0),COALESCE(b.period_month,0),COALESCE(b.net_idr,0),COALESCE(s.name,''),
+		        COALESCE(f.approval_id,''),COALESCE(f.transfer_ref,''),COALESCE(to_char(f.transfer_date,'YYYY-MM-DD'),''),
+		        COALESCE(f.process_note,'')
 		 FROM bill_refunds f
-		 JOIN student_bills b ON b.id=f.student_bill_id
+		 LEFT JOIN student_bills b ON b.id=f.student_bill_id
 		 LEFT JOIN billing_schemes s ON s.id=b.scheme_id
 		 WHERE f.school_id=$1 AND ($2='' OR f.status=$2) AND ($3='' OR f.student_user_id::text=$3)
-		 ORDER BY f.created_at DESC LIMIT 500`, schoolID, status, studentID)
+		 ORDER BY f.created_at DESC, f.id LIMIT $4 OFFSET $5`, schoolID, status, studentID, perPage, common.Offset(page, perPage))
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -78,13 +84,15 @@ func (a *App) ListRefunds(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var (
 			id, billID, student, reason, st, reqBy, decBy, note, procBy, schemeName string
-			amount, net                                                            int64
-			decAt, procAt                                                          sql.NullTime
-			createdAt                                                              time.Time
-			year, month                                                            int
+			approvalID, transferRef, transferDate, processNote                      string
+			amount, net                                                             int64
+			decAt, procAt                                                           sql.NullTime
+			createdAt                                                               time.Time
+			year, month                                                             int
 		)
 		if err := rows.Scan(&id, &billID, &student, &amount, &reason, &st, &reqBy, &decBy, &decAt, &note,
-			&procBy, &procAt, &createdAt, &year, &month, &net, &schemeName); err != nil {
+			&procBy, &procAt, &createdAt, &year, &month, &net, &schemeName,
+			&approvalID, &transferRef, &transferDate, &processNote); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -93,6 +101,8 @@ func (a *App) ListRefunds(w http.ResponseWriter, r *http.Request) {
 			"reason": reason, "status": st, "requested_by": reqBy, "decided_by": decBy,
 			"decision_note": note, "processed_by": procBy, "created_at": createdAt,
 			"period_year": year, "period_month": month, "bill_net_idr": net, "scheme_name": schemeName,
+			"approval_id": approvalID, "via_approval_center": approvalID != "",
+			"transfer_ref": transferRef, "transfer_date": transferDate, "process_note": processNote,
 		}
 		if decAt.Valid {
 			m["decided_at"] = decAt.Time
@@ -106,7 +116,9 @@ func (a *App) ListRefunds(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	common.WriteJSON(w, http.StatusOK, items, map[string]any{"summary": summary, "viewer_id": c.UserID})
+	common.WriteJSON(w, http.StatusOK, items, map[string]any{
+		"page": page, "per_page": perPage, "total": total, "summary": summary, "viewer_id": c.UserID,
+	})
 }
 
 // refundableQ is the bill's paid balance minus refunds already requested or
@@ -178,6 +190,7 @@ func (a *App) CreateRefund(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var id string
+	var year, month int
 	if err = tx.QueryRowContext(r.Context(),
 		`INSERT INTO bill_refunds(school_id,student_bill_id,student_user_id,amount_idr,reason,requested_by)
 		 VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
@@ -185,16 +198,47 @@ func (a *App) CreateRefund(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	if err = tx.QueryRowContext(r.Context(), `SELECT period_year,period_month FROM student_bills WHERE id::text=$1`,
+		in.StudentBillID).Scan(&year, &month); err != nil {
+		writeErr(w, err)
+		return
+	}
 	if err = tx.Commit(); err != nil {
 		writeErr(w, err)
 		return
 	}
-	a.audit(r.Context(), schoolID, "refund", id, "refund_requested", "admin", c.UserID, "", in.Reason,
-		nil, map[string]any{"bill_id": in.StudentBillID, "amount_idr": in.AmountIDR})
-	common.WriteJSON(w, http.StatusCreated, map[string]any{"id": id, "status": "requested"}, nil)
+	// The decision belongs to core's Approval Center (request type 'refund',
+	// stages by amount). If core does not take the request, nothing remains.
+	amount := in.AmountIDR
+	resp, err := a.submitApproval(r.Context(), client.ApprovalRequest{
+		SchoolID: schoolID, RequestType: reqTypeRefund, SourceID: id,
+		Title: fmt.Sprintf("Refund tagihan %02d/%d", month, year),
+		Summary: map[string]any{
+			"student_user_id": studentID, "student_bill_id": in.StudentBillID,
+			"period_year": year, "period_month": month, "amount_idr": in.AmountIDR,
+			"refundable_idr": refundable, "reason": in.Reason,
+		},
+		AmountIDR: &amount, MakerUserID: c.UserID,
+		CallbackURL:   a.Config.Gateway.BillingInternalURL + "/internal/refunds/" + id + "/callback",
+		CorrelationID: id, IdempotencyKey: "refund:" + id,
+	})
+	if err != nil {
+		_, _ = a.DB.ExecContext(r.Context(), `DELETE FROM bill_refunds WHERE id::text=$1 AND status='requested'`, id)
+		writeErr(w, err)
+		return
+	}
+	if _, err = a.DB.ExecContext(r.Context(), `UPDATE bill_refunds SET approval_id=$1,updated_at=now() WHERE id::text=$2`, resp.ID, id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	a.auditBoth(r.Context(), schoolID, "billing", "refund", id, "refund_requested", c.ActiveRole, c.UserID, in.Reason,
+		nil, map[string]any{"bill_id": in.StudentBillID, "amount_idr": in.AmountIDR, "approval_id": resp.ID})
+	common.WriteJSON(w, http.StatusCreated, map[string]any{"id": id, "status": "requested", "approval_id": resp.ID}, nil)
 }
 
 // DecideRefund is POST /admin/refunds/{id}/decision {action: approve|reject, note}.
+// It only decides refunds created before the Approval Center integration
+// (no approval_id); every newer refund is decided in core.
 func (a *App) DecideRefund(w http.ResponseWriter, r *http.Request) {
 	c, schoolID := adminSchool(w, r)
 	if c == nil {
@@ -225,16 +269,20 @@ func (a *App) DecideRefund(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var status, requestedBy string
+	var status, requestedBy, approvalID string
 	err = tx.QueryRowContext(r.Context(),
-		`SELECT status,requested_by::text FROM bill_refunds WHERE id::text=$1 AND school_id=$2 FOR UPDATE`,
-		id, schoolID).Scan(&status, &requestedBy)
+		`SELECT status,requested_by::text,COALESCE(approval_id,'') FROM bill_refunds WHERE id::text=$1 AND school_id=$2 FOR UPDATE`,
+		id, schoolID).Scan(&status, &requestedBy, &approvalID)
 	if err == sql.ErrNoRows {
 		common.WriteError(w, http.StatusNotFound, "refund tidak ditemukan")
 		return
 	}
 	if err != nil {
 		writeErr(w, err)
+		return
+	}
+	if approvalID != "" {
+		common.WriteError(w, http.StatusConflict, "refund ini diputuskan melalui Approval Center, bukan dari menu Refund")
 		return
 	}
 	if status != "requested" {
@@ -255,18 +303,35 @@ func (a *App) DecideRefund(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	a.audit(r.Context(), schoolID, "refund", id, "refund_"+target, "admin", c.UserID, "", in.Note,
+	a.auditBoth(r.Context(), schoolID, "billing", "refund", id, "refund_"+target, c.ActiveRole, c.UserID, in.Note,
 		map[string]any{"status": status}, map[string]any{"status": target})
+	a.notifyRefund(r.Context(), schoolID, id, target, in.Note)
 	common.WriteJSON(w, http.StatusOK, map[string]any{"id": id, "status": target}, nil)
 }
 
-// ProcessRefund is POST /admin/refunds/{id}/process. Only an approved refund
-// is processed; it reverses the bill's verified payments newest first.
+// ProcessRefund is POST /admin/refunds/{id}/process {transfer_ref,
+// transfer_date?, note?}. Only an approved refund is processed, against the
+// bank transfer that paid it out; it reverses the bill's verified payments
+// newest first.
 func (a *App) ProcessRefund(w http.ResponseWriter, r *http.Request) {
 	c, schoolID := adminSchool(w, r)
 	if c == nil {
 		return
 	}
+	var in struct {
+		TransferRef  string `json:"transfer_ref"`
+		TransferDate string `json:"transfer_date"`
+		Note         string `json:"note"`
+	}
+	if !common.Decode(w, r, &in) {
+		return
+	}
+	proof, perr := model.ParseTransferProof(in.TransferRef, in.TransferDate, a.now(), a.location())
+	if perr != nil {
+		common.WriteError(w, http.StatusUnprocessableEntity, perr.Error())
+		return
+	}
+	in.Note = strings.TrimSpace(in.Note)
 	id := param(r, "id")
 	tx, err := a.DB.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -288,7 +353,7 @@ func (a *App) ProcessRefund(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	if status != "approved" {
+	if status != model.RefundApproved {
 		common.WriteError(w, http.StatusUnprocessableEntity, "hanya refund yang sudah disetujui yang dapat diproses")
 		return
 	}
@@ -332,8 +397,13 @@ func (a *App) ProcessRefund(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if _, err = tx.ExecContext(r.Context(),
-		`UPDATE bill_refunds SET status='processed',processed_by=$1,processed_at=now(),updated_at=now()
-		 WHERE id::text=$2 AND school_id=$3`, c.UserID, id, schoolID); err != nil {
+		`UPDATE bill_refunds SET status='processed',processed_by=$1,processed_at=now(),updated_at=now(),
+		        transfer_ref=$4,transfer_date=$5,process_note=NULLIF($6,'')
+		 WHERE id::text=$2 AND school_id=$3`, c.UserID, id, schoolID, proof.Ref, proof.Date, in.Note); err != nil {
+		if isUniqueViolation(err) {
+			common.WriteError(w, http.StatusConflict, "nomor referensi transfer sudah dipakai refund lain")
+			return
+		}
 		writeErr(w, err)
 		return
 	}
@@ -345,7 +415,118 @@ func (a *App) ProcessRefund(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	a.audit(r.Context(), schoolID, "refund", id, "refund_processed", "admin", c.UserID, "", reason,
-		map[string]any{"status": status}, map[string]any{"status": "processed", "bill_id": billID, "amount_idr": amount})
-	common.WriteJSON(w, http.StatusOK, map[string]any{"id": id, "status": "processed"}, nil)
+	a.auditBoth(r.Context(), schoolID, "billing", "refund", id, "refund_processed", c.ActiveRole, c.UserID, reason,
+		map[string]any{"status": status}, map[string]any{"status": "processed", "bill_id": billID, "amount_idr": amount,
+			"transfer_ref": proof.Ref, "transfer_date": proof.Date.Format("2006-01-02")})
+	a.notifyRefund(r.Context(), schoolID, id, model.RefundProcessed, "")
+	common.WriteJSON(w, http.StatusOK, map[string]any{"id": id, "status": "processed", "transfer_ref": proof.Ref}, nil)
+}
+
+// RefundCallback is POST /internal/refunds/{id}/callback (core Approval
+// Center). Idempotent: a refund that is no longer pending is acknowledged.
+func (a *App) RefundCallback(w http.ResponseWriter, r *http.Request) {
+	var cb client.ApprovalCallback
+	if !common.Decode(w, r, &cb) {
+		return
+	}
+	id := param(r, "id")
+	ctx := r.Context()
+	tx, err := a.DB.BeginTx(ctx, nil)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	var schoolID, status, requestedBy, approvalID string
+	err = tx.QueryRowContext(ctx,
+		`SELECT school_id::text,status,requested_by::text,COALESCE(approval_id,'') FROM bill_refunds WHERE id::text=$1 FOR UPDATE`, id).
+		Scan(&schoolID, &status, &requestedBy, &approvalID)
+	if err == sql.ErrNoRows {
+		common.WriteError(w, http.StatusNotFound, "refund tidak ditemukan")
+		return
+	}
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if approvalID != "" && cb.ApprovalID != "" && cb.ApprovalID != approvalID {
+		common.WriteError(w, http.StatusConflict, "approval_id tidak cocok dengan pengajuan refund")
+		return
+	}
+	next, changed, derr := model.RefundDecision(status, cb.Decision, cb.DecidedBy, requestedBy)
+	if derr != nil {
+		common.WriteError(w, http.StatusUnprocessableEntity, derr.Error())
+		return
+	}
+	if !changed {
+		common.WriteJSON(w, http.StatusOK, map[string]any{"id": id, "status": next}, nil)
+		return
+	}
+	if _, err = tx.ExecContext(ctx,
+		`UPDATE bill_refunds SET status=$1,decided_by=$2::uuid,decided_at=now(),decision_note=NULLIF($3,''),updated_at=now()
+		 WHERE id::text=$4`, next, cb.DecidedBy, strings.TrimSpace(cb.Comment), id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		writeErr(w, err)
+		return
+	}
+	a.auditBoth(ctx, schoolID, "billing", "refund", id, "refund_"+next, "approver", cb.DecidedBy, cb.Comment,
+		map[string]any{"status": status}, map[string]any{"status": next, "approval_id": approvalID})
+	a.notifyRefund(ctx, schoolID, id, next, cb.Comment)
+	common.WriteJSON(w, http.StatusOK, map[string]any{"id": id, "status": next}, nil)
+}
+
+// notifyRefund tells the requesting staff member and the student's
+// guardians about a refund decision or payout. Delivery failures go to
+// core's Integration Exception Queue; they never undo the refund step.
+func (a *App) notifyRefund(ctx context.Context, schoolID, refundID, status, note string) {
+	var studentID, requestedBy, transferRef string
+	var amount int64
+	if err := a.DB.QueryRowContext(ctx,
+		`SELECT student_user_id::text,requested_by::text,amount_idr,COALESCE(transfer_ref,'') FROM bill_refunds WHERE id::text=$1`,
+		refundID).Scan(&studentID, &requestedBy, &amount, &transferRef); err != nil {
+		common.CaptureError(err)
+		return
+	}
+	title, body := model.RefundNoticeText(status, formatRupiah(amount), note, transferRef)
+	if title == "" {
+		return
+	}
+	data := map[string]any{"refund_id": refundID, "status": status, "student_user_id": studentID}
+	send := func(userID, audience string) {
+		key := "refund:" + refundID + ":" + status + ":" + userID
+		if a.Notification == nil || !a.Notification.Configured() {
+			a.raiseNotificationFailure(ctx, schoolID, key, "notification service not configured", data)
+			return
+		}
+		d := map[string]any{}
+		for k, v := range data {
+			d[k] = v
+		}
+		d["url"] = map[string]string{"staff": "/keuangan/refund", "guardian": "/orang-tua/tagihan"}[audience]
+		if err := a.Notification.Notify(ctx, key, client.Notification{
+			SchoolID: schoolID, UserID: userID, Type: "refund_" + status, Title: title, Body: body,
+			Data: d, Channels: []string{"in_app", "email"},
+		}); err != nil {
+			a.raiseNotificationFailure(ctx, schoolID, key, err.Error(), data)
+		}
+	}
+	send(requestedBy, "staff")
+	if status == model.RefundApproved {
+		return // guardians hear about the outcome: rejection or payout.
+	}
+	if a.IdentitySvc == nil || !a.IdentitySvc.Configured() {
+		a.raiseNotificationFailure(ctx, schoolID, "refund:"+refundID+":"+status+":guardians", "identity service not configured", data)
+		return
+	}
+	guardians, err := a.IdentitySvc.StudentGuardianIDs(ctx, schoolID, studentID)
+	if err != nil {
+		a.raiseNotificationFailure(ctx, schoolID, "refund:"+refundID+":"+status+":guardians", err.Error(), data)
+		return
+	}
+	for _, g := range guardians {
+		send(g, "guardian")
+	}
 }

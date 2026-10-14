@@ -122,7 +122,7 @@ func (a *App) writeStudentBills(w http.ResponseWriter, r *http.Request, schoolID
 			writeErr(w, err)
 			return
 		}
-		items = append(items, billSummary(id, schemeID, schemeName, status, year, month,
+		items = append(items, a.billSummary(id, schemeID, schemeName, status, year, month,
 			base, discount, net, verified, reversed, outstanding, dueAt, createdAt))
 	}
 	if err := rows.Err(); err != nil {
@@ -132,13 +132,18 @@ func (a *App) writeStudentBills(w http.ResponseWriter, r *http.Request, schoolID
 	common.WriteJSON(w, http.StatusOK, items, map[string]any{"page": page, "per_page": perPage, "total": total})
 }
 
-func billSummary(id, schemeID, schemeName, status string, year, month int,
+// billSummary is the one bill view every list and detail endpoint returns.
+// status is derived from the ledger (model.EffectiveBillStatus), so it always
+// agrees with paid_idr and outstanding_idr. overdue marks an open balance past its due date in the
+// school's time zone.
+func (a *App) billSummary(id, schemeID, schemeName, status string, year, month int,
 	base, discount, net, verified, reversed, outstanding int64, dueAt sql.NullTime, createdAt time.Time) map[string]any {
+	effective := model.EffectiveBillStatus(status, net, verified-reversed)
 	m := map[string]any{
 		"id":              id,
 		"scheme_id":       schemeID,
 		"scheme_name":     schemeName,
-		"status":          status,
+		"status":          string(effective),
 		"period_year":     year,
 		"period_month":    month,
 		"base_idr":        base,
@@ -146,10 +151,13 @@ func billSummary(id, schemeID, schemeName, status string, year, month int,
 		"net_idr":         net,
 		"paid_idr":        verified - reversed,
 		"outstanding_idr": outstanding,
+		"overdue":         false,
 		"created_at":      createdAt,
 	}
 	if dueAt.Valid {
 		m["due_at"] = dueAt.Time
+		due := dueAt.Time
+		m["overdue"] = model.BillOverdue(effective, &due, outstanding, a.now(), a.location())
 	}
 	return m
 }
@@ -211,7 +219,7 @@ func (a *App) GetChildBill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view := billSummary(id, schemeID, schemeName, status, year, month,
+	view := a.billSummary(id, schemeID, schemeName, status, year, month,
 		base, discount, net, verified, reversed, outstanding, dueAt, createdAt)
 	view["items"] = items
 	view["discounts"] = discounts
