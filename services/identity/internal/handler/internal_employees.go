@@ -175,6 +175,10 @@ func (a *App) InternalDeactivateUser(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusInternalServerError, "failed to commit transaction")
 		return
 	}
+	if req.EffectiveAt == nil || !req.EffectiveAt.After(time.Now()) {
+		// BUG-022: end the deactivated account's sessions now.
+		a.revokeAll(r, id, "user_deactivated", "")
+	}
 
 	common.WriteJSON(w, http.StatusOK, map[string]any{
 		"deactivated":   true,

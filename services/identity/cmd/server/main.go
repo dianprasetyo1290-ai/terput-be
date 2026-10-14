@@ -15,6 +15,7 @@ import (
 	"skci/identity/internal/cache"
 	"skci/identity/internal/common"
 	"skci/identity/internal/handler"
+	"skci/identity/internal/security"
 	"skci/identity/internal/store"
 	"skci/identity/internal/whitelabel"
 )
@@ -68,6 +69,15 @@ func main() {
 
 	app := handler.NewApp(db, jwtSecret, internalKey)
 	app.CoreURL = getenv("CORE_URL", "http://localhost:8091")
+	app.NotificationURL = getenv("NOTIFICATION_URL", "http://localhost:8089")
+	app.PublicAppURL = getenv("PUBLIC_APP_URL", "http://localhost:5173")
+	// TOTP secrets are encrypted with this key. Unset -> derived from the JWT
+	// secret (dev); set a dedicated value in production and never rotate it
+	// without resetting MFA for every user.
+	if k := getenv("MFA_ENCRYPTION_KEY", ""); k != "" {
+		app.MFAKey = security.DeriveKey(k)
+	}
+	app.MFAIssuer = getenv("MFA_ISSUER", "SEKOCI")
 	wlStore := whitelabel.NewStore(db)
 	wlHandler := whitelabel.NewHandler(wlStore, app.CoreURL, app.InternalKey)
 
@@ -105,6 +115,12 @@ func main() {
 	// Public routes (no auth).
 	r.Get("/healthz", handler.Healthz)
 	r.Post("/auth/login", app.Login)
+	r.Post("/auth/mfa/verify", app.VerifyMFA)
+	// nginx auth_request target: revocation check for every other service.
+	r.Get("/auth/session-check", app.SessionCheck)
+	r.Post("/auth/password/forgot", app.ForgotPassword)
+	r.Get("/auth/password/reset/{token}", app.CheckResetToken)
+	r.Post("/auth/password/reset", app.ResetPasswordWithToken)
 
 	// White-label public branding & manifest (T26, menu 159)
 	r.Get("/public/branding", wlHandler.PublicBranding)
@@ -114,8 +130,24 @@ func main() {
 
 	// Everything else requires a valid JWT.
 	r.Group(func(pr chi.Router) {
-		pr.Use(common.JWTMiddleware(jwtSecret))
+		pr.Use(common.JWTSessionMiddleware(jwtSecret, app.ValidateSession))
 		pr.Use(respCache.Middleware(skipCache))
+
+		// Sessions & login history (BUG-083), logout (BUG-022/025).
+		pr.Post("/auth/logout", app.Logout)
+		pr.Get("/auth/sessions", app.MySessions)
+		pr.Post("/auth/sessions/revoke-all", app.RevokeAllMySessions)
+		pr.Delete("/auth/sessions/{sid}", app.RevokeMySession)
+		pr.Get("/auth/login-history", app.MyLoginHistory)
+
+		// Security policy (lockout, idle timeout, MFA roles) and forbidden
+		// role combinations (SoD).
+		pr.Get("/security/policy", app.GetSecurityPolicy)
+		pr.Put("/security/policy", app.UpdateSecurityPolicy)
+		pr.Get("/security/role-conflicts", app.ListRoleConflicts)
+		pr.Get("/security/role-conflicts/violations", app.ListRoleConflictViolations)
+		pr.Post("/security/role-conflicts", app.UpsertRoleConflict)
+		pr.Delete("/security/role-conflicts/{roleA}/{roleB}", app.DeleteRoleConflict)
 
 		pr.Post("/auth/switch-role", app.SwitchRole)
 		pr.Get("/auth/me", app.Me)
@@ -183,6 +215,11 @@ func main() {
 			ur.Put("/{id}", app.UpdateUser)
 			ur.Delete("/{id}", app.DeleteUser)
 			ur.Post("/{id}/reset-password", app.ResetPassword)
+			ur.Get("/{id}/sessions", app.UserSessions)
+			ur.Post("/{id}/sessions/revoke-all", app.RevokeUserSessions)
+			ur.Get("/{id}/login-history", app.UserLoginHistory)
+			ur.Post("/{id}/unlock", app.UnlockUserAccount)
+			ur.Post("/{id}/mfa/reset", app.ResetUserMFA)
 			ur.Post("/{id}/roles", app.AssignUserRole)
 			ur.Delete("/{id}/roles/{role}", app.RemoveUserRole)
 		})
@@ -282,7 +319,7 @@ func main() {
 	})
 
 	r.Group(func(ir chi.Router) {
-		ir.Use(common.InternalOrJWTMiddleware(jwtSecret, internalKey))
+		ir.Use(common.InternalOrJWTMiddleware(jwtSecret, internalKey, app.ValidateSession))
 		// Safe for X-Internal-Key callers too: cacheKey falls back to a
 		// shared "anon" scope when there are no JWT claims, but every
 		// tenant-scoping param these internal reads rely on (school_id

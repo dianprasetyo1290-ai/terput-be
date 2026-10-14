@@ -29,6 +29,10 @@ func TestSetSchoolFeatureRequiresFacility(t *testing.T) {
 	if err := db.QueryRow(`INSERT INTO schools (name) VALUES ('Fitur T9') RETURNING id`).Scan(&school); err != nil {
 		t.Fatal(err)
 	}
+	// withClaims acts as this fixed user; school_features.updated_by is an FK.
+	if _, err := db.Exec(`INSERT INTO users (id, name, email, password_hash) VALUES ('00000000-0000-4000-8000-000000000001','Test Actor','test-actor@test.local','x') ON CONFLICT DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
 	app := &App{DB: db}
 	put := func(key, body string) *httptest.ResponseRecorder {
 		r := withClaims(httptest.NewRequest(http.MethodPut, "/schools/"+school+"/features/"+key, strings.NewReader(body)), common.RoleSuperadmin, "")

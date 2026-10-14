@@ -299,10 +299,12 @@ func (a *App) Impersonate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := a.issueToken(adminUserID, schoolID, common.RoleAdmin, []string{common.RoleAdmin})
+	token, _, err := a.issueToken(r, adminUserID, schoolID, common.RoleAdmin, []string{common.RoleAdmin}, "", false)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to issue token")
 		return
 	}
+	c := common.FromCtx(r)
+	a.RecordSecurityAudit(&schoolID, "impersonation_started", adminUserID, &c.UserID, &c.ActiveRole, nil, map[string]string{"school_id": schoolID}, "superadmin impersonated school admin", r.Header.Get("X-Correlation-ID"))
 	common.WriteJSON(w, http.StatusOK, map[string]interface{}{"token": token, "school_id": schoolID, "impersonated_user_id": adminUserID}, nil)
 }

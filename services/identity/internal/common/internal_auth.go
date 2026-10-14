@@ -17,12 +17,12 @@ const internalCallCtxKey internalCtxKey = "internal_call"
 // set so handlers can detect this via IsInternal(r) and skip
 // caller-scoped authorization in favor of an unscoped-by-ID lookup. Falls
 // through to normal JWT verification otherwise. See docs/CONVENTIONS.md.
-func InternalOrJWTMiddleware(jwtSecret, internalKey string) func(http.Handler) http.Handler {
-	jwtMW := JWTMiddleware(jwtSecret)
+func InternalOrJWTMiddleware(jwtSecret, internalKey string, validate SessionValidator) func(http.Handler) http.Handler {
+	jwtMW := JWTSessionMiddleware(jwtSecret, validate)
 	return func(next http.Handler) http.Handler {
 		jwtWrapped := jwtMW(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if key := r.Header.Get("X-Internal-Key"); key != "" && key == internalKey {
+			if key := r.Header.Get("X-Internal-Key"); key != "" && subtle.ConstantTimeCompare([]byte(key), []byte(internalKey)) == 1 {
 				ctx := context.WithValue(r.Context(), internalCallCtxKey, true)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return

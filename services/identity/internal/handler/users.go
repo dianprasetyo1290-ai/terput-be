@@ -415,10 +415,10 @@ type updateUserRequest struct {
 // UpdateUser: "admin can edit account data" for Data Siswa / Data Guru /
 // Data Pengguna alike.
 func (a *App) UpdateUser(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	id := chi.URLParam(r, "id")
+	if !a.requireUserInScope(w, r, id) {
 		return
 	}
-	id := chi.URLParam(r, "id")
 	var req updateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 		common.WriteError(w, http.StatusBadRequest, "name is required")
@@ -468,10 +468,12 @@ func (a *App) UpdateUser(w http.ResponseWriter, r *http.Request) {
 // cross-service) and keeps inflating DashboardCountsFor's siswa count even
 // though Data Siswa now shows the student gone. See Report sekoci V3.docx.
 func (a *App) DeleteUser(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	id := chi.URLParam(r, "id")
+	// An admin may only delete accounts of their own unit (by-ID reach
+	// across units was possible before).
+	if !a.requireUserInScope(w, r, id) {
 		return
 	}
-	id := chi.URLParam(r, "id")
 	var siswaSchoolIDs []string
 	roleRows, err := a.DB.Query(`SELECT school_id FROM user_school_roles WHERE user_id = $1 AND role = 'siswa' AND school_id IS NOT NULL`, id)
 	if err == nil {
@@ -495,6 +497,10 @@ func (a *App) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	for _, schoolID := range siswaSchoolIDs {
 		_ = a.Academic.RemoveStudentEnrollments(schoolID, id)
 	}
+	// BUG-022: a deleted account's tokens stop working immediately.
+	a.revokeAll(r, id, "user_deleted", "")
+	c := common.FromCtx(r)
+	a.RecordSecurityAudit(nil, "user_deleted", id, &c.UserID, &c.ActiveRole, nil, nil, "user soft-deleted", r.Header.Get("X-Correlation-ID"))
 	common.WriteJSON(w, http.StatusOK, map[string]string{"id": id}, nil)
 }
 
@@ -530,6 +536,8 @@ func (a *App) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusNotFound, "user not found")
 		return
 	}
+	a.revokeAll(r, id, "password_reset_by_admin", "")
+	a.RecordSecurityAudit(nil, "password_reset_by_admin", id, &claims.UserID, &claims.ActiveRole, nil, nil, "admin reset password", r.Header.Get("X-Correlation-ID"))
 	common.WriteJSON(w, http.StatusOK, map[string]string{"id": id, "new_password": newPassword}, nil)
 }
 
@@ -576,13 +584,23 @@ func (a *App) AssignUserRole(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "school_id is required for non-superadmin roles")
 		return
 	}
+	if claims.ActiveRole != common.RoleSuperadmin {
+		if ok, err := a.userInScope(r, id); err != nil || !ok {
+			common.WriteError(w, http.StatusNotFound, "user not found")
+			return
+		}
+	}
+	// BUG-023 / AC-RBAC-08: refuse a forbidden role combination.
+	if !a.checkRoleConflicts(w, r, id, req.Role) {
+		return
+	}
 	var schoolIDArg interface{}
 	if schoolID != "" {
 		schoolIDArg = schoolID
 	}
 	if _, err := a.DB.Exec(`INSERT INTO user_school_roles (user_id, school_id, role) VALUES ($1,$2,$3)
 		ON CONFLICT (user_id, school_id, role) DO NOTHING`, id, schoolIDArg, req.Role); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to assign role: "+err.Error())
+		common.WriteDBError(w, err, "gagal menambahkan peran")
 		return
 	}
 	var sID *string
