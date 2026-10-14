@@ -9,7 +9,8 @@ import (
 // exceptionKindsByRole is the FR-80-005 matrix: which exception kinds each
 // role sees. admin is the school's Finance Admin / unit admin (payments,
 // notifications, imports, callbacks) and does NOT see journal postings, which
-// belong to Accounting (finance_manager; payroll_officer for hr postings).
+// belong to Accounting (finance_manager and akuntan; payroll_officer for hr
+// postings).
 // auditor reads everything but acts on nothing.
 var exceptionKindsByRole = map[string][]string{
 	common.RoleSuperadmin: ExceptionKinds,
@@ -17,6 +18,7 @@ var exceptionKindsByRole = map[string][]string{
 	common.RoleAdmin: {ExceptionKindWebhook, ExceptionKindNotification, ExceptionKindDeadLetter,
 		ExceptionKindImport, ExceptionKindCallback},
 	common.RoleFinanceManager: {ExceptionKindWebhook, ExceptionKindJournalPosting},
+	common.RoleAkuntan:        {ExceptionKindWebhook, ExceptionKindJournalPosting},
 	common.RolePayrollOfficer: {ExceptionKindJournalPosting},
 }
 

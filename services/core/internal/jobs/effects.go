@@ -198,19 +198,28 @@ func AfterTransition(ctx context.Context, st store.Store, cl *client.Client, req
 // NotifyCriticalException alerts the people responsible for a new critical
 // exception (FR-80-006): every holder of a role allowed to act on its kind
 // (model.ExceptionResponsibleRoles), so a journal-posting failure reaches
-// Accounting and a webhook failure the Finance Admin.
+// Accounting and a webhook failure the Finance Admin. Holders come from
+// identity's internal user list (client.RoleHolders, falling back to the
+// public list when identity predates it); duplicates across roles are sent
+// once.
 func NotifyCriticalException(ctx context.Context, cl *client.Client, exc *model.IntegrationException) {
 	if cl == nil || exc == nil || exc.Severity != model.SeverityCritical {
 		return
 	}
 	var recipients []string
+	seen := map[string]bool{}
 	for _, role := range model.ExceptionResponsibleRoles(exc.Kind) {
-		ids, err := cl.UsersByRole(ctx, exc.SchoolID, role)
+		ids, err := cl.RoleHolders(ctx, exc.SchoolID, role)
 		if err != nil {
 			log.Printf("resolve %s for exception %s: %v", role, exc.ID, err)
 			continue
 		}
-		recipients = append(recipients, ids...)
+		for _, id := range ids {
+			if !seen[id] {
+				seen[id] = true
+				recipients = append(recipients, id)
+			}
+		}
 	}
 	if len(recipients) == 0 {
 		log.Printf("critical exception %s (%s): no responsible user to notify", exc.ID, exc.Kind)

@@ -203,3 +203,33 @@ func TestInternalException_AcceptsReporterDialects(t *testing.T) {
 		t.Fatalf("unknown severity: want 422, got %d", rec.Code)
 	}
 }
+
+// Round 3: critical journal postings reach every akuntan and finance_manager
+// through identity GET /internal/users; without that route (404) the public
+// list is used instead (TestCriticalException_NotifiesResponsibleRoles).
+func TestCriticalException_UsesInternalUserList(t *testing.T) {
+	_, router, h, notifier := newWiredServerWith(t, &fakeIdentity{school: testSchoolA, internalUsers: true, roles: map[string][]string{
+		testUserFinance: {"finance_manager", "akuntan"},
+		testUserKepala:  {"akuntan"},
+		testUserAdmin:   {"admin"},
+	}})
+	body := `{"school_id":"` + testSchoolA + `","source_service":"billing","kind":"journal_posting","severity":"critical",
+		"error_message":"posting jurnal gagal","idempotency_key":"jp:r3"}`
+	rec := do(router, http.MethodPost, "/internal/exceptions", "", map[string]string{"X-Internal-Key": testInternalKey}, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	h.Wait()
+	got := notifier.recipients("integration_exception")
+	slices.Sort(got)
+	want := []string{testUserFinance, testUserKepala}
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("recipients = %v, want %v (each holder once, admin excluded)", got, want)
+	}
+
+	tok := token(t, testUserKepala, testSchoolA, "akuntan")
+	if rec := do(router, http.MethodGet, "/exceptions?kind=journal_posting", tok, nil, ""); rec.Code != http.StatusOK {
+		t.Fatalf("akuntan list: %d %s", rec.Code, rec.Body.String())
+	}
+}

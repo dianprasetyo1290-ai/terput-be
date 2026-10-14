@@ -18,12 +18,22 @@ import (
 type fakeIdentity struct {
 	school string
 	roles  map[string][]string // user id -> roles in school
+	// internalUsers serves GET /internal/users (and hides the public
+	// /users list) to prove callers use the internal route when present.
+	internalUsers bool
 }
 
 func (f *fakeIdentity) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	if r.URL.Path == "/users" {
+	if r.URL.Path == "/users" || (f.internalUsers && r.URL.Path == "/internal/users") {
+		if r.URL.Path == "/internal/users" && (r.Header.Get("X-Internal-Key") == "" || r.URL.Query().Get("school_id") != f.school) {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
 		role := r.URL.Query().Get("role")
+		if f.internalUsers && r.URL.Path == "/users" {
+			role = ""
+		}
 		var out []map[string]string
 		for id, rs := range f.roles {
 			for _, x := range rs {
@@ -95,7 +105,13 @@ func (f *fakeNotifier) recipients(notifType string) []string {
 // newWiredServer is newTestServer with fake identity + notification services.
 func newWiredServer(t *testing.T, roles map[string][]string) (*fakeStore, http.Handler, *Handler, *fakeNotifier) {
 	t.Helper()
-	idSrv := httptest.NewServer(&fakeIdentity{school: testSchoolA, roles: roles})
+	return newWiredServerWith(t, &fakeIdentity{school: testSchoolA, roles: roles})
+}
+
+// newWiredServerWith wires a caller-configured fake identity.
+func newWiredServerWith(t *testing.T, identity *fakeIdentity) (*fakeStore, http.Handler, *Handler, *fakeNotifier) {
+	t.Helper()
+	idSrv := httptest.NewServer(identity)
 	t.Cleanup(idSrv.Close)
 	notifier := &fakeNotifier{}
 	nSrv := httptest.NewServer(notifier)
