@@ -81,3 +81,22 @@ func TestHandler_PublicAssetLinks(t *testing.T) {
 		t.Errorf("expected empty array '[]', got %s", w.Body.String())
 	}
 }
+
+// QA BUG-179: a host without published branding is the default case and must
+// not answer 404 on every SPA page load.
+func TestHandler_PublicBrandingWithoutBrandingIs200Null(t *testing.T) {
+	h := NewHandler(nil, "", "")
+	rr := httptest.NewRecorder()
+	h.PublicBranding(rr, httptest.NewRequest(http.MethodGet, "/public/branding?host=example.test", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var env struct {
+		Data struct {
+			Branding any `json:"branding"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil || env.Data.Branding != nil {
+		t.Fatalf("body = %s (err %v), want branding null", rr.Body.String(), err)
+	}
+}

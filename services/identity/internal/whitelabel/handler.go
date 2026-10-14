@@ -359,8 +359,13 @@ func (h *Handler) SaveStoreListing(w http.ResponseWriter, r *http.Request) {
 
 // PublicBranding handles GET /public/branding?host=
 func (h *Handler) PublicBranding(w http.ResponseWriter, r *http.Request) {
+	// "No white-label for this host" is the normal case for the default
+	// deployment, and the SPA asks on every page load, so it is answered
+	// 200 with branding:null rather than a 404 that floods the console and
+	// monitoring (QA BUG-179).
+	noBranding := map[string]any{"branding": nil, "version": 0}
 	if h.Store == nil {
-		common.WriteError(w, http.StatusNotFound, "Merek white-label tidak ditemukan untuk domain ini")
+		common.WriteJSON(w, http.StatusOK, noBranding, nil)
 		return
 	}
 	host := r.URL.Query().Get("host")
@@ -372,8 +377,13 @@ func (h *Handler) PublicBranding(w http.ResponseWriter, r *http.Request) {
 	}
 
 	draft, version, err := h.Store.GetPublishedByHost(r.Context(), host)
+	if errors.Is(err, ErrNotFound) {
+		w.Header().Set("Cache-Control", "public, max-age=60")
+		common.WriteJSON(w, http.StatusOK, noBranding, nil)
+		return
+	}
 	if err != nil {
-		common.WriteError(w, http.StatusNotFound, "Merek white-label tidak ditemukan untuk domain ini")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat merek white-label")
 		return
 	}
 
