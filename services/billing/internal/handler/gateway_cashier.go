@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"skci/billing/internal/common"
@@ -17,20 +19,100 @@ type CashierPaymentInput struct {
 	Method          string                       `json:"method"` // 'cash' | 'transfer'
 	AmountIDR       int64                        `json:"amount_idr"`
 	Note            string                       `json:"note"`
+	PayerName       string                       `json:"payer_name"`
 	IdempotencyKey  string                       `json:"idempotency_key"`
 	BillAllocations []model.BillAllocationResult `json:"bill_allocations,omitempty"`
 }
 
 type CashierPaymentResponse struct {
-	ID              string                       `json:"id"`
-	ReceiptNo       string                       `json:"receipt_no"`
-	StudentUserID   string                       `json:"student_user_id"`
-	Method          string                       `json:"method"`
-	AmountIDR       int64                        `json:"amount_idr"`
-	DepositIDR      int64                        `json:"deposit_idr"`
-	Allocations     []model.BillAllocationResult `json:"allocations"`
-	Status          string                       `json:"status"`
-	CreatedAt       time.Time                    `json:"created_at"`
+	ID            string                       `json:"id"`
+	ReceiptNo     string                       `json:"receipt_no"`
+	StudentUserID string                       `json:"student_user_id"`
+	Method        string                       `json:"method"`
+	AmountIDR     int64                        `json:"amount_idr"`
+	DepositIDR    int64                        `json:"deposit_idr"`
+	Allocations   []model.BillAllocationResult `json:"allocations"`
+	Status        string                       `json:"status"`
+	CreatedAt     time.Time                    `json:"created_at"`
+}
+
+// loadOpenBillsTx returns a student's non-void bills that still have an
+// outstanding balance, locked FOR UPDATE so two concurrent payments cannot
+// both settle the same balance. Outstanding comes from the ledger, never
+// from the stored status.
+func loadOpenBillsTx(ctx context.Context, tx *sql.Tx, schoolID, studentID string) ([]model.OpenBill, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id::text, due_at FROM student_bills
+		  WHERE school_id = $1 AND student_user_id = $2 AND status <> 'void'
+		  ORDER BY due_at ASC NULLS LAST, id
+		  FOR UPDATE`, schoolID, studentID)
+	if err != nil {
+		return nil, err
+	}
+	type billRow struct {
+		id  string
+		due sql.NullTime
+	}
+	var ids []billRow
+	for rows.Next() {
+		var b billRow
+		if err := rows.Scan(&b.id, &b.due); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, b)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var open []model.OpenBill
+	for _, b := range ids {
+		_, _, _, out, err := billTotalsQ(ctx, tx, schoolID, b.id)
+		if err != nil {
+			return nil, err
+		}
+		if out <= 0 {
+			continue
+		}
+		ob := model.OpenBill{BillID: b.id, OutstandingIDR: out}
+		if b.due.Valid {
+			ob.DueDate = b.due.Time
+		}
+		open = append(open, ob)
+	}
+	return open, nil
+}
+
+// receiptNames resolves the school, student and payer names printed on a
+// receipt from identity. payer defaults to the first linked guardian, then
+// the student. A name identity cannot supply falls back to the raw id so a
+// receipt never carries an invented name.
+func (a *App) receiptNames(ctx context.Context, schoolID, studentID, payer string) (string, string, string) {
+	school, student := schoolID, studentID
+	if !a.IdentitySvc.Configured() {
+		if payer == "" {
+			payer = student
+		}
+		return school, student, payer
+	}
+	if n, err := a.IdentitySvc.SchoolName(ctx, schoolID); err == nil && n != "" {
+		school = n
+	}
+	if u, err := a.IdentitySvc.User(ctx, studentID); err == nil && u.Name != "" {
+		student = u.Name
+	}
+	if payer == "" {
+		if gids, err := a.IdentitySvc.StudentGuardianIDs(ctx, schoolID, studentID); err == nil && len(gids) > 0 {
+			if u, err := a.IdentitySvc.User(ctx, gids[0]); err == nil && u.Name != "" {
+				payer = u.Name
+			}
+		}
+	}
+	if payer == "" {
+		payer = student
+	}
+	return school, student, payer
 }
 
 // CashierCreatePayment records a cash or direct transfer payment at the cashier counter (AC-29-03).
@@ -50,6 +132,7 @@ func (a *App) CashierCreatePayment(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	req.PayerName = strings.TrimSpace(req.PayerName)
 	if req.StudentUserID == "" || req.AmountIDR <= 0 {
 		common.WriteError(w, http.StatusBadRequest, "student_user_id and positive amount_idr are required")
 		return
@@ -63,14 +146,14 @@ func (a *App) CashierCreatePayment(w http.ResponseWriter, r *http.Request) {
 
 	// Idempotency check
 	var existingID, existingStatus string
+	var existingDeposit int64
 	err := a.DB.QueryRowContext(r.Context(),
-		`SELECT id, status FROM cashier_payments WHERE school_id = $1 AND idempotency_key = $2`,
-		schoolID, req.IdempotencyKey).Scan(&existingID, &existingStatus)
+		`SELECT id, status, deposit_idr FROM cashier_payments WHERE school_id = $1 AND idempotency_key = $2`,
+		schoolID, req.IdempotencyKey).Scan(&existingID, &existingStatus, &existingDeposit)
 	if err == nil && existingID != "" {
-		// Return existing receipt
 		var rNo string
 		_ = a.DB.QueryRowContext(r.Context(),
-			`SELECT receipt_no FROM receipts WHERE school_id = $1 AND source_id = $2`,
+			`SELECT receipt_no FROM receipts WHERE school_id = $1 AND source = 'cashier' AND source_id = $2`,
 			schoolID, existingID).Scan(&rNo)
 		common.WriteSuccess(w, CashierPaymentResponse{
 			ID:            existingID,
@@ -78,59 +161,29 @@ func (a *App) CashierCreatePayment(w http.ResponseWriter, r *http.Request) {
 			StudentUserID: req.StudentUserID,
 			Method:        req.Method,
 			AmountIDR:     req.AmountIDR,
+			DepositIDR:    existingDeposit,
 			Status:        existingStatus,
 		}, nil)
 		return
 	}
 
-	// Read school allocation setting
 	autoAlloc := "earliest_due"
 	_ = a.DB.QueryRowContext(r.Context(),
 		`SELECT auto_allocation FROM gateway_settings WHERE school_id = $1`, schoolID).Scan(&autoAlloc)
 
-	// Fetch open bills for the student
-	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT id, net_idr, due_at FROM student_bills
-		 WHERE school_id = $1 AND student_user_id = $2 AND status IN ('unpaid','partial')
-		 ORDER BY due_at ASC NULLS LAST`, schoolID, req.StudentUserID)
+	tx, err := a.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	defer rows.Close()
+	defer tx.Rollback()
 
-	var openBills []model.OpenBill
-	for rows.Next() {
-		var bID string
-		var netIDR int64
-		var dueAt sql.NullTime
-		if err := rows.Scan(&bID, &netIDR, &dueAt); err == nil {
-			var verifiedSum, reversalSum int64
-			_ = a.DB.QueryRowContext(r.Context(),
-				`SELECT COALESCE(SUM(a.amount_idr), 0)
-				 FROM bill_payment_allocations a
-				 JOIN bill_payments p ON p.id = a.payment_id
-				 WHERE p.student_bill_id = $1 AND p.status = 'verified'`, bID).Scan(&verifiedSum)
-			_ = a.DB.QueryRowContext(r.Context(),
-				`SELECT COALESCE(SUM(r.amount_idr), 0)
-				 FROM bill_payment_reversals r
-				 JOIN bill_payments p ON p.id = r.payment_id
-				 WHERE p.student_bill_id = $1`, bID).Scan(&reversalSum)
-			out, _ := model.Outstanding(netIDR, []int64{verifiedSum}, []int64{reversalSum})
-			if out > 0 {
-				var d time.Time
-				if dueAt.Valid {
-					d = dueAt.Time
-				} else {
-					d = time.Now()
-				}
-				openBills = append(openBills, model.OpenBill{
-					BillID:         bID,
-					OutstandingIDR: out,
-					DueDate:        d,
-				})
-			}
-		}
+	// Open bills of THIS student in THIS school only: a manual allocation to
+	// any other bill is rejected by ValidateManualAllocations.
+	openBills, err := loadOpenBillsTx(r.Context(), tx, schoolID, req.StudentUserID)
+	if err != nil {
+		writeErr(w, err)
+		return
 	}
 
 	allocations := req.BillAllocations
@@ -141,77 +194,82 @@ func (a *App) CashierCreatePayment(w http.ResponseWriter, r *http.Request) {
 			common.WriteError(w, http.StatusBadRequest, allocErr.Error())
 			return
 		}
-		allocations = allocs
+		allocations, depositIDR = allocs, dep
+	} else {
+		dep, vErr := model.ValidateManualAllocations(req.AmountIDR, allocations, openBills)
+		if vErr != nil {
+			common.WriteError(w, http.StatusUnprocessableEntity, vErr.Error())
+			return
+		}
 		depositIDR = dep
 	}
-
-	tx, err := a.DB.BeginTx(r.Context(), nil)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	defer tx.Rollback()
 
 	now := time.Now()
 	var cashierPaymentID string
 	err = tx.QueryRowContext(r.Context(),
 		`INSERT INTO cashier_payments (
-			school_id, student_user_id, method, amount_idr, received_by, note, status, idempotency_key, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, 'recorded', $7, $8, $8)
+			school_id, student_user_id, method, amount_idr, deposit_idr, received_by, note, status, idempotency_key, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'recorded', $8, $9, $9)
 		RETURNING id`,
-		schoolID, req.StudentUserID, req.Method, req.AmountIDR, claims.UserID, req.Note, req.IdempotencyKey, now).Scan(&cashierPaymentID)
+		schoolID, req.StudentUserID, req.Method, req.AmountIDR, depositIDR, claims.UserID, req.Note, req.IdempotencyKey, now).Scan(&cashierPaymentID)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 
-	// Create verified bill_payments records for each allocation
+	// One verified ledger payment per allocated bill. source='cashier' keeps
+	// it out of the transfer-proof totals (the cashier_payments row is the
+	// receipt of record) and the KASIR- reference is what corrections reverse.
 	for _, al := range allocations {
 		var pID string
 		allocIdem := fmt.Sprintf("cashier-alloc:%s:%s", cashierPaymentID, al.BillID)
 		err = tx.QueryRowContext(r.Context(),
 			`INSERT INTO bill_payments (
 				school_id, student_bill_id, amount_idr, transfer_at, bank_name, account_name,
-				reference, object_key, file_name, mime, size_bytes, sha256, status,
+				reference, status, source, source_id,
 				idempotency_key, uploader_user_id, verified_at, created_at, updated_at
 			) VALUES (
-				$1, $2, $3, $4, 'Kasir', 'Tunai/Transfer Kasir',
-				'KASIR-' || $5, 'cashier/' || $5, 'cashier_receipt', 'application/json',
-				100, 'cashier_sha', 'verified', $6, $7, $4, $4, $4
+				$1, $2, $3, $4, 'Kasir', $5,
+				'KASIR-' || $6, 'verified', 'cashier', $6::uuid,
+				$7, $8, $4, $4, $4
 			) RETURNING id`,
-			schoolID, al.BillID, al.AmountIDR, now, cashierPaymentID, allocIdem, claims.UserID).Scan(&pID)
+			schoolID, al.BillID, al.AmountIDR, now, cashierAccountLabel(req.Method), cashierPaymentID, allocIdem, claims.UserID).Scan(&pID)
 		if err != nil {
 			writeErr(w, err)
 			return
 		}
-
-		_, err = tx.ExecContext(r.Context(),
+		if _, err = tx.ExecContext(r.Context(),
 			`INSERT INTO bill_payment_allocations (school_id, payment_id, amount_idr, created_at)
 			 VALUES ($1, $2, $3, $4)`,
-			schoolID, pID, al.AmountIDR, now)
-		if err != nil {
+			schoolID, pID, al.AmountIDR, now); err != nil {
 			writeErr(w, err)
 			return
 		}
-
-		recomputeBillStatusInTx(r.Context(), tx, al.BillID)
+		if err = recomputeBillStatusQ(r.Context(), tx, schoolID, al.BillID); err != nil {
+			writeErr(w, err)
+			return
+		}
 	}
 
 	// Excess to deposit (BR-FIN-04)
 	if depositIDR > 0 {
 		var newBal int64
-		err = tx.QueryRowContext(r.Context(),
+		if err = tx.QueryRowContext(r.Context(),
 			`INSERT INTO student_deposits (school_id, student_user_id, balance_idr, updated_at)
 			 VALUES ($1, $2, $3, now())
 			 ON CONFLICT (school_id, student_user_id)
 			 DO UPDATE SET balance_idr = student_deposits.balance_idr + $3, updated_at = now()
 			 RETURNING balance_idr`,
-			schoolID, req.StudentUserID, depositIDR).Scan(&newBal)
-		if err == nil {
-			_, _ = tx.ExecContext(r.Context(),
-				`INSERT INTO deposit_movements (school_id, student_user_id, amount_idr, balance_after_idr, reason, ref_id)
-				 VALUES ($1, $2, $3, $4, 'Kelebihan pembayaran kasir', $5)`,
-				schoolID, req.StudentUserID, depositIDR, newBal, cashierPaymentID)
+			schoolID, req.StudentUserID, depositIDR).Scan(&newBal); err != nil {
+			writeErr(w, err)
+			return
+		}
+		if _, err = tx.ExecContext(r.Context(),
+			`INSERT INTO deposit_movements (school_id, student_user_id, amount_idr, balance_after_idr, reason, ref)
+			 VALUES ($1, $2, $3, $4, 'Kelebihan pembayaran kasir', $5)`,
+			schoolID, req.StudentUserID, depositIDR, newBal, "cashier:"+cashierPaymentID); err != nil {
+			writeErr(w, err)
+			return
 		}
 	}
 
@@ -220,23 +278,46 @@ func (a *App) CashierCreatePayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate unique receipt (AC-29-03)
-	receiptNo, _ := a.atomicNextReceiptNo(r.Context(), schoolID, now.Year())
-	docKey, _ := a.generateReceiptDocument(r.Context(), schoolID, ReceiptDetails{
-		ReceiptNo:   receiptNo,
-		SchoolName:  "Sekolah Teratai Putih",
-		StudentName: "Siswa",
-		PayerName:   "Orang Tua / Wali",
-		AmountIDR:  req.AmountIDR,
-		MethodLabel: req.Method,
-		Date:        now,
-		Items:       []string{fmt.Sprintf("Kasir %s", req.Method)},
-	})
+	a.audit(r.Context(), schoolID, "cashier_payment", cashierPaymentID, "cashier_recorded", "cashier", claims.UserID, "", req.Note,
+		nil, map[string]any{
+			"student_user_id": req.StudentUserID, "method": req.Method, "amount_idr": req.AmountIDR,
+			"deposit_idr": depositIDR, "allocations": allocations,
+		})
 
-	_, _ = a.DB.ExecContext(r.Context(),
-		`INSERT INTO receipts (school_id, receipt_no, source, source_id, object_key, sent_at, created_at)
-		 VALUES ($1, $2, 'cashier', $3, $4, now(), now())`,
-		schoolID, receiptNo, cashierPaymentID, docKey)
+	// Generate unique receipt (AC-29-03)
+	receiptNo, err := a.atomicNextReceiptNo(r.Context(), schoolID, now.Year())
+	if err != nil {
+		common.CaptureError(err)
+	}
+	schoolName, studentName, payerName := a.receiptNames(r.Context(), schoolID, req.StudentUserID, req.PayerName)
+	items := make([]string, 0, len(allocations)+1)
+	for _, al := range allocations {
+		items = append(items, fmt.Sprintf("Tagihan %s: %s", al.BillID, formatRupiah(al.AmountIDR)))
+	}
+	if depositIDR > 0 {
+		items = append(items, "Deposit kelebihan bayar: "+formatRupiah(depositIDR))
+	}
+	if receiptNo != "" {
+		docKey, docErr := a.generateReceiptDocument(r.Context(), schoolID, ReceiptDetails{
+			ReceiptNo:   receiptNo,
+			SchoolName:  schoolName,
+			StudentName: studentName,
+			PayerName:   payerName,
+			AmountIDR:   req.AmountIDR,
+			MethodLabel: cashierAccountLabel(req.Method),
+			Date:        now.In(a.loc()),
+			Items:       items,
+		})
+		if docErr != nil {
+			common.CaptureError(docErr)
+		}
+		if _, err := a.DB.ExecContext(r.Context(),
+			`INSERT INTO receipts (school_id, receipt_no, source, source_id, object_key, sent_at, created_at)
+			 VALUES ($1, $2, 'cashier', $3, NULLIF($4, ''), now(), now())`,
+			schoolID, receiptNo, cashierPaymentID, docKey); err != nil {
+			common.CaptureError(err)
+		}
+	}
 
 	common.WriteSuccess(w, CashierPaymentResponse{
 		ID:            cashierPaymentID,
@@ -249,6 +330,13 @@ func (a *App) CashierCreatePayment(w http.ResponseWriter, r *http.Request) {
 		Status:        "recorded",
 		CreatedAt:     now,
 	}, nil)
+}
+
+func cashierAccountLabel(method string) string {
+	if method == "transfer" {
+		return "Transfer (kasir)"
+	}
+	return "Tunai (kasir)"
 }
 
 // CashierListPayments returns paginated cashier payments.

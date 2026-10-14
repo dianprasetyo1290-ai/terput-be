@@ -70,10 +70,10 @@ func (a *App) ListRefunds(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var (
 			id, billID, student, reason, st, reqBy, decBy, note, procBy, schemeName string
-			amount, net                                                            int64
-			decAt, procAt                                                          sql.NullTime
-			createdAt                                                              time.Time
-			year, month                                                            int
+			amount, net                                                             int64
+			decAt, procAt                                                           sql.NullTime
+			createdAt                                                               time.Time
+			year, month                                                             int
 		)
 		if err := rows.Scan(&id, &billID, &student, &amount, &reason, &st, &reqBy, &decBy, &decAt, &note,
 			&procBy, &procAt, &createdAt, &year, &month, &net, &schemeName); err != nil {
