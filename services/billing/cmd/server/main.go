@@ -84,6 +84,7 @@ func main() {
 	// P3A: billing/wallet/canteen auto-journals, then the accounting sender.
 	gwRunner.Register("billing_journals", app.JobBillingJournals)
 	gwRunner.Register("journal_outbox", app.JobJournalOutbox)
+	gwRunner.Register("bill_reminders", app.JobBillReminders)
 	gwRunner.Start()
 	defer gwRunner.Stop()
 
@@ -159,6 +160,11 @@ func main() {
 
 		ad.Post("/admin/bills/generate", app.GenerateBills)
 		ad.Post("/admin/bills/reminders", app.AdminBillReminders)
+		ad.Get("/admin/bills/reminder-log", app.ListReminderLog)
+		ad.Get("/admin/billing/reminder-settings", app.GetReminderSettings)
+		ad.Put("/admin/billing/reminder-settings", app.PutReminderSettings)
+		ad.Get("/admin/billing/followups", app.ListFollowups)
+		ad.Post("/admin/billing/followups", app.CreateFollowup)
 		ad.Get("/admin/bills", app.ListBills)
 		ad.Get("/admin/arrears", app.ListArrears)
 

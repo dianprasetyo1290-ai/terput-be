@@ -36,16 +36,24 @@ type CashierPaymentResponse struct {
 	CreatedAt     time.Time                    `json:"created_at"`
 }
 
-// loadOpenBillsTx returns a student's non-void bills that still have an
-// outstanding balance, locked FOR UPDATE so two concurrent payments cannot
-// both settle the same balance. Outstanding comes from the ledger, never
-// from the stored status.
-func loadOpenBillsTx(ctx context.Context, tx *sql.Tx, schoolID, studentID string) ([]model.OpenBill, error) {
-	rows, err := tx.QueryContext(ctx,
-		`SELECT id::text, due_at FROM student_bills
-		  WHERE school_id = $1 AND student_user_id = $2 AND status <> 'void'
-		  ORDER BY due_at ASC NULLS LAST, id
-		  FOR UPDATE`, schoolID, studentID)
+// ledgerQueryer is satisfied by *sql.DB and *sql.Tx.
+type ledgerQueryer interface {
+	queryer
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+// loadOpenBills returns a student's non-void bills that still have an
+// outstanding balance. With lock (inside a tx) the bills are locked FOR
+// UPDATE so two concurrent payments cannot both settle the same balance.
+// Outstanding comes from the ledger, never from the stored status.
+func loadOpenBills(ctx context.Context, q ledgerQueryer, schoolID, studentID string, lock bool) ([]model.OpenBill, error) {
+	query := `SELECT id::text, due_at FROM student_bills
+		  WHERE school_id = $1 AND student_user_id::text = $2 AND status <> 'void'
+		  ORDER BY due_at ASC NULLS LAST, id`
+	if lock {
+		query += ` FOR UPDATE`
+	}
+	rows, err := q.QueryContext(ctx, query, schoolID, studentID)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +76,7 @@ func loadOpenBillsTx(ctx context.Context, tx *sql.Tx, schoolID, studentID string
 	}
 	var open []model.OpenBill
 	for _, b := range ids {
-		_, _, _, out, err := billTotalsQ(ctx, tx, schoolID, b.id)
+		_, _, _, out, err := billTotalsQ(ctx, q, schoolID, b.id)
 		if err != nil {
 			return nil, err
 		}
@@ -180,7 +188,7 @@ func (a *App) CashierCreatePayment(w http.ResponseWriter, r *http.Request) {
 
 	// Open bills of THIS student in THIS school only: a manual allocation to
 	// any other bill is rejected by ValidateManualAllocations.
-	openBills, err := loadOpenBillsTx(r.Context(), tx, schoolID, req.StudentUserID)
+	openBills, err := loadOpenBills(r.Context(), tx, schoolID, req.StudentUserID, true)
 	if err != nil {
 		writeErr(w, err)
 		return

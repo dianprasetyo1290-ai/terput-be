@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"skci/billing/internal/client"
-	"skci/billing/internal/common"
 	"skci/billing/internal/model"
 )
 
@@ -376,7 +375,8 @@ func (a *App) sendBillNotifications(ctx context.Context, schoolID string, bills 
 	for _, b := range bills {
 		guardians, err := a.IdentitySvc.StudentGuardianIDs(ctx, schoolID, b.StudentID)
 		if err != nil {
-			common.CaptureError(err)
+			a.raiseNotificationFailure(ctx, schoolID, "bill-issued:"+b.BillID, "data wali tidak dapat dibaca: "+err.Error(),
+				map[string]any{"type": "bill_issued", "bill_id": b.BillID, "student_user_id": b.StudentID})
 			continue
 		}
 
@@ -405,7 +405,8 @@ func (a *App) sendBillNotifications(ctx context.Context, schoolID string, bills 
 				Channels: []string{"in_app"},
 			})
 			if err != nil {
-				common.CaptureError(err)
+				a.raiseNotificationFailure(ctx, schoolID, idemKey, err.Error(),
+					map[string]any{"type": "bill_issued", "bill_id": b.BillID, "student_user_id": b.StudentID, "guardian_user_id": g})
 			}
 		}
 	}
