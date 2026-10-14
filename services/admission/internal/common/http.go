@@ -137,6 +137,13 @@ func DashboardAuth(secret string) func(http.Handler) http.Handler {
 	return roleAuth(secret, viewerRoles)
 }
 
+// ParentAuth admits a SEKOCI identity session whose active role is orang_tua
+// (BUG-108: parents already logged in to SEKOCI enter the PPDB portal without
+// a second OTP).
+func ParentAuth(secret string) func(http.Handler) http.Handler {
+	return roleAuth(secret, map[string]bool{"orang_tua": true})
+}
+
 // CanViewDashboard reports whether the request may read the PPDB dashboard.
 func CanViewDashboard(r *http.Request) bool {
 	c := Admin(r)

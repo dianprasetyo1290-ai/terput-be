@@ -58,6 +58,8 @@ type discoveryWave struct {
 	TestAt            *time.Time `json:"test_at,omitempty"`
 	AnnouncementAt    *time.Time `json:"announcement_at,omitempty"`
 	Status            string     `json:"status"`
+	EducationLevel    string     `json:"education_level,omitempty"`
+	EntryGrade        *int       `json:"entry_grade,omitempty"`
 }
 
 type discoveryTrack struct {
@@ -90,6 +92,7 @@ type discoveryResponse struct {
 	Waves                []discoveryWave        `json:"waves"`
 	Tracks               []discoveryTrack       `json:"tracks"`
 	DocumentRequirements []discoveryRequirement `json:"document_requirements"`
+	FormFields           []formFieldRow         `json:"form_fields"`
 }
 
 // Discovery is GET /public/discovery: the public registration catalogue.
@@ -144,7 +147,8 @@ func (a *App) Discovery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	waveRows, err := a.DB.QueryContext(r.Context(),
-		`SELECT w.id,w.period_id,w.name,w.registration_start,w.registration_end,w.test_start,w.announcement_at
+		`SELECT w.id,w.period_id,w.name,w.registration_start,w.registration_end,w.test_start,w.announcement_at,
+		        COALESCE(w.education_level,''),w.entry_grade
 		 FROM admission_waves w
 		 JOIN admission_periods p ON p.id=w.period_id
 		 WHERE w.school_id=$1 AND w.deleted_at IS NULL AND p.status='open'
@@ -157,7 +161,9 @@ func (a *App) Discovery(w http.ResponseWriter, r *http.Request) {
 	for waveRows.Next() {
 		var wave discoveryWave
 		var testAt, announcement sql.NullTime
-		if err := waveRows.Scan(&wave.ID, &wave.PeriodID, &wave.Name, &wave.RegistrationOpen, &wave.RegistrationClose, &testAt, &announcement); err != nil {
+		var grade sql.NullInt64
+		if err := waveRows.Scan(&wave.ID, &wave.PeriodID, &wave.Name, &wave.RegistrationOpen, &wave.RegistrationClose, &testAt, &announcement,
+			&wave.EducationLevel, &grade); err != nil {
 			common.WriteError(w, http.StatusInternalServerError, "failed to load discovery")
 			return
 		}
@@ -166,6 +172,10 @@ func (a *App) Discovery(w http.ResponseWriter, r *http.Request) {
 		}
 		if announcement.Valid {
 			wave.AnnouncementAt = &announcement.Time
+		}
+		if grade.Valid {
+			g := int(grade.Int64)
+			wave.EntryGrade = &g
 		}
 		wave.Status = waveStatus(time.Now(), wave.RegistrationOpen, wave.RegistrationClose)
 		out.Waves = append(out.Waves, wave)
@@ -223,6 +233,12 @@ func (a *App) Discovery(w http.ResponseWriter, r *http.Request) {
 		req.AcceptedTypes = parseTextArray(mimes)
 		req.MaxSizeMB = int(maxBytes / (1 << 20))
 		out.DocumentRequirements = append(out.DocumentRequirements, req)
+	}
+
+	out.FormFields, err = formFields(r.Context(), a.DB, schoolID, "", "open", true)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to load discovery")
+		return
 	}
 
 	common.WriteJSON(w, http.StatusOK, out, nil)

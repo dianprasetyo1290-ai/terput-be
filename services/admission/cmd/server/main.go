@@ -79,6 +79,7 @@ func main() {
 	r.Post("/public/otp/request", app.RequestOTP)
 	r.Post("/public/otp/verify", app.VerifyOTP)
 	r.Post("/public/otp/resend", app.ResendOTP)
+	r.With(common.ParentAuth(cfg.JWTSecret)).Post("/public/session/sekoci", app.SekociSession)
 
 	// ---------------------------------------------------------------------
 	// Guardian portal (admission guardian session token).
@@ -154,6 +155,10 @@ func main() {
 		ad.Post("/admin/config/tracks", app.CreateTrack)
 		ad.Put("/admin/config/tracks/{id}", app.UpdateTrack)
 
+		ad.Get("/admin/config/form-fields", app.ListFormFields)
+		ad.Post("/admin/config/form-fields", app.CreateFormField)
+		ad.Put("/admin/config/form-fields/{id}", app.UpdateFormField)
+
 		ad.Get("/admin/config/document-requirements", app.ListRequirements)
 		ad.Post("/admin/config/document-requirements", app.CreateRequirement)
 		ad.Put("/admin/config/document-requirements/{id}", app.UpdateRequirement)
@@ -178,6 +183,9 @@ func main() {
 		ad.Get("/admin/payments", app.PaymentQueue)
 		ad.Post("/admin/payments/{id}/review", app.ReviewPayment)
 		ad.Post("/admin/payments/{id}/reversal", app.ReversePayment)
+		ad.Get("/admin/refunds", app.ListRefunds)
+		ad.Post("/admin/refunds/{id}/process", app.ProcessRefund)
+		ad.Post("/admin/refunds/{id}/waive", app.WaiveRefund)
 
 		ad.Get("/admin/selection/formulas", app.ListFormulas)
 		ad.Post("/admin/selection/formulas", app.CreateFormula)

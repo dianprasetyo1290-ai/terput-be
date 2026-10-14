@@ -62,17 +62,18 @@ func (a *App) primaryContact(r *http.Request, schoolID, guardianID string) (stri
 // applicantInput mirrors the frontend ApplicantInput plus the read-only fields
 // the SPA round-trips on edit (id).
 type applicantInput struct {
-	ID                   string `json:"id"`
-	FullName             string `json:"full_name"`
-	Nickname             string `json:"nickname"`
-	NISN                 string `json:"nisn"`
-	NIK                  string `json:"nik"`
-	BirthPlace           string `json:"birth_place"`
-	BirthDate            string `json:"birth_date"`
-	Gender               string `json:"gender"`
-	PreviousSchool       string `json:"previous_school"`
-	Address              string `json:"address"`
-	GuardianRelationship string `json:"guardian_relationship"`
+	ID                   string         `json:"id"`
+	FullName             string         `json:"full_name"`
+	Nickname             string         `json:"nickname"`
+	NISN                 string         `json:"nisn"`
+	NIK                  string         `json:"nik"`
+	BirthPlace           string         `json:"birth_place"`
+	BirthDate            string         `json:"birth_date"`
+	Gender               string         `json:"gender"`
+	PreviousSchool       string         `json:"previous_school"`
+	Address              string         `json:"address"`
+	GuardianRelationship string         `json:"guardian_relationship"`
+	CustomFields         map[string]any `json:"custom_fields"`
 }
 
 // validate normalises and checks the applicant biodata (BUG-103/121).
@@ -109,7 +110,7 @@ func (a *App) listApplicants(r *http.Request, schoolID, guardianID string) ([]ma
 		        COALESCE(to_char(ap.birth_date,'YYYY-MM-DD'),''),COALESCE(ap.birth_place,''),COALESCE(ap.gender,''),
 		        COALESCE(ap.previous_school,''),COALESCE(ap.address,''),COALESCE(ap.guardian_relationship,''),
 		        ap.updated_at,
-		        COALESCE(app.status,''),COALESCE(app.registration_number,''),COALESCE(app.id::text,'')
+		        COALESCE(app.status,''),COALESCE(app.registration_number,''),COALESCE(app.id::text,''),ap.custom_fields
 		 FROM applicants ap
 		 LEFT JOIN LATERAL (
 		     SELECT a.id,a.status,a.registration_number FROM applications a
@@ -143,10 +144,17 @@ func scanApplicantRow(row rowScanner) (map[string]any, error) {
 		previousSchool, address, relationship                            string
 		updatedAt                                                        time.Time
 		status, registrationNumber, applicationID                        string
+		custom                                                           []byte
 	)
 	if err := row.Scan(&id, &fullName, &nickname, &nisn, &nik, &birthDate, &birthPlace, &gender,
-		&previousSchool, &address, &relationship, &updatedAt, &status, &registrationNumber, &applicationID); err != nil {
+		&previousSchool, &address, &relationship, &updatedAt, &status, &registrationNumber, &applicationID, &custom); err != nil {
 		return nil, err
+	}
+	customFields := map[string]any{}
+	if len(custom) > 0 {
+		if err := json.Unmarshal(custom, &customFields); err != nil {
+			return nil, err
+		}
 	}
 	m := map[string]any{
 		"id":                    id,
@@ -161,6 +169,7 @@ func scanApplicantRow(row rowScanner) (map[string]any, error) {
 		"address":               address,
 		"guardian_relationship": relationship,
 		"updated_at":            updatedAt,
+		"custom_fields":         customFields,
 	}
 	if status != "" {
 		m["status"] = status
@@ -178,7 +187,7 @@ func (a *App) GetApplicant(w http.ResponseWriter, r *http.Request) {
 		        COALESCE(to_char(ap.birth_date,'YYYY-MM-DD'),''),COALESCE(ap.birth_place,''),COALESCE(ap.gender,''),
 		        COALESCE(ap.previous_school,''),COALESCE(ap.address,''),COALESCE(ap.guardian_relationship,''),
 		        ap.updated_at,
-		        COALESCE(app.status,''),COALESCE(app.registration_number,''),COALESCE(app.id::text,'')
+		        COALESCE(app.status,''),COALESCE(app.registration_number,''),COALESCE(app.id::text,''),ap.custom_fields
 		 FROM applicants ap
 		 LEFT JOIN LATERAL (
 		     SELECT a.id,a.status,a.registration_number FROM applications a
@@ -210,13 +219,18 @@ func (a *App) CreateApplicant(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	custom, err := normalizeApplicantCustom(r.Context(), a.DB, c.SchoolID, in.CustomFields)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 	var id string
-	err := a.DB.QueryRowContext(r.Context(),
-		`INSERT INTO applicants(school_id,guardian_id,full_name,nickname,nisn,nik,birth_date,birth_place,gender,previous_school,address,guardian_relationship,source)
-		 VALUES($1,$2,$3,NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,'')::date,NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),NULLIF($11,''),NULLIF($12,''),'guardian')
+	err = a.DB.QueryRowContext(r.Context(),
+		`INSERT INTO applicants(school_id,guardian_id,full_name,nickname,nisn,nik,birth_date,birth_place,gender,previous_school,address,guardian_relationship,source,custom_fields)
+		 VALUES($1,$2,$3,NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,'')::date,NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),NULLIF($11,''),NULLIF($12,''),'guardian',$13)
 		 RETURNING id`,
 		c.SchoolID, c.GuardianID, in.FullName, in.Nickname, in.NISN, in.NIK, in.BirthDate, in.BirthPlace,
-		in.Gender, in.PreviousSchool, in.Address, in.GuardianRelationship).Scan(&id)
+		in.Gender, in.PreviousSchool, in.Address, in.GuardianRelationship, jsonRaw(custom)).Scan(&id)
 	if err != nil {
 		common.WriteError(w, http.StatusBadRequest, "failed to create applicant")
 		return
@@ -236,13 +250,19 @@ func (a *App) UpdateApplicant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := param(r, "id")
+	custom, err := normalizeApplicantCustom(r.Context(), a.DB, c.SchoolID, in.CustomFields)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 	res, err := a.DB.ExecContext(r.Context(),
 		`UPDATE applicants SET full_name=$1,nickname=NULLIF($2,''),nisn=NULLIF($3,''),nik=NULLIF($4,''),
 		        birth_date=NULLIF($5,'')::date,birth_place=NULLIF($6,''),gender=NULLIF($7,''),
-		        previous_school=NULLIF($8,''),address=NULLIF($9,''),guardian_relationship=NULLIF($10,''),updated_at=now()
+		        previous_school=NULLIF($8,''),address=NULLIF($9,''),guardian_relationship=NULLIF($10,''),
+		        custom_fields=$14,updated_at=now()
 		 WHERE id=$11 AND guardian_id=$12 AND school_id=$13 AND deleted_at IS NULL`,
 		in.FullName, in.Nickname, in.NISN, in.NIK, in.BirthDate, in.BirthPlace, in.Gender,
-		in.PreviousSchool, in.Address, in.GuardianRelationship, id, c.GuardianID, c.SchoolID)
+		in.PreviousSchool, in.Address, in.GuardianRelationship, id, c.GuardianID, c.SchoolID, jsonRaw(custom))
 	if err != nil {
 		common.WriteError(w, http.StatusBadRequest, "failed to update applicant")
 		return
@@ -472,7 +492,7 @@ func (a *App) applicationDetail(r *http.Request, schoolID, applicationID, scope,
 	                 a.submitted_at,a.answers,
 	                 ap.full_name,COALESCE(ap.nickname,''),COALESCE(ap.nisn,''),COALESCE(ap.nik,''),
 	                 COALESCE(to_char(ap.birth_date,'YYYY-MM-DD'),''),COALESCE(ap.birth_place,''),COALESCE(ap.gender,''),
-	                 COALESCE(ap.previous_school,''),COALESCE(ap.address,''),COALESCE(ap.guardian_relationship,'')
+	                 COALESCE(ap.previous_school,''),COALESCE(ap.address,''),COALESCE(ap.guardian_relationship,''),ap.custom_fields
 	          FROM applications a JOIN applicants ap ON ap.id=a.applicant_id
 	          WHERE a.id=$1 AND a.school_id=$2`
 	args := []any{applicationID, schoolID}
@@ -488,13 +508,35 @@ func (a *App) applicationDetail(r *http.Request, schoolID, applicationID, scope,
 		answers                                                                []byte
 		fullName, nickname, nisn, nik, birthDate, birthPlace                   string
 		gender, previousSchool, address, relationship                          string
+		custom                                                                 []byte
 	)
 	err := a.DB.QueryRowContext(r.Context(), query, args...).Scan(
 		&id, &applicantID, &periodID, &waveID, &trackID, &registrationNumber, &status, &version,
 		&submittedAt, &answers,
-		&fullName, &nickname, &nisn, &nik, &birthDate, &birthPlace, &gender, &previousSchool, &address, &relationship)
+		&fullName, &nickname, &nisn, &nik, &birthDate, &birthPlace, &gender, &previousSchool, &address, &relationship, &custom)
 	if err != nil {
 		return nil, err
+	}
+	customFields := map[string]any{}
+	if len(custom) > 0 {
+		if err := json.Unmarshal(custom, &customFields); err != nil {
+			return nil, err
+		}
+	}
+	// form_answers pairs each configured custom field of the period with the
+	// applicant's answer so staff and guardians see labelled values.
+	fields, err := formFields(r.Context(), a.DB, schoolID, periodID, "", false)
+	if err != nil {
+		return nil, err
+	}
+	formAnswers := []map[string]any{}
+	for _, f := range fields {
+		if f.Builtin {
+			continue
+		}
+		if v, ok := customFields[f.Key]; ok {
+			formAnswers = append(formAnswers, map[string]any{"key": f.Key, "label": f.Label, "type": f.Type, "value": v})
+		}
 	}
 
 	applicant := map[string]any{
@@ -509,6 +551,7 @@ func (a *App) applicationDetail(r *http.Request, schoolID, applicationID, scope,
 		"previous_school":       previousSchool,
 		"address":               address,
 		"guardian_relationship": relationship,
+		"custom_fields":         customFields,
 	}
 	if scope != "guardian" {
 		// Staff never see the full NIK (BUG-121).
@@ -518,6 +561,7 @@ func (a *App) applicationDetail(r *http.Request, schoolID, applicationID, scope,
 		"id":                  id,
 		"applicant_id":        applicantID,
 		"applicant":           applicant,
+		"form_answers":        formAnswers,
 		"period_id":           periodID,
 		"wave_id":             waveID,
 		"track_id":            trackID,

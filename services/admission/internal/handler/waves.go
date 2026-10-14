@@ -19,22 +19,49 @@ import (
 // (BUG-156).
 
 type waveInput struct {
-	PeriodID                   string `json:"period_id"`
-	Name                       string `json:"name"`
-	RegistrationOpenAt         string `json:"registration_open_at"`
-	RegistrationCloseAt        string `json:"registration_close_at"`
-	PaymentEndAt               string `json:"payment_end_at"`
-	TestAt                     string `json:"test_at"`
-	AnnouncementAt             string `json:"announcement_at"`
-	ReregistrationEndAt        string `json:"reregistration_end_at"`
-	WaitlistReregistrationDays *int   `json:"waitlist_reregistration_days"`
-	ConfirmImpact              bool   `json:"confirm_impact"`
+	PeriodID                   string  `json:"period_id"`
+	Name                       string  `json:"name"`
+	RegistrationOpenAt         string  `json:"registration_open_at"`
+	RegistrationCloseAt        string  `json:"registration_close_at"`
+	PaymentEndAt               string  `json:"payment_end_at"`
+	TestAt                     string  `json:"test_at"`
+	AnnouncementAt             string  `json:"announcement_at"`
+	ReregistrationEndAt        string  `json:"reregistration_end_at"`
+	WaitlistReregistrationDays *int    `json:"waitlist_reregistration_days"`
+	ConfirmImpact              bool    `json:"confirm_impact"`
+	EducationLevel             *string `json:"education_level"`
+	EntryGrade                 *int    `json:"entry_grade"`
+}
+
+// level resolves the jenjang/entry grade (BUG-093) on top of the stored
+// values; an explicit empty jenjang clears both.
+func (in waveInput) level(curLevel string, curGrade *int) (string, *int, error) {
+	level, grade := curLevel, curGrade
+	if in.EducationLevel != nil {
+		level = strings.ToUpper(strings.TrimSpace(*in.EducationLevel))
+		grade = in.EntryGrade
+	} else if in.EntryGrade != nil {
+		grade = in.EntryGrade
+	}
+	if err := model.ValidateWaveLevel(level, grade); err != nil {
+		return "", nil, &httpError{http.StatusUnprocessableEntity, err.Error()}
+	}
+	return level, grade, nil
+}
+
+func intPtrOrNil(p *int) any {
+	if p == nil {
+		return nil
+	}
+	return *p
 }
 
 type waveRow struct {
 	ID, PeriodID, Name    string
 	Schedule              model.WaveSchedule
 	WaitlistDays          int
+	Level                 string
+	Grade                 *int
 	ApplicationCount      int
 	ActiveApplicationsCnt int
 }
@@ -112,9 +139,11 @@ func (a *App) ListWaves(w http.ResponseWriter, r *http.Request) {
 	schoolID := common.EffectiveSchoolID(r)
 	rows, err := a.DB.QueryContext(r.Context(),
 		`SELECT w.id,w.period_id,w.name,w.registration_start,w.registration_end,w.payment_end,w.test_start,w.announcement_at,
-		        w.reregistration_end,w.waitlist_reregistration_days,(SELECT count(*) FROM applications a WHERE a.wave_id=w.id)
+		        w.reregistration_end,w.waitlist_reregistration_days,(SELECT count(*) FROM applications a WHERE a.wave_id=w.id),
+		        COALESCE(w.education_level,''),w.entry_grade
 		 FROM admission_waves w WHERE w.school_id=$1 AND w.deleted_at IS NULL AND ($2='' OR w.period_id::text=$2)
-		 ORDER BY w.registration_start`, schoolID, r.URL.Query().Get("period_id"))
+		   AND ($3='' OR w.education_level=$3)
+		 ORDER BY w.registration_start`, schoolID, r.URL.Query().Get("period_id"), r.URL.Query().Get("education_level"))
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -125,9 +154,10 @@ func (a *App) ListWaves(w http.ResponseWriter, r *http.Request) {
 		var (
 			wr                                   waveRow
 			payEnd, testAt, announceAt, reregEnd sql.NullTime
+			grade                                sql.NullInt64
 		)
 		if err := rows.Scan(&wr.ID, &wr.PeriodID, &wr.Name, &wr.Schedule.RegistrationStart, &wr.Schedule.RegistrationEnd,
-			&payEnd, &testAt, &announceAt, &reregEnd, &wr.WaitlistDays, &wr.ApplicationCount); err != nil {
+			&payEnd, &testAt, &announceAt, &reregEnd, &wr.WaitlistDays, &wr.ApplicationCount, &wr.Level, &grade); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -138,6 +168,10 @@ func (a *App) ListWaves(w http.ResponseWriter, r *http.Request) {
 			"waitlist_reregistration_days": wr.WaitlistDays,
 			"application_count":            wr.ApplicationCount,
 			"status":                       waveStatus(time.Now(), wr.Schedule.RegistrationStart, wr.Schedule.RegistrationEnd),
+			"education_level":              wr.Level,
+		}
+		if grade.Valid {
+			item["entry_grade"] = grade.Int64
 		}
 		timeIfSet(item, "payment_end_at", nullTimePtr(payEnd))
 		timeIfSet(item, "test_at", nullTimePtr(testAt))
@@ -150,9 +184,9 @@ func (a *App) ListWaves(w http.ResponseWriter, r *http.Request) {
 
 // waveWarnings lists other waves of the period whose registration window
 // overlaps [start,end].
-func waveWarnings(ctx context.Context, q queryer, schoolID, periodID, excludeID string, start, end time.Time) ([]string, error) {
+func waveWarnings(ctx context.Context, q queryer, schoolID, periodID, excludeID, level string, start, end time.Time) ([]string, error) {
 	rows, err := q.QueryContext(ctx,
-		`SELECT name,registration_start,registration_end FROM admission_waves
+		`SELECT name,registration_start,registration_end,COALESCE(education_level,'') FROM admission_waves
 		 WHERE school_id=$1 AND period_id=$2 AND deleted_at IS NULL AND id::text<>$3`, schoolID, periodID, excludeID)
 	if err != nil {
 		return nil, err
@@ -161,13 +195,13 @@ func waveWarnings(ctx context.Context, q queryer, schoolID, periodID, excludeID 
 	var warnings []string
 	for rows.Next() {
 		var (
-			name   string
-			bs, be time.Time
+			name, otherLevel string
+			bs, be           time.Time
 		)
-		if err := rows.Scan(&name, &bs, &be); err != nil {
+		if err := rows.Scan(&name, &bs, &be, &otherLevel); err != nil {
 			return nil, err
 		}
-		if model.RangesOverlap(start, end, bs, be) {
+		if model.SameLevel(level, otherLevel) && model.RangesOverlap(start, end, bs, be) {
 			warnings = append(warnings, "Periode pendaftaran tumpang tindih dengan "+name+" ("+
 				formatDateWIB(bs)+" s.d. "+formatDateWIB(be)+").")
 		}
@@ -228,7 +262,12 @@ func (a *App) CreateWave(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusUnprocessableEntity, "batas hari daftar ulang cadangan tidak boleh negatif")
 		return
 	}
-	warnings, err := waveWarnings(r.Context(), a.DB, schoolID, periodID, "", sched.RegistrationStart, sched.RegistrationEnd)
+	level, grade, err := in.level("", nil)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	warnings, err := waveWarnings(r.Context(), a.DB, schoolID, periodID, "", level, sched.RegistrationStart, sched.RegistrationEnd)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -236,10 +275,11 @@ func (a *App) CreateWave(w http.ResponseWriter, r *http.Request) {
 	var id string
 	err = a.DB.QueryRowContext(r.Context(),
 		`INSERT INTO admission_waves(school_id,period_id,name,registration_start,registration_end,payment_end,test_start,
-		                             announcement_at,reregistration_end,waitlist_reregistration_days)
-		 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+		                             announcement_at,reregistration_end,waitlist_reregistration_days,education_level,entry_grade)
+		 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11,''),$12) RETURNING id`,
 		schoolID, periodID, in.Name, sched.RegistrationStart, sched.RegistrationEnd, ptrTime(sched.PaymentEnd),
-		ptrTime(sched.TestAt), ptrTime(sched.AnnouncementAt), ptrTime(sched.ReregistrationEnd), waitlistDays).Scan(&id)
+		ptrTime(sched.TestAt), ptrTime(sched.AnnouncementAt), ptrTime(sched.ReregistrationEnd), waitlistDays,
+		level, intPtrOrNil(grade)).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
 			common.WriteError(w, http.StatusConflict, "nama gelombang sudah dipakai pada periode ini")
@@ -266,15 +306,16 @@ func (a *App) UpdateWave(w http.ResponseWriter, r *http.Request) {
 	var (
 		cur                                  waveRow
 		payEnd, testAt, announceAt, reregEnd sql.NullTime
+		curGrade                             sql.NullInt64
 	)
 	err := a.DB.QueryRowContext(r.Context(),
 		`SELECT w.id,w.period_id,w.name,w.registration_start,w.registration_end,w.payment_end,w.test_start,w.announcement_at,
-		        w.reregistration_end,w.waitlist_reregistration_days,
+		        w.reregistration_end,w.waitlist_reregistration_days,COALESCE(w.education_level,''),w.entry_grade,
 		        (SELECT count(*) FROM applications a WHERE a.wave_id=w.id),
 		        (SELECT count(*) FROM applications a WHERE a.wave_id=w.id AND a.status NOT IN('withdrawn','rejected','dropped','converted'))
 		 FROM admission_waves w WHERE w.id=$1 AND w.school_id=$2 AND w.deleted_at IS NULL`, param(r, "id"), schoolID).
 		Scan(&cur.ID, &cur.PeriodID, &cur.Name, &cur.Schedule.RegistrationStart, &cur.Schedule.RegistrationEnd,
-			&payEnd, &testAt, &announceAt, &reregEnd, &cur.WaitlistDays, &cur.ApplicationCount, &cur.ActiveApplicationsCnt)
+			&payEnd, &testAt, &announceAt, &reregEnd, &cur.WaitlistDays, &cur.Level, &curGrade, &cur.ApplicationCount, &cur.ActiveApplicationsCnt)
 	if err == sql.ErrNoRows {
 		common.WriteError(w, http.StatusNotFound, "gelombang tidak ditemukan")
 		return
@@ -285,6 +326,15 @@ func (a *App) UpdateWave(w http.ResponseWriter, r *http.Request) {
 	}
 	cur.Schedule.PaymentEnd, cur.Schedule.TestAt = nullTimePtr(payEnd), nullTimePtr(testAt)
 	cur.Schedule.AnnouncementAt, cur.Schedule.ReregistrationEnd = nullTimePtr(announceAt), nullTimePtr(reregEnd)
+	if curGrade.Valid {
+		g := int(curGrade.Int64)
+		cur.Grade = &g
+	}
+	level, grade, err := in.level(cur.Level, cur.Grade)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 	sched, err := in.schedule(cur.Schedule)
 	if err != nil {
 		writeErr(w, err)
@@ -317,7 +367,7 @@ func (a *App) UpdateWave(w http.ResponseWriter, r *http.Request) {
 		}, nil)
 		return
 	}
-	warnings, err := waveWarnings(r.Context(), a.DB, schoolID, cur.PeriodID, cur.ID, sched.RegistrationStart, sched.RegistrationEnd)
+	warnings, err := waveWarnings(r.Context(), a.DB, schoolID, cur.PeriodID, cur.ID, level, sched.RegistrationStart, sched.RegistrationEnd)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -328,10 +378,11 @@ func (a *App) UpdateWave(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err = a.DB.ExecContext(r.Context(),
 		`UPDATE admission_waves SET name=$3,registration_start=$4,registration_end=$5,payment_end=$6,test_start=$7,
-		        announcement_at=$8,reregistration_end=$9,waitlist_reregistration_days=$10,updated_at=now()
+		        announcement_at=$8,reregistration_end=$9,waitlist_reregistration_days=$10,
+		        education_level=NULLIF($11,''),entry_grade=$12,updated_at=now()
 		 WHERE id=$1 AND school_id=$2`,
 		cur.ID, schoolID, name, sched.RegistrationStart, sched.RegistrationEnd, ptrTime(sched.PaymentEnd), ptrTime(sched.TestAt),
-		ptrTime(sched.AnnouncementAt), ptrTime(sched.ReregistrationEnd), waitlistDays); err != nil {
+		ptrTime(sched.AnnouncementAt), ptrTime(sched.ReregistrationEnd), waitlistDays, level, intPtrOrNil(grade)); err != nil {
 		if isUniqueViolation(err) {
 			common.WriteError(w, http.StatusConflict, "nama gelombang sudah dipakai pada periode ini")
 			return
@@ -341,7 +392,8 @@ func (a *App) UpdateWave(w http.ResponseWriter, r *http.Request) {
 	}
 	a.audit(r.Context(), schoolID, "wave", cur.ID, "wave_updated", "admin", claims.UserID, claims.Name, "",
 		map[string]any{"schedule": cur.Schedule, "waitlist_reregistration_days": cur.WaitlistDays},
-		map[string]any{"schedule": sched, "waitlist_reregistration_days": waitlistDays, "affected_applications": cur.ActiveApplicationsCnt})
+		map[string]any{"schedule": sched, "waitlist_reregistration_days": waitlistDays, "education_level": level,
+			"entry_grade": intPtrOrNil(grade), "affected_applications": cur.ActiveApplicationsCnt})
 	common.WriteJSON(w, http.StatusOK, map[string]any{"id": cur.ID, "warnings": nonNil(warnings),
 		"affected_applications": cur.ActiveApplicationsCnt}, nil)
 }

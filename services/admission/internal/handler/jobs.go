@@ -88,8 +88,8 @@ func (a *App) dropUnpaidForms(ctx context.Context, now time.Time) error {
 
 // dropUnpaidReregistration applies BR-PPDB-08: an offered applicant who has
 // not paid the re-registration minimum by the deadline is dropped and the
-// seat is released for the waitlist. Amounts already paid are recorded as
-// refund_due_idr for the finance team.
+// seat is released for the waitlist. Amounts already paid become a refund
+// record under the period refund policy (see refunds.go).
 func (a *App) dropUnpaidReregistration(ctx context.Context, now time.Time) error {
 	list, err := a.overdue(ctx, now, stageReregistration,
 		[]string{string(model.StatusOffered), string(model.StatusReregistration)})
@@ -158,17 +158,20 @@ func (a *App) dropIfOverdue(ctx context.Context, schoolID, applicationID, stage 
 		`UPDATE charges SET cancelled_at=$2,cancel_reason=$3 WHERE id=$1`, charge.ID, now, reason); err != nil {
 		return err
 	}
-	if paid > 0 {
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE applications SET refund_due_idr=COALESCE(refund_due_idr,0)+$2 WHERE id=$1`, applicationID, paid); err != nil {
-			return err
-		}
+	refundable, err := recordRefundDue(ctx, tx, schoolID, applicationID, stage, paid)
+	if err != nil {
+		return err
 	}
 	body := "Pendaftaran dinyatakan gugur: " + reason + "."
 	if stage == stageReregistration {
 		body += " Kursi telah dilepas untuk pendaftar cadangan."
-		if paid > 0 {
-			body += " Dana yang sudah dibayar (" + formatIDR(paid) + ") akan diproses sesuai kebijakan pengembalian sekolah."
+	}
+	if paid > 0 {
+		if refundable > 0 {
+			body += " Sesuai kebijakan sekolah, dana sebesar " + formatIDR(refundable) + " dari " + formatIDR(paid) +
+				" yang sudah dibayar akan dikembalikan oleh panitia."
+		} else {
+			body += " Sesuai kebijakan sekolah, dana yang sudah dibayar (" + formatIDR(paid) + ") tidak dapat dikembalikan."
 		}
 	}
 	if err := a.notify(ctx, tx, schoolID, applicationID, "dropped", "Pendaftaran gugur", body, "dropped:"+applicationID, nil); err != nil {

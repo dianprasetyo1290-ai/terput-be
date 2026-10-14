@@ -401,6 +401,10 @@ type periodInput struct {
 	DiscountMode        string `json:"discount_mode"`
 	MaxDiscountIDR      *int64 `json:"max_discount_idr"`
 	MaxPaymentGraceDays *int   `json:"max_payment_grace_days"`
+	// Refund policy for dropped applicants (BUG-040): share of the paid
+	// amount returned, in basis points, minus a flat administration fee.
+	RefundPolicyBP    *int   `json:"refund_policy_bp"`
+	RefundAdminFeeIDR *int64 `json:"refund_admin_fee_idr"`
 }
 
 func (in periodInput) validatePolicy() error {
@@ -412,6 +416,12 @@ func (in periodInput) validatePolicy() error {
 	}
 	if in.MaxPaymentGraceDays != nil && *in.MaxPaymentGraceDays < 0 {
 		return &httpError{http.StatusUnprocessableEntity, "batas hari bayar formulir tidak boleh negatif"}
+	}
+	if in.RefundPolicyBP != nil && (*in.RefundPolicyBP < 0 || *in.RefundPolicyBP > 10000) {
+		return &httpError{http.StatusUnprocessableEntity, "persentase pengembalian dana harus 0-100%"}
+	}
+	if in.RefundAdminFeeIDR != nil && *in.RefundAdminFeeIDR < 0 {
+		return &httpError{http.StatusUnprocessableEntity, "biaya administrasi pengembalian tidak boleh negatif"}
 	}
 	return nil
 }
@@ -433,7 +443,7 @@ func (a *App) ListPeriods(w http.ResponseWriter, r *http.Request) {
 		`SELECT id,name,academic_year,status,timezone,
 		        COALESCE(registration_open_at,(SELECT min(registration_start) FROM admission_waves w WHERE w.period_id=admission_periods.id AND w.deleted_at IS NULL)),
 		        COALESCE(registration_close_at,(SELECT max(registration_end) FROM admission_waves w WHERE w.period_id=admission_periods.id AND w.deleted_at IS NULL)),
-		        discount_mode,max_discount_idr,max_payment_grace_days
+		        discount_mode,max_discount_idr,max_payment_grace_days,refund_policy_bp,refund_admin_fee_idr
 		 FROM admission_periods WHERE school_id=$1 AND deleted_at IS NULL ORDER BY created_at DESC`, schoolID)
 	if err != nil {
 		writeErr(w, err)
@@ -447,14 +457,17 @@ func (a *App) ListPeriods(w http.ResponseWriter, r *http.Request) {
 			open, close                      sql.NullTime
 			discountMode                     string
 			maxDiscount                      int64
-			graceDays                        int
+			graceDays, refundBP              int
+			refundFee                        int64
 		)
-		if err := rows.Scan(&id, &name, &year, &status, &timezone, &open, &close, &discountMode, &maxDiscount, &graceDays); err != nil {
+		if err := rows.Scan(&id, &name, &year, &status, &timezone, &open, &close, &discountMode, &maxDiscount, &graceDays,
+			&refundBP, &refundFee); err != nil {
 			writeErr(w, err)
 			return
 		}
 		item := map[string]any{"id": id, "name": name, "academic_year": year, "status": status, "timezone": timezone,
-			"discount_mode": discountMode, "max_discount_idr": maxDiscount, "max_payment_grace_days": graceDays}
+			"discount_mode": discountMode, "max_discount_idr": maxDiscount, "max_payment_grace_days": graceDays,
+			"refund_policy_bp": refundBP, "refund_admin_fee_idr": refundFee}
 		if open.Valid {
 			item["registration_open_at"] = open.Time
 		}
@@ -477,7 +490,7 @@ func (a *App) CreatePeriod(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Name == "" || in.AcademicYear == "" {
-		common.WriteError(w, http.StatusBadRequest, "name and academic_year are required")
+		common.WriteError(w, http.StatusUnprocessableEntity, "nama periode dan tahun ajaran wajib diisi")
 		return
 	}
 	if in.Timezone == "" {
@@ -489,28 +502,33 @@ func (a *App) CreatePeriod(w http.ResponseWriter, r *http.Request) {
 	}
 	open, err := parseTime(in.RegistrationOpenAt)
 	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "registration_open_at is invalid")
+		common.WriteError(w, http.StatusUnprocessableEntity, "tanggal buka pendaftaran tidak valid")
 		return
 	}
 	closeAt, err := parseTime(in.RegistrationCloseAt)
 	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "registration_close_at is invalid")
+		common.WriteError(w, http.StatusUnprocessableEntity, "tanggal tutup pendaftaran tidak valid")
 		return
 	}
 	var id string
 	err = a.DB.QueryRowContext(r.Context(),
 		`INSERT INTO admission_periods(school_id,name,academic_year,timezone,status,registration_open_at,registration_close_at,
-		                               discount_mode,max_discount_idr,max_payment_grace_days)
-		 VALUES($1,$2,$3,$4,$5,$6,$7,COALESCE(NULLIF($8,''),'stack'),COALESCE($9::bigint,0),COALESCE($10::int,30)) RETURNING id`,
+		                               discount_mode,max_discount_idr,max_payment_grace_days,refund_policy_bp,refund_admin_fee_idr)
+		 VALUES($1,$2,$3,$4,$5,$6,$7,COALESCE(NULLIF($8,''),'stack'),COALESCE($9::bigint,0),COALESCE($10::int,30),
+		        COALESCE($11::int,10000),COALESCE($12::bigint,0)) RETURNING id`,
 		schoolID, in.Name, in.AcademicYear, in.Timezone, normalizePeriodStatus(in.Status), nullTime(open), nullTime(closeAt),
-		in.DiscountMode, intOrNil(in.MaxDiscountIDR), intOrNil(in.MaxPaymentGraceDays)).Scan(&id)
+		in.DiscountMode, intOrNil(in.MaxDiscountIDR), intOrNil(in.MaxPaymentGraceDays),
+		intOrNil(in.RefundPolicyBP), intOrNil(in.RefundAdminFeeIDR)).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
-			common.WriteError(w, http.StatusConflict, "a period with this name and academic year already exists")
+			common.WriteError(w, http.StatusConflict, "periode dengan nama dan tahun ajaran ini sudah ada")
 			return
 		}
 		writeErr(w, err)
 		return
+	}
+	if c := common.Admin(r); c != nil {
+		a.audit(r.Context(), schoolID, "period", id, "period_created", "admin", c.UserID, c.Name, "", nil, in)
 	}
 	common.WriteJSON(w, http.StatusCreated, map[string]any{"id": id}, nil)
 }
@@ -527,12 +545,12 @@ func (a *App) UpdatePeriod(w http.ResponseWriter, r *http.Request) {
 	}
 	open, err := parseTime(in.RegistrationOpenAt)
 	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "registration_open_at is invalid")
+		common.WriteError(w, http.StatusUnprocessableEntity, "tanggal buka pendaftaran tidak valid")
 		return
 	}
 	closeAt, err := parseTime(in.RegistrationCloseAt)
 	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "registration_close_at is invalid")
+		common.WriteError(w, http.StatusUnprocessableEntity, "tanggal tutup pendaftaran tidak valid")
 		return
 	}
 	if err := in.validatePolicy(); err != nil {
@@ -544,17 +562,23 @@ func (a *App) UpdatePeriod(w http.ResponseWriter, r *http.Request) {
 		        status=$3,timezone=COALESCE(NULLIF($4,''),timezone),
 		        registration_open_at=COALESCE($5,registration_open_at),registration_close_at=COALESCE($6,registration_close_at),
 		        discount_mode=COALESCE(NULLIF($9,''),discount_mode),max_discount_idr=COALESCE($10::bigint,max_discount_idr),
-		        max_payment_grace_days=COALESCE($11::int,max_payment_grace_days),updated_at=now()
+		        max_payment_grace_days=COALESCE($11::int,max_payment_grace_days),
+		        refund_policy_bp=COALESCE($12::int,refund_policy_bp),refund_admin_fee_idr=COALESCE($13::bigint,refund_admin_fee_idr),
+		        updated_at=now()
 		 WHERE id=$7 AND school_id=$8`,
 		in.Name, in.AcademicYear, normalizePeriodStatus(in.Status), in.Timezone, nullTime(open), nullTime(closeAt), param(r, "id"), schoolID,
-		in.DiscountMode, intOrNil(in.MaxDiscountIDR), intOrNil(in.MaxPaymentGraceDays))
+		in.DiscountMode, intOrNil(in.MaxDiscountIDR), intOrNil(in.MaxPaymentGraceDays),
+		intOrNil(in.RefundPolicyBP), intOrNil(in.RefundAdminFeeIDR))
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "period not found")
+		common.WriteError(w, http.StatusNotFound, "periode tidak ditemukan")
 		return
+	}
+	if c := common.Admin(r); c != nil {
+		a.audit(r.Context(), schoolID, "period", param(r, "id"), "period_updated", "admin", c.UserID, c.Name, "", nil, in)
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]any{"id": param(r, "id")}, nil)
 }

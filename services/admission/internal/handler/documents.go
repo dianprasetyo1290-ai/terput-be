@@ -477,9 +477,10 @@ func (a *App) DocumentQueue(w http.ResponseWriter, r *http.Request) {
 		        WHEN 'rejected' THEN 'rejected'
 		        ELSE 'pending' END)
 		   AND ($3='' OR ap.full_name ILIKE '%'||$3||'%' OR a.registration_number ILIKE '%'||$3||'%')
+		   AND ($6='' OR d.application_id::text=$6)
 		 ORDER BY d.created_at DESC
 		 LIMIT $4 OFFSET $5`,
-		schoolID, status, search, perPage, common.Offset(page, perPage))
+		schoolID, status, search, perPage, common.Offset(page, perPage), r.URL.Query().Get("application_id"))
 	if err != nil {
 		writeErr(w, err)
 		return

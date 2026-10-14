@@ -149,6 +149,13 @@ func (a *App) submit(ctx context.Context, schoolID, guardianID, applicationID st
 	if len(missing) > 0 {
 		return &httpError{http.StatusUnprocessableEntity, "dokumen wajib belum lengkap: " + strings.Join(missing, ", ")}
 	}
+	fieldsMissing, err := missingFormFields(ctx, tx, schoolID, applicationID)
+	if err != nil {
+		return err
+	}
+	if len(fieldsMissing) > 0 {
+		return &httpError{http.StatusUnprocessableEntity, "data formulir wajib belum diisi: " + strings.Join(fieldsMissing, ", ")}
+	}
 
 	// Seat lock: serialise submissions per track, then count every
 	// application that still competes for a seat.
