@@ -35,8 +35,18 @@ func (a *App) Router() http.Handler {
 	r := chi.NewRouter()
 
 	trHandler := training.NewHandler(training.NewStore(a.DB), a.Client)
-	atsHandler := ats.NewHandler(ats.NewStore(a.DB), a.Client)
-	payHandler := payroll.NewHandler(payroll.NewStore(a.DB), a.Client)
+	atsStore := ats.NewStore(a.DB)
+	if a.Crypto != nil {
+		atsStore.EncryptAmount = a.Crypto.EncryptAmount
+		atsStore.DecryptAmount = a.Crypto.DecryptAmount
+	}
+	atsHandler := ats.NewHandler(atsStore, a.Client)
+	payStore := payroll.NewStore(a.DB)
+	if a.Crypto != nil {
+		payStore.DecryptAmount = a.Crypto.DecryptAmount
+	}
+	payStore.Accounting = payroll.NewAccountingClient(a.Config.AccountingURL, a.Config.InternalKey)
+	payHandler := payroll.NewHandler(payStore, a.Client)
 
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -102,6 +112,7 @@ func (a *App) Router() http.Handler {
 
 		// ESS Payslips
 		api.Get("/me/payslips", payHandler.MyPayslips)
+		api.Get("/me/payslips/{id}/pdf", payHandler.MyPayslipPDF)
 
 		// ESS reads that previously went through HR-admin endpoints and so
 		// 403'd for pegawai/guru (QA BUG-WEB role sweep).
@@ -293,11 +304,20 @@ func (a *App) Router() http.Handler {
 			pay.Get("/payroll/runs/{id}", payHandler.GetRun)
 			pay.Get("/payroll/runs/{id}/lines", payHandler.ListLines)
 			pay.Get("/payroll/journals", payHandler.ListJournals)
+			pay.Post("/payroll/journals/{id}/retry", payHandler.RetryJournal)
+			pay.Get("/payroll/statutory", payHandler.GetStatutory)
+			pay.Get("/payroll/reports/pph21", payHandler.ReportPPh21)
+			pay.Get("/payroll/reports/pph21/annual", payHandler.ReportPPh21Annual)
+			pay.Get("/payroll/reports/bpjs", payHandler.ReportBPJS)
+			pay.Get("/payroll/reports/reconciliation", payHandler.ReportReconciliation)
+			pay.Get("/payroll/remittances", payHandler.ListRemittances)
+			pay.Post("/payroll/remittances", payHandler.CreateRemittance)
 		})
 		api.Group(func(pay chi.Router) {
 			pay.Use(common.RequireAnyRole(rolesPayrollOperate...))
 			pay.Post("/payroll/components", payHandler.CreateComponent)
 			pay.Post("/payroll/components/{id}/submit-approval", payHandler.SubmitComponentApproval)
+			pay.Put("/payroll/components/{id}/accounts", payHandler.SetComponentAccounts)
 			pay.Get("/payroll/inputs", payHandler.ListInputs)
 			pay.Post("/payroll/inputs", payHandler.SaveInput)
 			pay.Post("/payroll/inputs/pull-attendance", payHandler.PullAttendance)
@@ -306,6 +326,7 @@ func (a *App) Router() http.Handler {
 			pay.Post("/payroll/runs/{id}/submit", payHandler.SubmitRun)
 			pay.Post("/payroll/runs/{id}/finalize", payHandler.FinalizeRun)
 			pay.Get("/payroll/payslips", payHandler.ListPayslips)
+			pay.Get("/payroll/payslips/{id}/pdf", payHandler.PayslipPDF)
 		})
 	})
 
