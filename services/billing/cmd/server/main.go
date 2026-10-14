@@ -132,6 +132,7 @@ func main() {
 
 		pr.Get("/parent/children/{studentUserId}/bills", app.ListChildBills)
 		pr.Get("/parent/children/{studentUserId}/bills/{billId}", app.GetChildBill)
+		pr.Get("/parent/children/{studentUserId}/bills/{billId}/invoice.pdf", app.ChildBillInvoice)
 		pr.Post("/parent/children/{studentUserId}/bills/{billId}/payments", app.SubmitPayment)
 		pr.Get("/parent/children/{studentUserId}/payments", app.ListChildPayments)
 		pr.Get("/parent/children/{studentUserId}/payments/{paymentId}/proof", app.GetChildPaymentProof)
@@ -144,6 +145,7 @@ func main() {
 		st.Use(common.JWTMiddleware(cfg.JWTSecret))
 
 		st.Get("/me/bills", app.ListMyBills)
+		st.Get("/me/bills/{id}/invoice.pdf", app.MyBillInvoice)
 		st.Get("/me/bills/visibility", app.GetMyBillVisibility)
 		st.Get("/me/payments", app.ListMyPayments)
 	})
@@ -171,6 +173,7 @@ func main() {
 		ad.Get("/admin/bills", app.ListBills)
 		ad.Post("/admin/bills/generate-annual", app.GenerateAnnualBills)
 		ad.Get("/admin/bills/{id}", app.GetBill)
+		ad.Get("/admin/bills/{id}/invoice.pdf", app.AdminBillInvoice)
 		ad.Put("/admin/bills/{id}/installments", app.SetBillInstallments)
 		ad.Post("/admin/bills/{id}/change-requests", app.CreateBillChangeRequest)
 		ad.Get("/admin/bill-change-requests", app.ListBillChangeRequests)
@@ -194,6 +197,8 @@ func main() {
 		ad.Get("/admin/finance/summary", app.FinanceSummary)
 		ad.Get("/admin/finance/aging", app.FinanceAging)
 		ad.Get("/admin/finance/receipts", app.FinanceReceipts)
+		ad.Get("/admin/finance/unallocated", app.UnallocatedFunds)
+		ad.Get("/admin/students/{id}/ledger", app.StudentLedger)
 		// T6 Payment Gateway & Cashier routes
 		ad.Get("/admin/payment-methods", app.AdminListPaymentMethods)
 		ad.Post("/admin/payment-methods", app.AdminCreatePaymentMethod)
