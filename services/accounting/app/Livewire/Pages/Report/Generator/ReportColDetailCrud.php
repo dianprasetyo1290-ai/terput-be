@@ -38,8 +38,11 @@ class ReportColDetailCrud extends Component
         'period_key' => 'nullable|integer',
     ];
 
-    public function mount($id)
+    public function mount($id = null)
     {
+        if (! ctype_digit((string) $id) || ! ReportColHead::whereKey($id)->exists()) {
+            abort(new \Illuminate\Http\RedirectResponse(route('generator.col')));
+        }
         $this->colHeadId = $id;
         $this->colHead = ReportColHead::findOrFail($id);
     }

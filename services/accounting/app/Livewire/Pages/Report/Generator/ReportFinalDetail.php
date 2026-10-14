@@ -32,6 +32,9 @@ class ReportFinalDetail extends Component
 
     public function mount($id = '')
     {
+        if (! ctype_digit((string) $id) || ! ReportFinal::whereKey($id)->exists()) {
+            abort(new \Illuminate\Http\RedirectResponse(route('generator.viewfinal_design')));
+        }
         $this->finalId = $id;
         $this->final = ReportFinal::find($id);
         $this->rowhead = ReportRowHead::get();

@@ -52,8 +52,8 @@ class Period extends Component
         if ($value) {
             $this->Curent['period_code'] = 1;
             $this->Last['period_code'] = 2;
-            $this->Last['period_name'] = $value - 1;
-            $this->LastTwo['period_name'] = $value - 2;
+            $this->Last['period_name'] = (int) $value - 1;
+            $this->LastTwo['period_name'] = (int) $value - 2;
             $this->LastTwo['period_code'] = 3;
         } else {
             $this->Last['period_code'] = null;
@@ -740,17 +740,17 @@ class Period extends Component
             $this->Curent = $cek1->toArray();
             $this->Last = $cek2->toArray();
             $this->LastTwo = [
-                'period_name' => $cek1->period_name - 2,
+                'period_name' => (int) $cek1->period_name - 2,
             ];
         } else if ($cek1) {
             $this->id1Nya = $cek1->id;
             $this->id2Nya = optional($cek2)->id;
             $this->Curent = $cek1->toArray();
             $this->Last = [
-                'period_name' => $cek1->period_name - 1,
+                'period_name' => (int) $cek1->period_name - 1,
             ];
             $this->LastTwo = [
-                'period_name' => $cek1->period_name - 2,
+                'period_name' => (int) $cek1->period_name - 2,
             ];
         } else {
             $this->Curent = [

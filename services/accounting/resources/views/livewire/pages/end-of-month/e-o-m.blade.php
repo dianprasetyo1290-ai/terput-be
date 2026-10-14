@@ -123,8 +123,8 @@
                     Jurnal draft diajukan &amp; disetujui di menu Jurnal Transaksi / Approval Jurnal;
                     posting otomatis gagal dilihat di menu <a href="{{ url('autoposting') }}">Posting Otomatis</a>.
                 </div>
+                @can('createend_of_month')
                 <form wire:submit="confirmTransfer">
-                    @can('createend_of_month')
                         <div class="text-center">
                             @if ($allPassed)
                                 <div wire:loading.remove wire:target='transfer'>
@@ -143,8 +143,8 @@
                                 </button>
                             @endif
                         </div>
-                    @endcan
                 </form>
+                @endcan
             @endif
         </div>
     </div>

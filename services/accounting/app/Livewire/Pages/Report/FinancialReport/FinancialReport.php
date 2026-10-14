@@ -123,8 +123,8 @@ class FinancialReport extends Component
     {
         return view('livewire.pages.report.financial-report.financial-report', [
             'data' => ReportFinal::where('name', 'ilike', '%'.$this->search.'%')
-            ->orderBy('id', $this->order)
-            ->paginate(10),
+            ->orderBy('id', strtoupper((string) $this->order) === 'DESC' ? 'desc' : 'asc')
+            ->paginate(in_array((int) $this->limit, [10, 30, 50, 100], true) ? (int) $this->limit : 10),
         ]);
     }
 }

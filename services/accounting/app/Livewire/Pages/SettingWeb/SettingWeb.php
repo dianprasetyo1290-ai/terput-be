@@ -62,7 +62,7 @@ class SettingWeb extends Component
 
     public function save()
     {
-        $settingModel = ModelSettingWeb::find(1);
+        $settingModel = ModelSettingWeb::find(1) ?? new ModelSettingWeb(['id' => 1]);
 
         $this->setting['logo'] = $this->handleImageUpload(
             $this->setting['logo'],
@@ -79,7 +79,9 @@ class SettingWeb extends Component
             $settingModel->favicon
         );
 
-        $settingModel->update($this->setting);
+        $settingModel->fill($this->setting);
+        $settingModel->id = 1;
+        $settingModel->save();
         $this->setting = $settingModel->toArray();
 
         $this->js(<<<'JS'
@@ -102,7 +104,10 @@ class SettingWeb extends Component
 
     public function mount()
     {
-        $this->setting = ModelSettingWeb::find(1)->toArray();
+        $row = ModelSettingWeb::find(1);
+        if ($row) {
+            $this->setting = $row->toArray();
+        }
     }
     private function handleImageUpload($newImageFile, $oldImagePathFromDb): ?string
     {
