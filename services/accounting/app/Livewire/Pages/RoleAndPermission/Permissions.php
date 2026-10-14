@@ -21,9 +21,45 @@ class Permissions extends Component
     {
         // Opened bare (no ?foo= from the Peran list) → back to Peran, not a 500.
         if (!$this->foo) {
-            return $this->redirectRoute('role');
+            $this->redirectRoute('role');
+
+            return;
         }
-        $this->role_id = Crypt::decrypt($this->foo);
+        try {
+            $this->role_id = Crypt::decrypt($this->foo);
+        } catch (\Illuminate\Contracts\Encryption\DecryptException) {
+            $this->redirectRoute('role');
+        }
+    }
+
+    /**
+     * Who may change which permission (QA round 2): approving a period
+     * reopen (editperiod_reopen) is the checker half of maker-checker, so
+     * only a SuperAdmin may grant or revoke it; the SuperAdmin role itself
+     * (all permissions via Gate::before) is only edited by a SuperAdmin.
+     */
+    private function editableRole(): ?Role
+    {
+        $this->authorize('editpermission');
+        $role = Role::find($this->role_id);
+        if (! $role) {
+            return null;
+        }
+        if ($role->name === 'SuperAdmin' && ! auth()->user()?->hasRole('SuperAdmin')) {
+            throw new \Illuminate\Auth\Access\AuthorizationException('Hanya SuperAdmin yang dapat mengubah izin peran SuperAdmin.');
+        }
+
+        return $role;
+    }
+
+    private static function superAdminOnly(string $permission): bool
+    {
+        return $permission === \App\Support\AccountingRoles::REOPEN_APPROVE;
+    }
+
+    private function mayToggle(string $permission): bool
+    {
+        return ! self::superAdminOnly($permission) || (bool) auth()->user()?->hasRole('SuperAdmin');
     }
     public function limits($limit)
     {
@@ -36,9 +72,17 @@ class Permissions extends Component
     }
     public function abc($module, $action)
     {
-        $role = Role::find($this->role_id);
+        $role = $this->editableRole();
+        if (! $role) {
+            return;
+        }
         $permission_user = $role->getPermissionNames()->toArray();
         $permission = $action . '' . $module;
+        if (! $this->mayToggle($permission)) {
+            $this->js("Swal.fire({icon: 'error', title: 'Izin ini hanya dapat diubah oleh SuperAdmin.'})");
+
+            return;
+        }
 
         // $role->syncPermissions($permission);
         if (in_array($permission, $permission_user)) {
@@ -71,17 +115,29 @@ class Permissions extends Component
     }
     public function simpan()
     {
-        $role = Role::find($this->role_id);
-        $role->syncPermissions([]);
+        $role = $this->editableRole();
+        if (! $role) {
+            return;
+        }
+        $wanted = [];
         foreach ($this->permission_user as $module => $actions) {
-            foreach ($actions as $action => $value) {
-
+            foreach ((array) $actions as $action => $value) {
                 if ($value) {
-                    $permission =  $action . $module;
-                    $role->givePermissionTo($permission);
+                    $wanted[] = $action . $module;
                 }
             }
         }
+        // A SuperAdmin-only permission keeps its current state unless a
+        // SuperAdmin is saving.
+        $current = $role->getPermissionNames()->all();
+        $wanted = array_values(array_filter($wanted, fn ($p) => $this->mayToggle($p)));
+        foreach ($current as $p) {
+            if (! $this->mayToggle($p)) {
+                $wanted[] = $p;
+            }
+        }
+        $wanted = array_values(array_unique(array_intersect($wanted, Permission::pluck('name')->all())));
+        $role->syncPermissions($wanted);
         $this->js(
             <<<'js'
             Swal.fire({
@@ -94,6 +150,19 @@ class Permissions extends Component
             js
         );
     }
+    /** Close the add-permission modal (Cancel / x buttons). */
+    public function cancel()
+    {
+        $this->name = null;
+        $this->resetValidation();
+        $this->js("$('#add-modal').modal('hide'); $('#add-department').modal('hide');");
+    }
+
+    public function closeViewModalFileKet()
+    {
+        $this->cancel();
+    }
+
     public function save()
     {
         $this->validate([
@@ -134,8 +203,11 @@ class Permissions extends Component
             $m->where('name', 'ilike', '%' . $this->search . '%');
         }
         $modules = $m->orderBy('id', $this->order)->get();
-        $role = Role::find($this->role_id); // Assuming role with ID 1 exists
-        $permissions = $role->getPermissionNames()->toArray(); // Convert permissions to array
+        $role = Role::find($this->role_id);
+        if (! $role) {
+            return '<div></div>'; // redirecting back to Peran
+        }
+        $permissions = $role->getPermissionNames()->toArray();
         return view('livewire.pages.role-and-permission.permissions', ['modules' => $modules, 'permissions' => $permissions, 'role' => $role]);
     }
 }
