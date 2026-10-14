@@ -66,6 +66,7 @@ type Store interface {
 	// Central Audit Trail
 	InsertAudit(ctx context.Context, event model.AuditEvent) error
 	ListAudit(ctx context.Context, f AuditFilter, page, perPage int) ([]model.AuditEvent, int, error)
+	AuditFacets(ctx context.Context, schoolID *string, since time.Time) (model.AuditFacets, error)
 
 	// Parent Service Requests (Menu 81)
 	ListServiceRequestCategories(ctx context.Context, schoolID string, activeOnly bool) ([]model.ServiceRequestCategory, error)

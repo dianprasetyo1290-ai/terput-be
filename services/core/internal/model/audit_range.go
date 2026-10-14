@@ -47,3 +47,13 @@ func ParseAuditRange(from, to string, loc *time.Location) (*time.Time, *time.Tim
 	}
 	return f, t, nil
 }
+
+// AuditFacetDays bounds the GET /audit/facets scan.
+const AuditFacetDays = 365
+
+// AuditFacets are the filter choices offered by the audit trail view.
+type AuditFacets struct {
+	Services []string `json:"services"`
+	Modules  []string `json:"modules"`
+	Actions  []string `json:"actions"`
+}

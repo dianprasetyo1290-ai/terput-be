@@ -45,22 +45,22 @@ func (h *Handler) auditorHasAccess(w http.ResponseWriter, r *http.Request, claim
 	return true
 }
 
-func (h *Handler) ListAudit(w http.ResponseWriter, r *http.Request) {
+// auditScope authorises an audit-trail read (superadmin, or an auditor inside
+// an active access window) and resolves the tenant: nil = every tenant
+// (platform superadmin without a school).
+func (h *Handler) auditScope(w http.ResponseWriter, r *http.Request) (*common.Claims, *string, bool) {
 	claims := common.FromCtx(r)
 	if claims == nil {
 		common.WriteError(w, http.StatusUnauthorized, "tidak terautentikasi")
-		return
+		return nil, nil, false
 	}
-
 	if claims.ActiveRole != common.RoleSuperadmin && claims.ActiveRole != common.RoleAuditor {
 		common.WriteError(w, http.StatusForbidden, "hanya superadmin dan auditor yang dapat mengakses audit trail")
-		return
+		return nil, nil, false
 	}
-
 	var schoolIDPtr *string
 	if claims.ActiveRole != common.RoleSuperadmin || claims.SchoolID != "" {
-		sid := common.EffectiveSchoolID(r)
-		if sid != "" {
+		if sid := common.EffectiveSchoolID(r); sid != "" {
 			schoolIDPtr = &sid
 		}
 	}
@@ -70,8 +70,45 @@ func (h *Handler) ListAudit(w http.ResponseWriter, r *http.Request) {
 			sid = *schoolIDPtr
 		}
 		if !h.auditorHasAccess(w, r, claims, sid) {
-			return
+			return nil, nil, false
 		}
+	}
+	return claims, schoolIDPtr, true
+}
+
+// splitList parses a comma-separated query value ("a,b") into its non-empty
+// trimmed parts.
+func splitList(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// AuditFacets handles GET /audit/facets: the services, modules and actions
+// recorded for the tenant in the last AuditFacetDays, so the audit view can
+// filter by source (BUG-026/027/116) without guessing names.
+func (h *Handler) AuditFacets(w http.ResponseWriter, r *http.Request) {
+	_, schoolIDPtr, ok := h.auditScope(w, r)
+	if !ok {
+		return
+	}
+	facets, err := h.Store.AuditFacets(r.Context(), schoolIDPtr, time.Now().AddDate(0, 0, -model.AuditFacetDays))
+	if err != nil {
+		common.CaptureError(err)
+		common.WriteError(w, http.StatusInternalServerError, "gagal memuat pilihan filter audit")
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, facets, nil)
+}
+
+func (h *Handler) ListAudit(w http.ResponseWriter, r *http.Request) {
+	claims, schoolIDPtr, ok := h.auditScope(w, r)
+	if !ok {
+		return
 	}
 
 	q := r.URL.Query()
@@ -91,7 +128,7 @@ func (h *Handler) ListAudit(w http.ResponseWriter, r *http.Request) {
 		UserID:        q.Get("user_id"),
 		Module:        q.Get("module"),
 		Service:       q.Get("service"),
-		Action:        q.Get("action"),
+		Actions:       splitList(q.Get("action")),
 		EntityID:      q.Get("entity_id"),
 		CorrelationID: q.Get("correlation_id"),
 		From:          from,
@@ -124,7 +161,7 @@ func (h *Handler) ListAudit(w http.ResponseWriter, r *http.Request) {
 			ActorRole:   ptr(claims.ActiveRole),
 			Reason:      ptr(fmt.Sprintf("ekspor %d baris audit log", len(events))),
 			AfterData: map[string]any{"rows": len(events), "filter": map[string]any{
-				"user_id": filter.UserID, "module": filter.Module, "service": filter.Service, "action": filter.Action,
+				"user_id": filter.UserID, "module": filter.Module, "service": filter.Service, "action": filter.Actions,
 				"entity_id": filter.EntityID, "correlation_id": filter.CorrelationID, "from": q.Get("from"), "to": q.Get("to")}},
 			CorrelationID: correlationPtr(r),
 			IPHash:        HashIP(ClientIP(r)),

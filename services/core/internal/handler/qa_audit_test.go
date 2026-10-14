@@ -119,3 +119,40 @@ func TestCorrelationID_StampedOnAudit(t *testing.T) {
 		t.Fatalf("audit by correlation: %s", rec.Body.String())
 	}
 }
+
+// BUG-026/027/116 (core side): the audit view filters by source service and
+// by several actions at once (e.g. data_exported,audit_exported), and offers
+// the recorded values as choices.
+func TestAudit_SourceFilterAndFacets(t *testing.T) {
+	fs, router, _ := newTestServer(t)
+	sid := testSchoolA
+	for _, ev := range []model.AuditEvent{
+		{SchoolID: &sid, Service: "identity", Module: "security", EntityType: "user", EntityID: "u1", Action: "login_failed"},
+		{SchoolID: &sid, Service: "billing", Module: "invoice", EntityType: "export", EntityID: "e1", Action: "data_exported"},
+		{SchoolID: &sid, Service: "core", Module: "audit", EntityType: "audit_events", EntityID: "x", Action: "audit_exported"},
+	} {
+		_ = fs.InsertAudit(context.Background(), ev)
+	}
+	tok := token(t, testUserAdmin, testSchoolA, "superadmin")
+	count := func(q string) int {
+		rec := do(router, http.MethodGet, "/audit?"+q, tok, nil, "")
+		var resp struct{ Data []model.AuditEvent }
+		_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+		return len(resp.Data)
+	}
+	if n := count("service=identity"); n != 1 {
+		t.Errorf("service=identity: %d", n)
+	}
+	if n := count("action=data_exported,audit_exported"); n != 2 {
+		t.Errorf("export actions: %d", n)
+	}
+	rec := do(router, http.MethodGet, "/audit/facets", tok, nil, "")
+	var facets struct{ Data model.AuditFacets }
+	_ = json.Unmarshal(rec.Body.Bytes(), &facets)
+	if rec.Code != http.StatusOK || len(facets.Data.Services) != 3 || len(facets.Data.Actions) != 3 {
+		t.Fatalf("facets: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(router, http.MethodGet, "/audit/facets", token(t, testUserAuditor, testSchoolA, "auditor"), nil, ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("auditor without grant: want 403, got %d", rec.Code)
+	}
+}

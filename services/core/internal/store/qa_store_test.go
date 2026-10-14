@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -120,5 +121,16 @@ func TestPGStore_AuditFilters(t *testing.T) {
 	_, total, _ = st.ListAudit(ctx, AuditFilter{SchoolID: &school, CorrelationID: corr, Service: "billing"}, 1, 50)
 	if total != 1 {
 		t.Fatalf("by correlation+service: %d", total)
+	}
+	_, total, err = st.ListAudit(ctx, AuditFilter{SchoolID: &school, CorrelationID: corr, Actions: []string{"posted", "data_exported"}}, 1, 50)
+	if err != nil || total != 2 {
+		t.Fatalf("by action list: total=%d err=%v", total, err)
+	}
+	facets, err := st.AuditFacets(ctx, &school, time.Now().Add(-time.Hour))
+	if err != nil || !slices.Contains(facets.Services, "accounting") || !slices.Contains(facets.Actions, "posted") {
+		t.Fatalf("facets = %+v err=%v", facets, err)
+	}
+	if _, err := st.AuditFacets(ctx, nil, time.Now().Add(-time.Hour)); err != nil {
+		t.Fatalf("facets all tenants: %v", err)
 	}
 }

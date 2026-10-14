@@ -63,6 +63,7 @@ func NewRouter(h *Handler, cfg config.Config) http.Handler {
 		// Approvals Inbox, Mine, Detail, Decisions
 		pr.Get("/approvals/inbox", h.ListInbox)
 		pr.Get("/approvals/mine", h.ListMine)
+		pr.Get("/approvals/by-source", h.GetApprovalBySource)
 		pr.Get("/approvals/{id}", h.GetApproval)
 		pr.Post("/approvals/{id}/approve", h.Approve)
 		pr.Post("/approvals/{id}/reject", h.Reject)
@@ -80,6 +81,7 @@ func NewRouter(h *Handler, cfg config.Config) http.Handler {
 
 		// Central Audit Trail
 		pr.Get("/audit", h.ListAudit)
+		pr.Get("/audit/facets", h.AuditFacets)
 		pr.Get("/audit/access-grants", h.ListAuditGrants)
 		pr.Post("/audit/access-grants", h.CreateAuditGrant)
 		pr.Delete("/audit/access-grants/{id}", h.RevokeAuditGrant)

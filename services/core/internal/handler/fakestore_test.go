@@ -590,7 +590,7 @@ func (f *fakeStore) ListAudit(ctx context.Context, filter store.AuditFilter, pag
 		if filter.CorrelationID != "" && (a.CorrelationID == nil || *a.CorrelationID != filter.CorrelationID) {
 			continue
 		}
-		if filter.Action != "" && a.Action != filter.Action {
+		if len(filter.Actions) > 0 && !slices.Contains(filter.Actions, a.Action) {
 			continue
 		}
 		if filter.Service != "" && a.Service != filter.Service {
@@ -696,4 +696,27 @@ func (f *fakeStore) HasActiveAuditGrant(ctx context.Context, schoolID, userID st
 		}
 	}
 	return false, nil
+}
+
+func (f *fakeStore) AuditFacets(_ context.Context, schoolID *string, since time.Time) (model.AuditFacets, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := model.AuditFacets{Services: []string{}, Modules: []string{}, Actions: []string{}}
+	add := func(dst *[]string, v string) {
+		if v != "" && !slices.Contains(*dst, v) {
+			*dst = append(*dst, v)
+		}
+	}
+	for _, a := range f.audits {
+		if (schoolID != nil && (a.SchoolID == nil || *a.SchoolID != *schoolID)) || a.CreatedAt.Before(since) {
+			continue
+		}
+		add(&out.Services, a.Service)
+		add(&out.Modules, a.Module)
+		add(&out.Actions, a.Action)
+	}
+	slices.Sort(out.Services)
+	slices.Sort(out.Modules)
+	slices.Sort(out.Actions)
+	return out, nil
 }

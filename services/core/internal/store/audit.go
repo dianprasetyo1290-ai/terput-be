@@ -51,7 +51,7 @@ type AuditFilter struct {
 	UserID        string
 	Module        string
 	Service       string
-	Action        string
+	Actions       []string
 	EntityID      string
 	CorrelationID string
 	From          *time.Time
@@ -77,8 +77,8 @@ func (s *PGStore) ListAudit(ctx context.Context, f AuditFilter, page, perPage in
 	if f.Service != "" {
 		add("service = $%d", f.Service)
 	}
-	if f.Action != "" {
-		add("action = $%d", f.Action)
+	if len(f.Actions) > 0 {
+		add("action = ANY($%d::text[])", f.Actions)
 	}
 	if f.EntityID != "" {
 		add("entity_id = $%d", f.EntityID)
@@ -144,4 +144,33 @@ func (s *PGStore) ListAudit(ctx context.Context, f AuditFilter, page, perPage in
 	}
 
 	return events, total, rows.Err()
+}
+
+// AuditFacets lists the distinct services, modules and actions recorded since
+// `since` (schoolID nil = every tenant).
+func (s *PGStore) AuditFacets(ctx context.Context, schoolID *string, since time.Time) (model.AuditFacets, error) {
+	out := model.AuditFacets{Services: []string{}, Modules: []string{}, Actions: []string{}}
+	for _, c := range []struct {
+		col string
+		dst *[]string
+	}{{"service", &out.Services}, {"module", &out.Modules}, {"action", &out.Actions}} {
+		rows, err := s.DB.QueryContext(ctx, `SELECT DISTINCT `+c.col+` FROM audit_events
+			WHERE ($1::uuid IS NULL OR school_id = $1) AND created_at >= $2 AND `+c.col+` <> ''
+			ORDER BY 1 LIMIT 500`, schoolID, since)
+		if err != nil {
+			return out, fmt.Errorf("audit facets %s: %w", c.col, err)
+		}
+		for rows.Next() {
+			var v string
+			if err := rows.Scan(&v); err != nil {
+				rows.Close()
+				return out, err
+			}
+			*c.dst = append(*c.dst, v)
+		}
+		if err := rows.Close(); err != nil {
+			return out, err
+		}
+	}
+	return out, nil
 }
