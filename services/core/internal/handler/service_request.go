@@ -250,6 +250,12 @@ func (h *Handler) CreateParentServiceRequest(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	attachments, err := normalizeAttachments(req.Attachments, schoolID, claims.GetUserID())
+	if err != nil {
+		common.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	sr := model.ServiceRequest{
 		SchoolID:        schoolID,
 		CategoryID:      req.CategoryID,
@@ -257,7 +263,7 @@ func (h *Handler) CreateParentServiceRequest(w http.ResponseWriter, r *http.Requ
 		StudentUserID:   req.StudentUserID,
 		Subject:         strings.TrimSpace(req.Subject),
 		Description:     strings.TrimSpace(req.Description),
-		Attachments:     req.Attachments,
+		Attachments:     attachments,
 	}
 
 	created, err := h.Store.CreateServiceRequest(r.Context(), sr)
@@ -370,6 +376,15 @@ func (h *Handler) ListHandlerServiceRequests(w http.ResponseWriter, r *http.Requ
 	if len(roles) == 0 && claims.ActiveRole != "" {
 		roles = []string{claims.ActiveRole}
 	}
+	// School admin oversees every category (menu 81 role matrix), the same
+	// rule GetServiceRequestDetail and CanUserHandle already apply.
+	if claims.HasRole(common.RoleAdmin) || claims.HasRole(common.RoleSuperadmin) {
+		if cats, err := h.Store.ListServiceRequestCategories(r.Context(), schoolID, false); err == nil {
+			for _, c := range cats {
+				roles = append(roles, c.HandlerRole)
+			}
+		}
+	}
 
 	list, err := h.Store.ListHandlerServiceRequests(r.Context(), schoolID, roles, status)
 	if err != nil {
@@ -390,6 +405,9 @@ func (h *Handler) UpdateServiceRequestStatus(w http.ResponseWriter, r *http.Requ
 	id := chi.URLParam(r, "id")
 
 	if h.serviceDeskGuard(w, r, schoolID, id) {
+		return
+	}
+	if !h.requireServiceRequestHandler(w, r, claims, schoolID, id) {
 		return
 	}
 
@@ -429,6 +447,9 @@ func (h *Handler) UpdateServiceRequestResult(w http.ResponseWriter, r *http.Requ
 	if h.serviceDeskGuard(w, r, schoolID, id) {
 		return
 	}
+	if !h.requireServiceRequestHandler(w, r, claims, schoolID, id) {
+		return
+	}
 
 	var input updateResultInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -436,7 +457,12 @@ func (h *Handler) UpdateServiceRequestResult(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	updated, err := h.Store.UpdateServiceRequestResult(r.Context(), schoolID, id, input.ResultAttachments)
+	results, err := normalizeAttachments(input.ResultAttachments, schoolID, claims.GetUserID())
+	if err != nil {
+		common.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	updated, err := h.Store.UpdateServiceRequestResult(r.Context(), schoolID, id, results)
 	if errors.Is(err, store.ErrNotFound) {
 		common.WriteError(w, http.StatusNotFound, "permintaan layanan tidak ditemukan")
 		return

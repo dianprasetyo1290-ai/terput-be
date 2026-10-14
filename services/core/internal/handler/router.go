@@ -96,6 +96,8 @@ func NewRouter(h *Handler, cfg config.Config) http.Handler {
 		pr.Get("/service-requests/{id}", h.GetServiceRequestDetail)
 		pr.Post("/service-requests/{id}/status", h.UpdateServiceRequestStatus)
 		pr.Post("/service-requests/{id}/result", h.UpdateServiceRequestResult)
+		pr.Get("/service-requests/{id}/files", h.DownloadServiceRequestAttachment)
+		pr.Post("/service-request-attachments", h.UploadServiceRequestAttachment)
 
 		// Service Desk (menu 137-138, T11)
 		if h.ServiceDesk != nil {
