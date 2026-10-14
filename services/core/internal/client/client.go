@@ -232,6 +232,38 @@ func (c *Client) UsersByRole(ctx context.Context, schoolID, role string) ([]stri
 	return ids, nil
 }
 
+// RoleHolders lists the ids of every active user holding a role in a school
+// via identity's internal endpoint GET /internal/users?role=&school_id=
+// (X-Internal-Key, no page cap). When identity does not serve that route yet
+// (404) it falls back to UsersByRole, so callers keep working during rollout.
+func (c *Client) RoleHolders(ctx context.Context, schoolID, role string) ([]string, error) {
+	if c.IdentityURL == "" {
+		return nil, ErrNotConfigured
+	}
+	q := url.Values{"role": {role}, "school_id": {schoolID}}
+	var users []struct {
+		ID     string `json:"id"`
+		UserID string `json:"user_id"`
+	}
+	err := c.getJSON(ctx, c.IdentityURL+"/internal/users?"+q.Encode(), &users)
+	if errors.Is(err, ErrNotFound) {
+		return c.UsersByRole(ctx, schoolID, role)
+	}
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(users))
+	for _, u := range users {
+		switch {
+		case u.ID != "":
+			ids = append(ids, u.ID)
+		case u.UserID != "":
+			ids = append(ids, u.UserID)
+		}
+	}
+	return ids, nil
+}
+
 // GuardianHasStudent reports whether an active guardian link connects the
 // guardian to the student in the school (identity GET
 // /internal/guardians/{g}/students/{s}/access; 404 = no link).

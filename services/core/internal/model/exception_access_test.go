@@ -15,6 +15,7 @@ func TestExceptionKindsFor(t *testing.T) {
 	}{
 		{role: "admin", sees: []string{"webhook", "notification", "import", "dead_letter", "callback"}, doesNotSee: []string{"journal_posting"}},
 		{role: "finance_manager", sees: []string{"webhook", "journal_posting"}, doesNotSee: []string{"import", "notification"}},
+		{role: "akuntan", sees: []string{"webhook", "journal_posting"}, doesNotSee: []string{"import", "notification", "dead_letter"}},
 		{role: "payroll_officer", sees: []string{"journal_posting"}, doesNotSee: []string{"webhook"}},
 		{role: "superadmin", sees: ExceptionKinds},
 		{role: "auditor", sees: ExceptionKinds},
@@ -46,8 +47,8 @@ func TestExceptionKindsFor(t *testing.T) {
 
 func TestExceptionResponsibleRoles(t *testing.T) {
 	tests := map[string][]string{
-		"journal_posting": {"finance_manager", "payroll_officer", "superadmin"},
-		"webhook":         {"admin", "finance_manager", "superadmin"},
+		"journal_posting": {"akuntan", "finance_manager", "payroll_officer", "superadmin"},
+		"webhook":         {"admin", "akuntan", "finance_manager", "superadmin"},
 		"import":          {"admin", "superadmin"},
 	}
 	for kind, want := range tests {

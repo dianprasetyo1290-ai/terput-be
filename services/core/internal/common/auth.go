@@ -27,6 +27,8 @@ const (
 	RoleAuditor        = "auditor"
 	RoleFinanceManager = "finance_manager"
 	RolePegawai        = "pegawai"
+	// RoleAkuntan is the school accountant (finance/accounting staff).
+	RoleAkuntan = "akuntan"
 )
 
 // ApproverRoles are the roles a flow step may name (approver_role /
