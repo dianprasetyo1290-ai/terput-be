@@ -165,7 +165,20 @@ func (f *extFixture) exec(q string, args ...any) {
 }
 
 // provider registers a provider row + adapter override.
+// testSimSecret signs simulator notifications in tests (BUG-004: the sim
+// adapter rejects unsigned webhooks).
+const testSimSecret = "test-sim-webhook-secret-0123456789"
+
+// simNicepay stands in for the default provider "nicepay" (tests have no
+// NICEPay credentials and the handler no longer falls back to the sim).
+func simNicepay() map[string]gateway.Provider {
+	return map[string]gateway.Provider{gateway.DefaultProvider: &gateway.Sim{ProviderCode: gateway.DefaultProvider, WebhookSecret: testSimSecret}}
+}
+
 func (f *extFixture) provider(p gateway.Provider, caps ...string) string {
+	if sim, ok := p.(*gateway.Sim); ok {
+		sim.WebhookSecret = testSimSecret
+	}
 	code := p.Code()
 	f.exec(`INSERT INTO payment_providers (code, adapter, label, enabled) VALUES ($1, 'sim', $1, true)`, code)
 	for _, c := range caps {
@@ -299,7 +312,7 @@ func TestAC15002_FailoverAndNoFailover(t *testing.T) {
 func TestCheckoutGoldenLegacy(t *testing.T) {
 	f := newExtFixture(t)
 	f.app.PaymentFeatures = nil
-	f.app.Providers = nil
+	f.app.Providers = simNicepay()
 	va := f.method("va_bni", gateway.CapVA, "BNIN")
 	billID := f.bill(2026, 7, time.Now(), 500000)
 	code, data, raw := f.checkout(va, billID)
@@ -354,7 +367,10 @@ func (f *extFixture) pendingTx(provider, ref, purpose, purposeRef string, method
 func (f *extFixture) webhook(provider, ref string) int {
 	f.t.Helper()
 	body := `{"originalReferenceNo":"` + ref + `","trxId":"` + ref + `","latestTransactionStatus":"00"}`
-	resp, err := http.Post(f.srv.URL+"/webhooks/"+provider, "application/json", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPost, f.srv.URL+"/webhooks/"+provider, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-SIGNATURE", gateway.SimSignature(testSimSecret, []byte(body)))
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -398,7 +414,7 @@ func TestPurposeChargeAndHook(t *testing.T) {
 	f.app.PaymentFeatures = nil // K1 must work on the T6 path too
 	hook := &fakePurpose{}
 	f.app.PurposeHandlers[PurposeWalletTopup] = hook
-	f.app.Providers = nil
+	f.app.Providers = simNicepay()
 	m := f.method("va_topup", gateway.CapVA, "BNIN")
 	ctx := context.Background()
 	topupID := genUUID()
@@ -480,10 +496,11 @@ func TestAdhocBillCheckout(t *testing.T) {
 		t.Skip("student_bills.scheme_id is still NOT NULL: runs after rebase on T12 migration 0007")
 	}
 	f.app.PaymentFeatures = nil
+	f.app.Providers = simNicepay()
 	m := f.method("va_adhoc", gateway.CapVA, "BNIN")
 	id := genUUID()
 	f.exec(`INSERT INTO student_bills (id, school_id, student_user_id, scheme_id, period_year, period_month, base_idr, discount_idr, net_idr, status, due_at, source_module, source_ref)
-	        VALUES ($1, $2, $3, NULL, 2026, 7, 50000, 0, 50000, 'unpaid', now(), 'library', $1)`, id, f.schoolID, f.studentID)
+	        VALUES ($1, $2, $3, NULL, 2026, 7, 50000, 0, 50000, 'unpaid', now(), 'library', $4)`, id, f.schoolID, f.studentID, id)
 	if code, _, raw := f.checkout(m, id); code != http.StatusOK {
 		t.Fatalf("ad-hoc checkout %d %s", code, raw)
 	}

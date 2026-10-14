@@ -23,6 +23,7 @@ import (
 
 	"skci/billing/internal/common"
 	"skci/billing/internal/config"
+	"skci/billing/internal/gateway"
 	"skci/billing/internal/nicepay"
 	"skci/billing/internal/storage"
 )
@@ -118,6 +119,7 @@ func setupTestApp(t *testing.T, db *sql.DB, guardianID, studentID string) (*App,
 		},
 	}
 	app := New(db, cfg, identity, store)
+	app.Providers = simNicepay()
 
 	r := chi.NewRouter()
 
@@ -284,6 +286,7 @@ func TestNicepayWebhookSecurity(t *testing.T) {
 		t.Fatal(err)
 	}
 	app.Nicepay = niceClient
+	app.Providers = nil // exercise the real NICEPay adapter
 
 	payload := `{"trxId":"NICE123","status":"0000"}`
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/webhooks/nicepay", bytes.NewReader([]byte(payload)))
@@ -580,6 +583,7 @@ func TestNicepayWebhookIdempotency(t *testing.T) {
 	})
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/webhooks/nicepay", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-SIGNATURE", gateway.SimSignature(testSimSecret, payload))
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -594,6 +598,7 @@ func TestNicepayWebhookIdempotency(t *testing.T) {
 	// 5. Send duplicate webhook again (AC-IF-02)
 	req2, _ := http.NewRequest(http.MethodPost, srv.URL+"/webhooks/nicepay", bytes.NewReader(payload))
 	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("X-SIGNATURE", gateway.SimSignature(testSimSecret, payload))
 	resp2, err := http.DefaultClient.Do(req2)
 	if err != nil {
 		t.Fatalf("duplicate webhook request: %v", err)

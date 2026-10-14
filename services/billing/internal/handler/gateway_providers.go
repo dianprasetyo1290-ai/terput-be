@@ -127,8 +127,8 @@ func (a *App) PlatformCreateProvider(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "kode (huruf kecil), label, dan adapter (nicepay/sim) wajib valid")
 		return
 	}
-	if in.Adapter == gateway.AdapterSim && a.Config.Production() {
-		common.WriteError(w, http.StatusBadRequest, "adapter simulator tidak tersedia di production")
+	if in.Adapter == gateway.AdapterSim && !a.Config.SimulatorAllowed() {
+		common.WriteError(w, http.StatusBadRequest, "adapter simulator hanya tersedia bila PAYMENT_SIMULATOR_ENABLED=true di luar production")
 		return
 	}
 	ref, err := normalizeCredentialRef(in.CredentialRef)
