@@ -91,6 +91,8 @@ func Load() (Config, error) {
 			return Config{}, errors.New("SEKOCI_INTERNAL_KEY must be explicitly configured in production")
 		case c.IdentityURL == "":
 			return Config{}, errors.New("IDENTITY_URL must be explicitly configured in production")
+		case c.Gateway.SimulatorEnabled:
+			return Config{}, errors.New("PAYMENT_SIMULATOR_ENABLED is not allowed in production")
 		}
 	}
 	return c, nil
@@ -98,6 +100,10 @@ func Load() (Config, error) {
 
 // Production reports whether the service runs with production guards.
 func (c Config) Production() bool { return strings.EqualFold(c.AppEnv, "production") }
+
+// SimulatorAllowed reports whether the payment simulator adapter may run:
+// only when explicitly enabled and never in production (QA-PAY BUG-004).
+func (c Config) SimulatorAllowed() bool { return c.Gateway.SimulatorEnabled && !c.Production() }
 
 func containsDev(v string) bool {
 	return strings.Contains(v, "dev-") || strings.Contains(v, "change-me")

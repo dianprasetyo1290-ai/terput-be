@@ -2,6 +2,8 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -32,15 +34,50 @@ type createStatusRequestInput struct {
 	IdempotencyKey  *string                `json:"idempotency_key"`
 }
 
-// CreateStudentStatusRequest is POST /student-status-requests (admin, superadmin, walikelas).
-func (h *Handler) CreateStudentStatusRequest(w http.ResponseWriter, r *http.Request) {
+// requireMenu78Role enforces the Menu 78 role matrix (model.Can*): superadmin
+// has no Mutasi Siswa access (BUG-177).
+func requireMenu78Role(w http.ResponseWriter, r *http.Request, allowed func(string) bool) (*common.Claims, bool) {
 	claims := common.FromCtx(r)
 	if claims == nil {
 		common.WriteError(w, http.StatusUnauthorized, "unauthorized")
+		return nil, false
+	}
+	if !allowed(claims.ActiveRole) {
+		common.WriteError(w, http.StatusForbidden, "forbidden: peran Anda tidak memiliki akses ke menu Pindah & Keluar Siswa")
+		return nil, false
+	}
+	return claims, true
+}
+
+// writeErrorWithData is common.WriteError plus a data payload (e.g. the id of
+// the request that blocks a duplicate).
+func writeErrorWithData(w http.ResponseWriter, status int, msg string, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(common.Envelope{Data: data, Message: msg, Errors: map[string]string{"message": msg}})
+}
+
+func writeActiveRequestConflict(w http.ResponseWriter, existing *model.StudentStatusRequest) {
+	writeErrorWithData(w, http.StatusConflict,
+		"siswa sudah memiliki pengajuan mutasi yang sedang berjalan; selesaikan atau batalkan pengajuan tersebut terlebih dahulu",
+		map[string]any{
+			"existing_request_id": existing.ID,
+			"existing_status":     existing.Status,
+			"existing_kind":       existing.Kind,
+			"link":                "/akademik/mutasi-siswa/" + existing.ID,
+		})
+}
+
+// CreateStudentStatusRequest is POST /student-status-requests (admin, walikelas).
+// Fail-closed (BUG-057): the request is only kept when the Approval Center
+// accepted it; otherwise nothing is stored and the configuration error is shown.
+func (h *Handler) CreateStudentStatusRequest(w http.ResponseWriter, r *http.Request) {
+	claims, ok := requireMenu78Role(w, r, model.CanCreateStatusRequest)
+	if !ok {
 		return
 	}
-	if claims.ActiveRole != "admin" && claims.ActiveRole != common.RoleSuperadmin && claims.ActiveRole != "walikelas" {
-		common.WriteError(w, http.StatusForbidden, "forbidden: role not permitted to initiate status requests")
+	if h.Core == nil {
+		common.WriteError(w, http.StatusServiceUnavailable, "Approval Center belum terhubung (CORE_BASE_URL); pengajuan tidak dapat dikirim")
 		return
 	}
 
@@ -77,6 +114,29 @@ func (h *Handler) CreateStudentStatusRequest(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// 2b. Idempotent replay returns the original request; otherwise one
+	// active request per student (BUG-137).
+	if in.IdempotencyKey != nil && *in.IdempotencyKey != "" {
+		prev, err := h.Store.GetStudentStatusRequestByIdempotency(r.Context(), schoolID, *in.IdempotencyKey)
+		if err != nil {
+			common.WriteError(w, http.StatusInternalServerError, "failed to check idempotency: "+err.Error())
+			return
+		}
+		if prev != nil {
+			common.WriteJSON(w, http.StatusCreated, prev, nil)
+			return
+		}
+	}
+	active, err := h.Store.FindActiveStatusRequest(r.Context(), schoolID, in.StudentUserID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to check running requests: "+err.Error())
+		return
+	}
+	if active != nil {
+		writeActiveRequestConflict(w, active)
+		return
+	}
+
 	fromClassroomID := enrollment.ClassroomID
 	toClassID := ""
 	if in.ToClassroomID != nil {
@@ -89,6 +149,11 @@ func (h *Handler) CreateStudentStatusRequest(w http.ResponseWriter, r *http.Requ
 
 	// 3. Validate domain rules
 	if err := model.ValidateCreateStatusRequest(in.Kind, in.Reason, fromClassroomID, toClassID, toSchoolID, schoolID, in.EffectiveDate); err != nil {
+		common.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	// BUG-176: not before the student entered the active class.
+	if err := model.ValidateEffectiveDateAfterEnrollment(in.EffectiveDate, enrollment.EnrolledAt, nil); err != nil {
 		common.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
@@ -154,6 +219,14 @@ func (h *Handler) CreateStudentStatusRequest(w http.ResponseWriter, r *http.Requ
 	}
 
 	created, err := h.Store.CreateStudentStatusRequest(r.Context(), req)
+	if errors.Is(err, store.ErrActiveStatusRequestExists) {
+		if active, _ := h.Store.FindActiveStatusRequest(r.Context(), schoolID, in.StudentUserID); active != nil {
+			writeActiveRequestConflict(w, active)
+			return
+		}
+		common.WriteError(w, http.StatusConflict, err.Error())
+		return
+	}
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to create status request: "+err.Error())
 		return
@@ -183,54 +256,175 @@ func (h *Handler) CreateStudentStatusRequest(w http.ResponseWriter, r *http.Requ
 		summaryMap["refund_amount_idr"] = *in.RefundAmountIDR
 	}
 
-	if h.Core != nil {
-		callbackURL := h.Core.CallbackBaseURL + "/internal/student-status-requests/approval-callback"
-		coreReq := client.CoreApprovalRequest{
-			SchoolID:       schoolID,
-			RequestType:    requestType,
-			SourceService:  "academic",
-			SourceID:       created.ID,
-			Title:          "Pengajuan " + in.Kind + " siswa: " + in.StudentUserID,
-			Summary:        summaryMap,
-			AmountIDR:      &totalOutstanding,
-			Flags:          flags,
-			MakerUserID:    claims.UserID,
-			SubjectUserID:  &in.StudentUserID,
-			CallbackURL:    callbackURL,
-			CorrelationID:  created.ID,
-			IdempotencyKey: "academic:status-request:" + created.ID,
-		}
-		apprResp, cErr := h.Core.SubmitApproval(r.Context(), coreReq)
-		if cErr != nil {
-			log.Printf("student status request %s: submit approval: %v", created.ID, cErr)
-		}
-		if cErr == nil && apprResp != nil && apprResp.ID != "" {
-			_ = h.Store.UpdateStatusRequestApproval(r.Context(), schoolID, created.ID, created.Status, apprResp.ID)
-			created.ApprovalID = &apprResp.ID
-		}
-
-		_ = h.Core.Audit(r.Context(), client.CoreAuditEvent{
-			SchoolID:    schoolID,
-			Service:     "academic",
-			Module:      "transfer",
-			EntityType:  "student_status_request",
-			EntityID:    created.ID,
-			Action:      "request_created",
-			ActorUserID: claims.UserID,
-			ActorRole:   claims.ActiveRole,
-			After:       summaryMap,
-			Reason:      in.Reason,
-		})
+	callbackURL := h.Core.CallbackBaseURL + "/internal/student-status-requests/approval-callback"
+	coreReq := client.CoreApprovalRequest{
+		SchoolID:       schoolID,
+		RequestType:    requestType,
+		SourceService:  "academic",
+		SourceID:       created.ID,
+		Title:          "Pengajuan " + in.Kind + " siswa: " + in.StudentUserID,
+		Summary:        summaryMap,
+		AmountIDR:      &totalOutstanding,
+		Flags:          flags,
+		MakerUserID:    claims.UserID,
+		SubjectUserID:  &in.StudentUserID,
+		CallbackURL:    callbackURL,
+		CorrelationID:  created.ID,
+		IdempotencyKey: "academic:status-request:" + created.ID,
 	}
+	apprResp, cErr := h.Core.SubmitApproval(r.Context(), coreReq)
+	if cErr == nil && (apprResp == nil || apprResp.ID == "") {
+		cErr = errors.New("core approval returned no id")
+	}
+	if cErr != nil {
+		// Fail closed: a request the Approval Center never saw would stay
+		// pending_approval forever. Drop it and tell the user why.
+		log.Printf("student status request %s: submit approval: %v", created.ID, cErr)
+		if dErr := h.Store.DeleteUnsubmittedStatusRequest(r.Context(), schoolID, created.ID); dErr != nil {
+			log.Printf("student status request %s: rollback after failed submit: %v", created.ID, dErr)
+		}
+		status, msg := approvalSubmitError(requestType, cErr)
+		common.WriteError(w, status, msg)
+		return
+	}
+	if err := h.Store.UpdateStatusRequestApproval(r.Context(), schoolID, created.ID, created.Status, apprResp.ID); err != nil {
+		log.Printf("student status request %s: store approval id %s: %v", created.ID, apprResp.ID, err)
+	} else {
+		created.ApprovalID = &apprResp.ID
+	}
+
+	_ = h.Core.Audit(r.Context(), client.CoreAuditEvent{
+		SchoolID:    schoolID,
+		Service:     "academic",
+		Module:      "transfer",
+		EntityType:  "student_status_request",
+		EntityID:    created.ID,
+		Action:      "request_created",
+		ActorUserID: claims.UserID,
+		ActorRole:   claims.ActiveRole,
+		After:       summaryMap,
+		Reason:      in.Reason,
+	})
 
 	common.WriteJSON(w, http.StatusCreated, created, nil)
 }
 
-// ListStudentStatusRequests is GET /student-status-requests (admin, superadmin, walikelas, kepala_sekolah).
+// approvalSubmitError maps a failed core submit to the user-facing answer.
+// Core 4xx = configuration/validation problem at the school (most often no
+// approval flow for the request type) -> 422 with core's message; anything
+// else (network, 5xx, bad internal key -> 401/403) -> 502.
+func approvalSubmitError(requestType string, err error) (int, string) {
+	var ce *client.CoreError
+	if errors.As(err, &ce) && ce.Status >= 400 && ce.Status < 500 &&
+		ce.Status != http.StatusUnauthorized && ce.Status != http.StatusForbidden {
+		msg := ce.Message
+		if msg == "" {
+			msg = http.StatusText(ce.Status)
+		}
+		return http.StatusUnprocessableEntity, fmt.Sprintf(
+			"Pengajuan tidak dapat dikirim ke Approval Center: %s. Admin sekolah perlu mengatur alur approval %q di menu Alur Approval, lalu ajukan ulang.",
+			msg, requestType)
+	}
+	return http.StatusBadGateway, "Approval Center tidak dapat dihubungi atau menolak kredensial layanan; pengajuan tidak disimpan. Coba lagi atau hubungi admin TI."
+}
+
+// CancelStudentStatusRequest is POST /student-status-requests/{id}/cancel:
+// the requester withdraws a request that is still pending_approval
+// (BUG-057). The core approval is cancelled first, so an approver can no
+// longer decide it.
+func (h *Handler) CancelStudentStatusRequest(w http.ResponseWriter, r *http.Request) {
+	claims, ok := requireMenu78Role(w, r, model.CanCreateStatusRequest)
+	if !ok {
+		return
+	}
+	schoolID, ok := scopeSchoolID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Reason string `json:"reason"`
+	}
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			common.WriteError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+	reason := strings.TrimSpace(in.Reason)
+	if reason == "" {
+		reason = "Dibatalkan oleh pengaju"
+	}
+
+	req, err := h.Store.GetStudentStatusRequest(r.Context(), schoolID, chi.URLParam(r, "id"))
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to fetch request: "+err.Error())
+		return
+	}
+	if req == nil {
+		common.WriteError(w, http.StatusNotFound, "request not found")
+		return
+	}
+	switch err := model.CheckCancelStatusRequest(req.Status, req.RequestedBy, claims.UserID); {
+	case errors.Is(err, model.ErrCancelNotRequester):
+		common.WriteError(w, http.StatusForbidden, err.Error())
+		return
+	case err != nil:
+		common.WriteError(w, http.StatusConflict, err.Error())
+		return
+	}
+
+	if req.ApprovalID != nil && *req.ApprovalID != "" {
+		if h.Core == nil {
+			common.WriteError(w, http.StatusServiceUnavailable, "Approval Center belum terhubung; pembatalan tidak dapat diproses")
+			return
+		}
+		if cErr := h.Core.CancelApproval(r.Context(), *req.ApprovalID, claims.UserID, reason); cErr != nil {
+			var ce *client.CoreError
+			switch {
+			case errors.As(cErr, &ce) && ce.Status == http.StatusConflict:
+				common.WriteError(w, http.StatusConflict, "pengajuan sudah diputuskan di Approval Center dan tidak dapat dibatalkan")
+				return
+			case errors.As(cErr, &ce) && ce.Status == http.StatusNotFound:
+				// Core has no such approval: nothing to withdraw there.
+			default:
+				log.Printf("student status request %s: cancel approval %s: %v", req.ID, *req.ApprovalID, cErr)
+				common.WriteError(w, http.StatusBadGateway, "Approval Center tidak dapat dihubungi; pembatalan tidak diproses. Coba lagi.")
+				return
+			}
+		}
+	}
+
+	moved, err := h.Store.TransitionStatusRequest(r.Context(), schoolID, req.ID, model.StatusPendingApproval, model.StatusCancelled, "")
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to cancel request: "+err.Error())
+		return
+	}
+	if !moved {
+		common.WriteError(w, http.StatusConflict, model.ErrCancelNotPending.Error())
+		return
+	}
+	if h.Core != nil {
+		_ = h.Core.Audit(r.Context(), client.CoreAuditEvent{
+			SchoolID:    req.SchoolID,
+			Service:     "academic",
+			Module:      "transfer",
+			EntityType:  "student_status_request",
+			EntityID:    req.ID,
+			Action:      "request_cancelled",
+			ActorUserID: claims.UserID,
+			ActorRole:   claims.ActiveRole,
+			Before:      map[string]any{"status": req.Status},
+			After:       map[string]any{"status": model.StatusCancelled},
+			Reason:      reason,
+		})
+	}
+	req.Status = model.StatusCancelled
+	common.WriteJSON(w, http.StatusOK, req, nil)
+}
+
+// ListStudentStatusRequests is GET /student-status-requests (admin, walikelas, kepala_sekolah).
 func (h *Handler) ListStudentStatusRequests(w http.ResponseWriter, r *http.Request) {
-	claims := common.FromCtx(r)
-	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "unauthorized")
+	if _, ok := requireMenu78Role(w, r, model.CanViewStatusRequests); !ok {
 		return
 	}
 	schoolID, ok := scopeSchoolID(w, r)
@@ -272,9 +466,7 @@ func (h *Handler) ListStudentStatusRequests(w http.ResponseWriter, r *http.Reque
 
 // GetStudentStatusRequest is GET /student-status-requests/{id}.
 func (h *Handler) GetStudentStatusRequest(w http.ResponseWriter, r *http.Request) {
-	claims := common.FromCtx(r)
-	if claims == nil {
-		common.WriteError(w, http.StatusUnauthorized, "unauthorized")
+	if _, ok := requireMenu78Role(w, r, model.CanViewStatusRequests); !ok {
 		return
 	}
 	schoolID, ok := scopeSchoolID(w, r)
@@ -323,23 +515,42 @@ func (h *Handler) ApprovalCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if in.Decision == "rejected" {
-		if err := h.Store.UpdateStatusRequestApproval(r.Context(), req.SchoolID, req.ID, model.StatusRejected, in.ApprovalID); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to update rejection: "+err.Error())
-			return
-		}
-		common.WriteJSON(w, http.StatusOK, map[string]string{"status": "rejected"}, nil)
+	var target string
+	switch in.Decision {
+	case "rejected":
+		target = model.StatusRejected
+	case "approved":
+		target = model.StatusApproved
+	default:
+		common.WriteError(w, http.StatusUnprocessableEntity, "unrecognized decision: "+in.Decision)
 		return
 	}
 
-	if in.Decision == "approved" {
-		if err := h.Store.UpdateStatusRequestApproval(r.Context(), req.SchoolID, req.ID, model.StatusApproved, in.ApprovalID); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to update approval: "+err.Error())
-			return
-		}
-		req.Status = model.StatusApproved
+	// Replays of the same decision are acknowledged; any other transition
+	// (e.g. a decision arriving after the requester cancelled) is refused.
+	if req.Status == target || (target == model.StatusApproved && req.Status == model.StatusApplied) {
+		common.WriteJSON(w, http.StatusOK, map[string]string{"status": req.Status}, nil)
+		return
+	}
+	if !model.IsValidStatusTransition(req.Status, target) {
+		common.WriteError(w, http.StatusConflict, "status pengajuan "+req.Status+" tidak dapat diubah menjadi "+target)
+		return
+	}
+	moved, err := h.Store.TransitionStatusRequest(r.Context(), req.SchoolID, req.ID, req.Status, target, in.ApprovalID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "failed to update request: "+err.Error())
+		return
+	}
+	if !moved {
+		common.WriteError(w, http.StatusConflict, "status pengajuan berubah bersamaan; keputusan tidak diterapkan")
+		return
+	}
+	req.Status = target
+	if in.ApprovalID != "" {
 		req.ApprovalID = &in.ApprovalID
+	}
 
+	if target == model.StatusApproved {
 		// Check if effective_date <= today in Asia/Jakarta
 		applyNow, _ := model.ShouldApplyImmediately(req.EffectiveDate, time.Now(), nil)
 		if applyNow {
@@ -348,16 +559,13 @@ func (h *Handler) ApprovalCallback(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		common.WriteJSON(w, http.StatusOK, map[string]string{"status": req.Status}, nil)
-		return
 	}
-
-	common.WriteError(w, http.StatusUnprocessableEntity, "unrecognized decision: "+in.Decision)
+	common.WriteJSON(w, http.StatusOK, map[string]string{"status": req.Status}, nil)
 }
 
-// ApplyStudentStatusRequest is POST /student-status-requests/{id}/apply (admin/superadmin).
+// ApplyStudentStatusRequest is POST /student-status-requests/{id}/apply (admin).
 func (h *Handler) ApplyStudentStatusRequest(w http.ResponseWriter, r *http.Request) {
-	if !requireAdmin(w, r) {
+	if _, ok := requireMenu78Role(w, r, model.CanApplyStatusRequest); !ok {
 		return
 	}
 	schoolID, ok := scopeSchoolID(w, r)
@@ -522,6 +730,9 @@ func (h *Handler) applyRequest(r *http.Request, req *model.StudentStatusRequest)
 // GetStudentFinancialSummaryProxy is GET /student-status-requests/financial-summary?student_user_id=.
 // Helper for frontend form to display financial snapshot before submitting (AC-78-01).
 func (h *Handler) GetStudentFinancialSummaryProxy(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireMenu78Role(w, r, model.CanViewStatusRequests); !ok {
+		return
+	}
 	schoolID, ok := scopeSchoolID(w, r)
 	if !ok {
 		return

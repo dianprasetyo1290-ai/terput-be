@@ -2,6 +2,9 @@ package gateway
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,11 +15,13 @@ import (
 // Sim is the simulation branch T6 had inline in ParentCheckout ("SIM-"
 // refs), moved into an adapter. It supports every capability so dev, tests
 // and Playwright can exercise routing, retail and autodebit without a real
-// provider. The handler never builds it in production.
+// provider. The handler builds it only when PAYMENT_SIMULATOR_ENABLED=true
+// outside production, never as a fallback (QA-PAY BUG-004).
 type Sim struct {
-	ProviderCode string
-	FailCharges  bool // every charge fails like an outage (failover drills)
-	FailDebits   bool // every debit is rejected like insufficient balance
+	ProviderCode  string
+	FailCharges   bool   // every charge fails like an outage (failover drills)
+	FailDebits    bool   // every debit is rejected like insufficient balance
+	WebhookSecret string // HMAC key for notifications; empty rejects all
 }
 
 func (s *Sim) Code() string           { return s.ProviderCode }
@@ -71,13 +76,29 @@ type simNotification struct {
 	MandateStatus           string `json:"mandateStatus"`
 }
 
-// VerifyWebhook accepts any body (simulator only). Like T6 without NICEPay
-// credentials, a notification without a status means "paid".
-func (s *Sim) VerifyWebhook(_ http.Header, body []byte) (Notification, error) {
+// SimSignature is the X-SIGNATURE a simulator notification must carry:
+// hex(HMAC-SHA256(secret, body)).
+func SimSignature(secret string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// VerifyWebhook accepts only bodies signed with WebhookSecret (QA-PAY
+// BUG-004: no unsigned notification is ever trusted, simulator included).
+// A verified notification without a status means "paid", like T6.
+func (s *Sim) VerifyWebhook(h http.Header, body []byte) (Notification, error) {
 	ref, pRef := ParseNicepayRefs(body)
 	var b simNotification
 	_ = json.Unmarshal(body, &b)
 	n := Notification{RefNo: ref, ProviderRef: pRef, MandateRef: b.MandateRef, MandateStatus: b.MandateStatus}
+	sig := ""
+	if h != nil {
+		sig = h.Get("X-SIGNATURE")
+	}
+	if s.WebhookSecret == "" || sig == "" || !hmac.Equal([]byte(sig), []byte(SimSignature(s.WebhookSecret, body))) {
+		return n, ErrInvalidSignature
+	}
 	switch b.LatestTransactionStatus {
 	case "", "00":
 		n.ClaimedStatus = StatusPaid

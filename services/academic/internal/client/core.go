@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -85,7 +86,7 @@ func (c *CoreClient) SubmitApproval(ctx context.Context, req CoreApprovalRequest
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("core approval returned status %d", resp.StatusCode)
+		return nil, coreErrorFrom(resp)
 	}
 
 	var env struct {
@@ -95,6 +96,57 @@ func (c *CoreClient) SubmitApproval(ctx context.Context, req CoreApprovalRequest
 		return nil, err
 	}
 	return &env.Data, nil
+}
+
+// CoreError is a non-2xx answer from core. Status 4xx means core understood
+// and refused the request (e.g. no approval flow configured for the school,
+// already-decided approval); 5xx means core itself failed.
+type CoreError struct {
+	Status  int
+	Message string
+}
+
+func (e *CoreError) Error() string {
+	if e.Message == "" {
+		return fmt.Sprintf("core approval returned status %d", e.Status)
+	}
+	return fmt.Sprintf("core approval returned status %d: %s", e.Status, e.Message)
+}
+
+// coreErrorFrom keeps core's own message so the caller can show it (e.g.
+// "alur approval student_withdrawal belum dikonfigurasi").
+func coreErrorFrom(resp *http.Response) *CoreError {
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	var env struct {
+		Message string `json:"message"`
+	}
+	_ = json.Unmarshal(raw, &env)
+	return &CoreError{Status: resp.StatusCode, Message: strings.TrimSpace(env.Message)}
+}
+
+// CancelApproval calls core POST /internal/approvals/{id}/cancel. Core only
+// cancels a still-pending approval; otherwise it answers 409 (CoreError).
+func (c *CoreClient) CancelApproval(ctx context.Context, approvalID, actorUserID, reason string) error {
+	url := fmt.Sprintf("%s/internal/approvals/%s/cancel", c.BaseURL, approvalID)
+	body, err := json.Marshal(map[string]string{"actor_user_id": actorUserID, "reason": reason})
+	if err != nil {
+		return err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("X-Internal-Key", c.InternalKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return coreErrorFrom(resp)
+	}
+	return nil
 }
 
 type CoreAuditEvent struct {

@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -520,18 +522,23 @@ func (a *App) AdminListAttempts(w http.ResponseWriter, r *http.Request) {
 func (a *App) MandateWebhook(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	code := param(r, "provider")
-	p, err := a.paymentProvider(ctx, code)
-	if err != nil {
-		writeSnap(w, http.StatusNotFound, snapNotFound)
-		return
-	}
 	body, err := readLimited(r)
 	if err != nil {
 		writeSnap(w, http.StatusBadRequest, snapBadRequest)
 		return
 	}
+	sum := sha256.Sum256(body)
+	rawHash := hex.EncodeToString(sum[:])
+	p, err := a.paymentProvider(ctx, code)
+	if err != nil {
+		_, pRef := gateway.ParseNicepayRefs(body)
+		a.rejectWebhook(ctx, code, pRef, rawHash, maskJSON(body), "provider_unavailable")
+		writeSnap(w, http.StatusServiceUnavailable, snapError)
+		return
+	}
 	n, err := p.VerifyWebhook(r.Header, body)
 	if err != nil {
+		a.rejectWebhook(ctx, code, n.ProviderRef, rawHash, maskJSON(body), "invalid_signature")
 		writeSnap(w, http.StatusUnauthorized, snapUnauthorized)
 		return
 	}

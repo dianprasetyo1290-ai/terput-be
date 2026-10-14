@@ -31,6 +31,14 @@ type Gateway struct {
 	Location    *time.Location
 	JobInterval time.Duration
 
+	// QA-PAY BUG-004: the payment simulator is off unless explicitly enabled
+	// with PAYMENT_SIMULATOR_ENABLED=true (refused when APP_ENV=production)
+	// and is never a fallback for a provider without credentials. Its
+	// webhooks are verified with HMAC-SHA256 over the body using
+	// PAYMENT_SIM_WEBHOOK_SECRET (header X-SIGNATURE, hex).
+	SimulatorEnabled bool
+	SimWebhookSecret string
+
 	// T14: simulator switches (non-production only) for failover and
 	// failed-debit drills, and how many past days the daily gateway journal
 	// job re-checks for days it has not journaled yet.
@@ -59,6 +67,8 @@ func loadGateway() (Gateway, error) {
 		AccountingURL:       os.Getenv("ACCOUNTING_URL"),
 		BillingInternalURL:  strings.TrimRight(os.Getenv("BILLING_INTERNAL_URL"), "/"),
 		JobInterval:         time.Duration(integer("GATEWAY_JOB_INTERVAL_SECONDS", 60)) * time.Second,
+		SimulatorEnabled:    os.Getenv("PAYMENT_SIMULATOR_ENABLED") == "true",
+		SimWebhookSecret:    os.Getenv("PAYMENT_SIM_WEBHOOK_SECRET"),
 		SimFailCharges:      os.Getenv("PAYMENT_SIM_FAIL_CHARGES") == "true",
 		SimFailDebits:       os.Getenv("PAYMENT_SIM_FAIL_DEBITS") == "true",
 		JournalLookbackDays: integer("GATEWAY_JOURNAL_LOOKBACK_DAYS", 7),
@@ -85,6 +95,9 @@ func loadGateway() (Gateway, error) {
 	}
 	if set > 0 && len(missing) > 0 {
 		return g, errors.New("NICEPay is partially configured; missing " + strings.Join(missing, ", "))
+	}
+	if g.SimulatorEnabled && len(g.SimWebhookSecret) < 16 {
+		return g, errors.New("PAYMENT_SIMULATOR_ENABLED requires PAYMENT_SIM_WEBHOOK_SECRET (min 16 characters)")
 	}
 	return g, nil
 }

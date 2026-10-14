@@ -288,8 +288,10 @@ func TestSimMatchesT6Instructions(t *testing.T) {
 	if rt.PayCode != "SIMR77" || rt.RetailOutlet != "alfamart" {
 		t.Fatalf("retail=%+v", rt)
 	}
-	n, _ := s.VerifyWebhook(nil, []byte(`{"trxId":"TX-1","latestTransactionStatus":"06"}`))
-	if n.RefNo != "TX-1" || n.ClaimedStatus != StatusFailed {
+	s.WebhookSecret = "sim-secret-for-tests-0001"
+	body := []byte(`{"trxId":"TX-1","latestTransactionStatus":"06"}`)
+	n, err := s.VerifyWebhook(http.Header{"X-Signature": {SimSignature(s.WebhookSecret, body)}}, body)
+	if err != nil || n.RefNo != "TX-1" || n.ClaimedStatus != StatusFailed {
 		t.Fatalf("notification=%+v", n)
 	}
 	if st, _ := s.QueryStatus(ctx, StatusQuery{}); st != StatusPending {
@@ -323,4 +325,40 @@ func testPrivateKey(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return base64.StdEncoding.EncodeToString(der)
+}
+
+// BUG-004: the simulator never trusts an unsigned or wrongly signed body.
+func TestSimWebhookRequiresSignature(t *testing.T) {
+	body := []byte(`{"trxId":"TX-9","latestTransactionStatus":"00"}`)
+	const secret = "sim-secret-for-tests-0001"
+	good := SimSignature(secret, body)
+	cases := []struct {
+		name, secret, sig string
+		ok                bool
+	}{
+		{"no secret configured", "", good, false},
+		{"no signature header", secret, "", false},
+		{"forged signature", secret, "merchantToken-palsu", false},
+		{"signature of other body", secret, SimSignature(secret, []byte(`{}`)), false},
+		{"signature with other secret", secret, SimSignature("other-secret-000000000", body), false},
+		{"valid signature", secret, good, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := http.Header{}
+			if c.sig != "" {
+				h.Set("X-SIGNATURE", c.sig)
+			}
+			n, err := (&Sim{WebhookSecret: c.secret}).VerifyWebhook(h, body)
+			if c.ok != (err == nil) {
+				t.Fatalf("err=%v want ok=%v", err, c.ok)
+			}
+			if !c.ok && !errors.Is(err, ErrInvalidSignature) {
+				t.Fatalf("err=%v want ErrInvalidSignature", err)
+			}
+			if n.RefNo != "TX-9" {
+				t.Fatalf("refs must be parsed even when rejected: %+v", n)
+			}
+		})
+	}
 }

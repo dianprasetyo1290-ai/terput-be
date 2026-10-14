@@ -2,9 +2,11 @@ package handler
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strings"
 	"time"
@@ -78,9 +80,9 @@ func (a *App) location() *time.Location {
 
 // paymentProvider returns the adapter for a provider code: an explicit
 // override, else one built from payment_providers + <credential_ref>_* env.
-// Outside production a NICEPay provider without credentials runs as the
-// simulator, exactly like T6's "SIM-" branch; the sim adapter itself is
-// refused in production.
+// Fail-closed (QA-PAY BUG-004): a NICEPay provider without credentials is
+// unavailable, never silently replaced by the simulator; the sim adapter
+// itself only runs when PAYMENT_SIMULATOR_ENABLED=true outside production.
 func (a *App) paymentProvider(ctx context.Context, code string) (gateway.Provider, error) {
 	if p, ok := a.Providers[code]; ok {
 		return p, nil
@@ -93,7 +95,6 @@ func (a *App) paymentProvider(ctx context.Context, code string) (gateway.Provide
 		return nil, unavailable
 	}
 	gw := a.Config.Gateway
-	sim := &gateway.Sim{ProviderCode: code, FailCharges: gw.SimFailCharges, FailDebits: gw.SimFailDebits}
 	switch adapter {
 	case gateway.AdapterNicepay:
 		ref := credRef.String
@@ -101,20 +102,14 @@ func (a *App) paymentProvider(ctx context.Context, code string) (gateway.Provide
 			if a.Nicepay != nil {
 				return &gateway.Nicepay{ProviderCode: code, Client: a.Nicepay, NotifyURL: gw.NicepayCallbackURL, ReturnURL: gw.NicepayReturnURL, ImageURL: gw.NicepayImageURL}, nil
 			}
-			if a.Config.Production() {
-				return nil, unavailable
-			}
-			return sim, nil
+			return nil, unavailable
 		}
 		if v, ok := a.providerCache.Load(code); ok {
 			return v.(gateway.Provider), nil
 		}
 		creds := config.NicepayFromEnv(ref)
 		if !creds.Installed() {
-			if a.Config.Production() {
-				return nil, unavailable
-			}
-			return sim, nil
+			return nil, unavailable
 		}
 		c, err := nicepay.NewClient(nicepay.Config{BaseURL: creds.BaseURL, ClientID: creds.ClientID, ChannelID: creds.ChannelID,
 			ClientSecret: creds.ClientSecret, PrivateKey: creds.PrivateKey, NotifPubKey: creds.PublicKey, StoreID: creds.StoreID})
@@ -125,23 +120,24 @@ func (a *App) paymentProvider(ctx context.Context, code string) (gateway.Provide
 		a.providerCache.Store(code, p)
 		return p, nil
 	case gateway.AdapterSim:
-		if a.Config.Production() {
+		if !a.Config.SimulatorAllowed() {
 			return nil, unavailable
 		}
-		return sim, nil
+		return &gateway.Sim{ProviderCode: code, FailCharges: gw.SimFailCharges, FailDebits: gw.SimFailDebits, WebhookSecret: gw.SimWebhookSecret}, nil
 	}
 	return nil, unavailable
 }
 
 // credentialsInstalled reports, without revealing anything, whether a
-// provider's credentials are present.
+// provider's credentials are present (for the simulator: whether it is
+// allowed to run at all).
 func (a *App) credentialsInstalled(adapter, credRef string) bool {
 	switch adapter {
 	case gateway.AdapterSim:
-		return true
+		return a.Config.SimulatorAllowed()
 	case gateway.AdapterNicepay:
 		if credRef == "" || credRef == "NICEPAY" {
-			return a.Nicepay != nil || a.Config.Gateway.NicepayConfigured()
+			return a.Nicepay != nil
 		}
 		return config.NicepayFromEnv(credRef).Installed()
 	}
@@ -248,9 +244,15 @@ type chargeResult struct {
 	ExpiresAt                          time.Time
 }
 
+// newTxNo is TX-<yymmddhhmmss><6 random digits>. The old suffix
+// (Nanosecond()%1000) is always 0 on platforms with microsecond clocks, so
+// two checkouts in the same second collided on UNIQUE(school_id, tx_no).
 func newTxNo() string {
-	now := time.Now()
-	return fmt.Sprintf("TX-%s%d", now.Format("060102150405"), now.Nanosecond()%1000)
+	n, err := rand.Int(rand.Reader, big.NewInt(1_000_000))
+	if err != nil {
+		n = big.NewInt(int64(time.Now().Nanosecond() / 1000))
+	}
+	return fmt.Sprintf("TX-%s%06d", time.Now().Format("060102150405"), n.Int64())
 }
 
 // chargeFailureMessage keeps T6's 502 wording per method kind.

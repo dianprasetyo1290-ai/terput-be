@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 
@@ -68,34 +69,23 @@ func (a *App) handleProviderWebhook(w http.ResponseWriter, r *http.Request, code
 		writeSnap(w, http.StatusBadRequest, snapBadRequest)
 		return
 	}
-	p, err := a.paymentProvider(ctx, code)
-	if err != nil {
-		writeSnap(w, http.StatusNotFound, snapNotFound)
-		return
-	}
-
 	sum := sha256.Sum256(body)
 	rawHash := hex.EncodeToString(sum[:])
 	maskedBody := maskJSON(body)
 
+	p, err := a.paymentProvider(ctx, code)
+	if err != nil {
+		// Fail closed (QA-PAY BUG-004): no verifier = nothing is trusted.
+		// 503 so the provider retries once credentials are installed.
+		_, pRef := gateway.ParseNicepayRefs(body)
+		a.rejectWebhook(ctx, code, pRef, rawHash, maskedBody, "provider_unavailable")
+		writeSnap(w, http.StatusServiceUnavailable, snapError)
+		return
+	}
+
 	n, verr := p.VerifyWebhook(r.Header, body)
 	if verr != nil {
-		_, _ = a.DB.ExecContext(ctx,
-			`INSERT INTO gateway_notifications (provider, provider_ref, signature_valid, raw_hash, body_masked, result, received_at)
-			 VALUES ($1, $2, false, $3, $4, 'invalid_signature', now())
-			 ON CONFLICT (provider, provider_ref, raw_hash) DO NOTHING`,
-			code, n.ProviderRef, rawHash, jsonRaw(maskedBody))
-		if a.Core != nil {
-			_ = a.Core.Audit(ctx, client.AuditEvent{
-				Service:       "billing",
-				Module:        "security",
-				EntityType:    "webhook",
-				EntityID:      n.ProviderRef,
-				Action:        "webhook_signature_rejected",
-				Reason:        "invalid signature from payment gateway " + code,
-				CorrelationID: rawHash,
-			})
-		}
+		a.rejectWebhook(ctx, code, n.ProviderRef, rawHash, maskedBody, "invalid_signature")
 		writeSnap(w, http.StatusUnauthorized, snapUnauthorized)
 		return
 	}
@@ -104,7 +94,9 @@ func (a *App) handleProviderWebhook(w http.ResponseWriter, r *http.Request, code
 	err = a.DB.QueryRowContext(ctx,
 		`INSERT INTO gateway_notifications (provider, provider_ref, signature_valid, raw_hash, body_masked, received_at)
 		 VALUES ($1, $2, true, $3, $4, now())
-		 ON CONFLICT (provider, provider_ref, raw_hash) DO NOTHING
+		 ON CONFLICT (provider, provider_ref, raw_hash) DO UPDATE
+		   SET signature_valid = true, result = NULL, received_at = now()
+		   WHERE gateway_notifications.signature_valid = false
 		 RETURNING id`,
 		code, n.ProviderRef, rawHash, jsonRaw(maskedBody)).Scan(&notifID)
 	if err != nil || notifID == "" {
@@ -137,6 +129,28 @@ func (a *App) handleProviderWebhook(w http.ResponseWriter, r *http.Request, code
 	}
 	a.finishNotification(ctx, notifID, t.SchoolID, string(st))
 	writeSnap(w, http.StatusOK, snapOK)
+}
+
+// rejectWebhook records a refused notification in gateway_notifications
+// and the security audit log (TC-IF-005). The transaction is not touched.
+func (a *App) rejectWebhook(ctx context.Context, code, providerRef, rawHash string, maskedBody map[string]any, result string) {
+	_, _ = a.DB.ExecContext(ctx,
+		`INSERT INTO gateway_notifications (provider, provider_ref, signature_valid, raw_hash, body_masked, result, received_at)
+		 VALUES ($1, $2, false, $3, $4, $5, now())
+		 ON CONFLICT (provider, provider_ref, raw_hash) DO NOTHING`,
+		code, providerRef, rawHash, jsonRaw(maskedBody), result)
+	if a.Core != nil {
+		_ = a.Core.Audit(ctx, client.AuditEvent{
+			Service:       "billing",
+			Module:        "security",
+			EntityType:    "webhook",
+			EntityID:      providerRef,
+			Action:        "webhook_" + result,
+			Reason:        "notifikasi payment gateway " + code + " ditolak: " + result,
+			CorrelationID: rawHash,
+		})
+	}
+	log.Printf("billing: webhook %s rejected (%s) ref=%q hash=%s", code, result, providerRef, rawHash)
 }
 
 func (a *App) finishNotification(ctx context.Context, id, schoolID, result string) {
