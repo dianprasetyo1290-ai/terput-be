@@ -12,6 +12,7 @@ import (
 
 	"skci/ops/internal/client"
 	"skci/ops/internal/common"
+	"skci/ops/internal/pdfdoc"
 	"skci/ops/internal/storage"
 )
 
@@ -778,23 +779,39 @@ func (h *Handler) GetStockCountReportPDF(w http.ResponseWriter, r *http.Request)
 }
 
 func buildStockOpnamePDF(c *StockCount) []byte {
-	// Standard simple printable PDF document
-	content := fmt.Sprintf("%%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj\n5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n4 0 obj << /Length %d >> stream\nBT /F1 16 Tf 50 720 Td (BERITA ACARA STOCK OPNAME) Tj ET\nBT /F1 10 Tf 50 690 Td (Nomor: %s   Gudang: %s   Status: %s) Tj ET\n", len(c.Number)+100, c.Number, c.WarehouseName, c.Status)
-	y := 650
-	for i, l := range c.Lines {
-		if i > 25 {
-			break
-		}
-		var diff int64
-		if l.Variance != nil {
-			diff = *l.Variance
-		}
-		lineStr := fmt.Sprintf("%s (%s): Sistem %d, Fisik %v, Selisih %d %s", l.ItemName, l.ItemCode, l.SystemQty, l.CountedQty, diff, l.Unit)
-		content += fmt.Sprintf("BT /F1 9 Tf 50 %d Td (%s) Tj ET\n", y, lineStr)
-		y -= 18
+	lines := []pdfdoc.Line{
+		{Text: "BERITA ACARA STOCK OPNAME", Size: 16, Bold: true},
+		{Text: "Nomor: " + c.Number, Gap: 6},
+		{Text: "Gudang: " + c.WarehouseName},
+		{Text: "Status: " + c.Status},
+		{Text: "Mulai: " + c.StartedAt.Format("02-01-2006 15:04")},
+		{Text: "Barang", Bold: true, Gap: 12},
+		{Text: "Sistem", Bold: true, Right: 400, Gap: -14.5},
+		{Text: "Fisik", Bold: true, Right: 470, Gap: -14.5},
+		{Text: "Selisih", Bold: true, Right: 545, Gap: -14.5},
 	}
-	content += "endstream\nendobj\nxref\n0 6\n0000000000 65535 f \n0000000010 00000 n \n0000000060 00000 n \n0000000117 00000 n \n0000000280 00000 n \n0000000215 00000 n \ntrailer << /Size 6 /Root 1 0 R >>\nstartxref\n500\n%%EOF"
-	return []byte(content)
+	for _, l := range c.Lines {
+		counted, diff := "-", "-"
+		if l.CountedQty != nil {
+			counted = fmt.Sprintf("%d", *l.CountedQty)
+		}
+		if l.Variance != nil {
+			diff = fmt.Sprintf("%+d", *l.Variance)
+		}
+		lines = append(lines,
+			pdfdoc.Line{Text: fmt.Sprintf("%s - %s (%s)", l.ItemCode, l.ItemName, l.Unit), X: 60},
+			pdfdoc.Line{Text: fmt.Sprintf("%d", l.SystemQty), Right: 400, Gap: -14.5},
+			pdfdoc.Line{Text: counted, Right: 470, Gap: -14.5},
+			pdfdoc.Line{Text: diff, Right: 545, Gap: -14.5},
+		)
+	}
+	lines = append(lines,
+		pdfdoc.Line{Text: "Petugas penghitung", Gap: 40},
+		pdfdoc.Line{Text: "Mengetahui", X: 350, Gap: -14.5},
+		pdfdoc.Line{Text: "(____________________)", Gap: 40},
+		pdfdoc.Line{Text: "(____________________)", X: 350, Gap: -14.5},
+	)
+	return pdfdoc.Build(lines)
 }
 
 // ApprovalDecision matches Core callback payload.

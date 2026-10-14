@@ -11,6 +11,7 @@ import (
 
 	"skci/ops/internal/client"
 	"skci/ops/internal/common"
+	"skci/ops/internal/pdfdoc"
 	"skci/ops/internal/storage"
 )
 
@@ -621,18 +622,35 @@ func (h *Handler) GetPOReportPDF(w http.ResponseWriter, r *http.Request) {
 }
 
 func buildPOPDF(po *PurchaseOrder) []byte {
-	content := fmt.Sprintf("%%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj\n5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n4 0 obj << /Length %d >> stream\nBT /F1 16 Tf 50 720 Td (PURCHASE ORDER) Tj ET\nBT /F1 10 Tf 50 690 Td (Nomor: %s   Vendor: %s   Total: Rp%d) Tj ET\n", len(po.Number)+100, po.Number, po.VendorName, po.TotalIDR)
-	y := 650
-	for i, l := range po.Lines {
-		if i > 25 {
-			break
-		}
-		lineStr := fmt.Sprintf("%s: %d x Rp%d = Rp%d", l.Description, l.Qty, l.UnitPriceIDR, l.AmountIDR)
-		content += fmt.Sprintf("BT /F1 9 Tf 50 %d Td (%s) Tj ET\n", y, lineStr)
-		y -= 18
+	const amountX = 545.0
+	lines := []pdfdoc.Line{
+		{Text: "PURCHASE ORDER", Size: 16, Bold: true},
+		{Text: "Nomor: " + po.Number, Gap: 6},
+		{Text: "Vendor: " + po.VendorName},
+		{Text: "Status: " + po.Status},
 	}
-	content += "endstream\nendobj\nxref\n0 6\n0000000000 65535 f \n0000000010 00000 n \n0000000060 00000 n \n0000000117 00000 n \n0000000280 00000 n \n0000000215 00000 n \ntrailer << /Size 6 /Root 1 0 R >>\nstartxref\n500\n%%EOF"
-	return []byte(content)
+	if po.ExpectedDate != nil {
+		lines = append(lines, pdfdoc.Line{Text: "Perkiraan diterima: " + po.ExpectedDate.Format("02-01-2006")})
+	}
+	lines = append(lines,
+		pdfdoc.Line{Text: "Uraian", Bold: true, Gap: 12},
+		pdfdoc.Line{Text: "Jumlah", Bold: true, Right: amountX, Gap: -14.5},
+	)
+	for _, l := range po.Lines {
+		desc := l.Description
+		if desc == "" && l.ItemName != nil {
+			desc = *l.ItemName
+		}
+		lines = append(lines,
+			pdfdoc.Line{Text: fmt.Sprintf("%s  (%d x %s)", desc, l.Qty, pdfdoc.Rupiah(l.UnitPriceIDR)), X: 60},
+			pdfdoc.Line{Text: pdfdoc.Rupiah(l.AmountIDR), Right: amountX, Gap: -14.5},
+		)
+	}
+	lines = append(lines,
+		pdfdoc.Line{Text: "Total", Bold: true, Gap: 8},
+		pdfdoc.Line{Text: pdfdoc.Rupiah(po.TotalIDR), Bold: true, Right: amountX, Gap: -14.5},
+	)
+	return pdfdoc.Build(lines)
 }
 
 // --- Goods Receipts & Returns ---
