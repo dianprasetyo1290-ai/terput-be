@@ -220,6 +220,30 @@ func (a *App) DeleteComponentAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	code := param(r, "code")
+	// BUG-050: a mapping still used by an active scheme cannot be removed,
+	// otherwise the next generation or posting would have no account.
+	var schemes []string
+	rows, err := a.DB.QueryContext(r.Context(),
+		`SELECT DISTINCT s.name FROM billing_scheme_components c JOIN billing_schemes s ON s.id = c.scheme_id
+		  WHERE c.school_id = $1 AND c.code = $2 AND s.status <> 'archived' ORDER BY 1`, schoolID, code)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			writeErr(w, err)
+			return
+		}
+		schemes = append(schemes, n)
+	}
+	rows.Close()
+	if len(schemes) > 0 {
+		common.WriteError(w, http.StatusConflict, "pemetaan masih dipakai skema aktif: "+strings.Join(schemes, ", ")+"; arsipkan skema atau ganti akunnya")
+		return
+	}
 	res, err := a.DB.ExecContext(r.Context(), `DELETE FROM fee_component_accounts WHERE school_id = $1 AND component_code = $2`, schoolID, code)
 	if err != nil {
 		writeErr(w, err)

@@ -358,6 +358,7 @@ func (a *App) GenerateBills(w http.ResponseWriter, r *http.Request) {
 	if !common.Decode(w, r, &in) {
 		return
 	}
+	in.ActorType, in.ActorID = claims.ActiveRole, claims.UserID
 	result, err := a.generateBills(r.Context(), schoolID, in)
 	if err != nil {
 		writeErr(w, err)
