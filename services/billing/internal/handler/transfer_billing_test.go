@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"skci/billing/internal/client"
 	"skci/billing/internal/common"
 	"skci/billing/internal/config"
 )
@@ -340,8 +341,14 @@ func TestInternalStudentRefund_Idempotency(t *testing.T) {
 	schoolID := newUUID()
 	studentID := newUUID()
 	idempotencyKey := fmt.Sprintf("refund-key-%s", newUUID())
+	makerID := newUUID()
 
+	core := &fakeCore{}
+	coreSrv := httptest.NewServer(core.handler())
+	defer coreSrv.Close()
 	app := New(db, config.Config{}, stubIdentity{}, nil)
+	app.Core = client.New(coreSrv.URL, "k")
+	app.Config.Gateway.BillingInternalURL = "http://billing:8080"
 	srv := httptest.NewServer(newBillingTestRouter(app))
 	defer srv.Close()
 
@@ -350,7 +357,28 @@ func TestInternalStudentRefund_Idempotency(t *testing.T) {
 		"amount_idr":      200000,
 		"reason":          "Kelebihan bayar mutasi keluar",
 		"idempotency_key": idempotencyKey,
+		"requested_by":    makerID,
 	}
+
+	// Core refuses (no approval flow): nothing is stored, the caller sees 422.
+	core.refuse = true
+	refusedBody, _ := json.Marshal(refundPayload)
+	reqR, _ := http.NewRequest(http.MethodPost, srv.URL+"/internal/students/"+studentID+"/refund", bytes.NewReader(refusedBody))
+	reqR.Header.Set("Content-Type", "application/json")
+	respR, err := http.DefaultClient.Do(reqR)
+	if err != nil {
+		t.Fatalf("refused refund request: %v", err)
+	}
+	respR.Body.Close()
+	if respR.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 when core refuses, got %d", respR.StatusCode)
+	}
+	var leftover int
+	_ = db.QueryRow(`SELECT count(*) FROM bill_refunds WHERE school_id=$1`, schoolID).Scan(&leftover)
+	if leftover != 0 {
+		t.Fatalf("refused refund must not remain, found %d rows", leftover)
+	}
+	core.refuse = false
 	body, _ := json.Marshal(refundPayload)
 
 	// First call -> 201 Created
@@ -374,6 +402,18 @@ func TestInternalStudentRefund_Idempotency(t *testing.T) {
 	_ = json.NewDecoder(resp1.Body).Decode(&res1)
 	if res1.Data.ID == "" {
 		t.Fatalf("expected refund id in response")
+	}
+	appr := core.lastApproval(t)
+	if appr.RequestType != reqTypeRefund || appr.SourceID != res1.Data.ID || appr.MakerUserID != makerID ||
+		appr.AmountIDR == nil || *appr.AmountIDR != 200000 ||
+		appr.CallbackURL != "http://billing:8080/internal/refunds/"+res1.Data.ID+"/callback" {
+		t.Fatalf("approval request mismatch: %+v", appr)
+	}
+	var approvalID, requestedBy, status string
+	_ = db.QueryRow(`SELECT COALESCE(approval_id,''),requested_by::text,status FROM bill_refunds WHERE id=$1`, res1.Data.ID).
+		Scan(&approvalID, &requestedBy, &status)
+	if approvalID == "" || requestedBy != makerID || status != "requested" {
+		t.Fatalf("refund row: approval_id=%q requested_by=%q status=%q", approvalID, requestedBy, status)
 	}
 
 	// Second call with same idempotency key -> 200 OK with same ID
