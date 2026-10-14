@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"skci/core/internal/common"
 )
 
 var (
@@ -46,7 +48,7 @@ func New(notifURL, identityURL, hrURL, internalKey string) *Client {
 		IdentityURL:     strings.TrimRight(identityURL, "/"),
 		HRURL:           strings.TrimRight(hrURL, "/"),
 		InternalKey:     internalKey,
-		HTTP:            &http.Client{Timeout: 8 * time.Second},
+		HTTP:            &http.Client{Timeout: 8 * time.Second, Transport: common.CorrelationTransport{}},
 	}
 }
 

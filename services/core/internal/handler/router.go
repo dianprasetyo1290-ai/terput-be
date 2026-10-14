@@ -15,11 +15,12 @@ import (
 func NewRouter(h *Handler, cfg config.Config) http.Handler {
 	r := chi.NewRouter()
 
-	r.Use(middleware.RequestID, middleware.RealIP, middleware.Logger, common.SentryMiddleware(), middleware.Recoverer)
+	r.Use(middleware.RequestID, common.CorrelationMiddleware, middleware.RealIP, middleware.Logger, common.SentryMiddleware(), middleware.Recoverer)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   cfg.CORSOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Internal-Key", "Idempotency-Key"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Internal-Key", "Idempotency-Key", common.CorrelationHeader},
+		ExposedHeaders:   []string{common.CorrelationHeader},
 		AllowCredentials: true,
 	}))
 
@@ -79,6 +80,9 @@ func NewRouter(h *Handler, cfg config.Config) http.Handler {
 
 		// Central Audit Trail
 		pr.Get("/audit", h.ListAudit)
+		pr.Get("/audit/access-grants", h.ListAuditGrants)
+		pr.Post("/audit/access-grants", h.CreateAuditGrant)
+		pr.Delete("/audit/access-grants/{id}", h.RevokeAuditGrant)
 
 		// Parent Service Requests (Menu 81)
 		pr.Get("/service-request-categories", h.ListCategories)

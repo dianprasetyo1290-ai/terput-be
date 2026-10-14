@@ -149,6 +149,9 @@ func (h *Handler) delegationsFor(ctx context.Context, schoolID, userID string) [
 	return dels
 }
 
+// correlationPtr is the request's correlation id (BUG-117), nil when absent.
+func correlationPtr(r *http.Request) *string { return strPtr(common.CorrelationID(r.Context())) }
+
 // audit writes a core-originated audit event stamped with the caller.
 func (h *Handler) audit(r *http.Request, ev model.AuditEvent) {
 	ev.Service = "core"
@@ -158,6 +161,9 @@ func (h *Handler) audit(r *http.Request, ev model.AuditEvent) {
 	}
 	if ev.IPHash == nil {
 		ev.IPHash = HashIP(ClientIP(r))
+	}
+	if ev.CorrelationID == nil || *ev.CorrelationID == "" {
+		ev.CorrelationID = correlationPtr(r)
 	}
 	if err := h.Store.InsertAudit(r.Context(), ev); err != nil {
 		log.Printf("audit %s/%s: %v", ev.Module, ev.Action, err)

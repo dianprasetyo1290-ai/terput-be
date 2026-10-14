@@ -42,6 +42,12 @@ type Store interface {
 	ListExpiredSteps(ctx context.Context) ([]model.ApprovalStep, error)
 	EscalateStep(ctx context.Context, stepID string) (*model.ApprovalStep, error)
 
+	// Auditor access windows (BUG-087)
+	CreateAuditGrant(ctx context.Context, g model.AuditAccessGrant) (*model.AuditAccessGrant, error)
+	ListAuditGrants(ctx context.Context, schoolID string) ([]model.AuditAccessGrant, error)
+	RevokeAuditGrant(ctx context.Context, schoolID, id, revokedBy string) (*model.AuditAccessGrant, error)
+	HasActiveAuditGrant(ctx context.Context, schoolID, userID string) (bool, error)
+
 	// Approval Delegations
 	ListDelegations(ctx context.Context, schoolID, userID string) ([]model.ApprovalDelegation, error)
 	CreateDelegation(ctx context.Context, delegation model.ApprovalDelegation) (*model.ApprovalDelegation, error)

@@ -434,6 +434,9 @@ func (h *Handler) InternalCreateAudit(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusUnprocessableEntity, "school_id dan actor_user_id harus berupa UUID")
 		return
 	}
+	if in.CorrelationID == nil || *in.CorrelationID == "" {
+		in.CorrelationID = correlationPtr(r) // BUG-117: X-Correlation-ID of the caller
+	}
 	if err := h.Store.InsertAudit(r.Context(), model.AuditEvent{
 		SchoolID:      in.SchoolID,
 		Service:       in.Service,

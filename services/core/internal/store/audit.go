@@ -47,11 +47,15 @@ func (s *PGStore) InsertAudit(ctx context.Context, ev model.AuditEvent) error {
 // non-nil = exactly that school (no global rows leak to a school auditor).
 // To is exclusive.
 type AuditFilter struct {
-	SchoolID *string
-	UserID   string
-	Module   string
-	From     *time.Time
-	To       *time.Time
+	SchoolID      *string
+	UserID        string
+	Module        string
+	Service       string
+	Action        string
+	EntityID      string
+	CorrelationID string
+	From          *time.Time
+	To            *time.Time
 }
 
 func (s *PGStore) ListAudit(ctx context.Context, f AuditFilter, page, perPage int) ([]model.AuditEvent, int, error) {
@@ -69,6 +73,18 @@ func (s *PGStore) ListAudit(ctx context.Context, f AuditFilter, page, perPage in
 	}
 	if f.Module != "" {
 		add("module = $%d", f.Module)
+	}
+	if f.Service != "" {
+		add("service = $%d", f.Service)
+	}
+	if f.Action != "" {
+		add("action = $%d", f.Action)
+	}
+	if f.EntityID != "" {
+		add("entity_id = $%d", f.EntityID)
+	}
+	if f.CorrelationID != "" {
+		add("correlation_id = $%d", f.CorrelationID)
 	}
 	if f.From != nil {
 		add("created_at >= $%d", *f.From)

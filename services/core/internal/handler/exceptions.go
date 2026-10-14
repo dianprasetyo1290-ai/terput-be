@@ -71,6 +71,10 @@ func (h *Handler) ListExceptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !h.auditorHasAccess(w, r, claims, schoolID) {
+		return
+	}
+
 	page, perPage := common.Page(r)
 	kindFilter := r.URL.Query().Get("kind")
 	statusFilter := r.URL.Query().Get("status")
