@@ -42,6 +42,7 @@ func JSONWithMeta(w http.ResponseWriter, status int, data, meta any) {
 
 // WriteError writes an error envelope.
 func WriteError(w http.ResponseWriter, status int, msg string) {
+	msg = SafeMessage(status, msg)
 	WriteEnvelope(w, status, Envelope{Message: msg, Errors: map[string]string{"message": msg}})
 }
 
