@@ -139,3 +139,46 @@ func (c *AcademicClient) RemoveStudentEnrollments(schoolID, studentUserID string
 func normalizeName(s string) string {
 	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(s), " ", ""))
 }
+
+// ErrClassroomNotFound is returned by ClassroomName for an unknown id.
+var ErrClassroomNotFound = fmt.Errorf("classroom not found")
+
+// ClassroomName returns the name of classroomID in schoolID (announcement
+// targeting validation, QA-IDN BUG-089).
+func (c *AcademicClient) ClassroomName(schoolID, classroomID string) (string, error) {
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/classrooms/%s?school_id=%s", c.BaseURL, classroomID, schoolID), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("X-Internal-Key", c.InternalKey)
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return "", ErrClassroomNotFound
+	}
+	if resp.StatusCode >= 300 {
+		return "", fmt.Errorf("GET classroom: status %d", resp.StatusCode)
+	}
+	var env classroomEnvelope
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return "", err
+	}
+	return env.Data.Name, nil
+}
+
+// UserClassrooms lists the classrooms userIDs belong to in schoolID (as
+// student, wali kelas or guru pengampu) via academic's
+// GET /internal/user-classrooms.
+func (c *AcademicClient) UserClassrooms(schoolID string, userIDs []string) ([]string, error) {
+	var env struct {
+		Data []string `json:"data"`
+	}
+	url := fmt.Sprintf("%s/internal/user-classrooms?school_id=%s&user_ids=%s", c.BaseURL, schoolID, strings.Join(userIDs, ","))
+	if err := c.do(http.MethodGet, url, nil, &env); err != nil {
+		return nil, err
+	}
+	return env.Data, nil
+}

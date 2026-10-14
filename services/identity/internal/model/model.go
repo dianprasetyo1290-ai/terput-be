@@ -60,17 +60,17 @@ type AcademicYear struct {
 }
 
 type User struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	Email           string    `json:"email"`
-	Phone           *string   `json:"phone"`
-	DefaultPassword *string   `json:"default_password,omitempty"`
-	PasswordChanged bool      `json:"password_changed"`
-	Photo           *string   `json:"photo"`
-	BirthDate       *string   `json:"birth_date"`
-	BirthPlace      *string   `json:"birth_place"`
-	Address         *string   `json:"address"`
-	Religion        *string   `json:"religion"`
+	ID              string     `json:"id"`
+	Name            string     `json:"name"`
+	Email           string     `json:"email"`
+	Phone           *string    `json:"phone"`
+	DefaultPassword *string    `json:"default_password,omitempty"`
+	PasswordChanged bool       `json:"password_changed"`
+	Photo           *string    `json:"photo"`
+	BirthDate       *string    `json:"birth_date"`
+	BirthPlace      *string    `json:"birth_place"`
+	Address         *string    `json:"address"`
+	Religion        *string    `json:"religion"`
 	NISN            *string    `json:"nisn"`
 	NIK             *string    `json:"nik,omitempty"`
 	IsSuperadmin    bool       `json:"is_superadmin"`
@@ -174,19 +174,25 @@ type PositionAssignment struct {
 // leaves the event-only columns nil. Message doubles as Konten (event) /
 // Pesan (pengumuman) — same free-text semantics either way.
 type Announcement struct {
-	ID                     string    `json:"id"`
-	SchoolID               *string   `json:"school_id"`
-	Type                   string    `json:"type"`
-	Title                  string    `json:"title"`
-	Message                string    `json:"message"`
-	TargetRoles            []string  `json:"target_roles"`
-	Location               *string   `json:"location"`
-	URL                    *string   `json:"url"`
-	ThumbnailURL           *string   `json:"thumbnail_url"`
-	DocumentationPhotoURLs []string  `json:"documentation_photo_urls"`
-	Jenis                  *string   `json:"jenis"`
-	Published              bool      `json:"published"`
-	CreatedBy              *string   `json:"created_by"`
-	CreatedAt              time.Time `json:"created_at"`
-	UpdatedAt              time.Time `json:"updated_at"`
+	ID                     string     `json:"id"`
+	SchoolID               *string    `json:"school_id"`
+	Type                   string     `json:"type"`
+	Title                  string     `json:"title"`
+	Message                string     `json:"message"`
+	TargetRoles            []string   `json:"target_roles"`
+	Location               *string    `json:"location"`
+	URL                    *string    `json:"url"`
+	ThumbnailURL           *string    `json:"thumbnail_url"`
+	DocumentationPhotoURLs []string   `json:"documentation_photo_urls"`
+	Jenis                  *string    `json:"jenis"`
+	Published              bool       `json:"published"`
+	AudienceAll            bool       `json:"audience_all"`
+	TargetSchoolIDs        []string   `json:"target_school_ids"`
+	TargetClassIDs         []string   `json:"target_class_ids"`
+	TargetClassNames       []string   `json:"target_class_names"`
+	PublishAt              *time.Time `json:"publish_at"`
+	Status                 string     `json:"status"` // draf | terjadwal | terbit
+	CreatedBy              *string    `json:"created_by"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
 }
