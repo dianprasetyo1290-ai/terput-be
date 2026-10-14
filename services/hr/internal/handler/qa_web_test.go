@@ -51,6 +51,7 @@ func TestQAWeb_ListEndpointsAgainstSchema(t *testing.T) {
 		"/payroll/payslips", "/payroll/journals",
 		"/employees", "/departments", "/positions", "/org-chart",
 		"/leave-types", "/document-types", "/leave-requests", "/attendance",
+		"/dashboard",
 	}
 	for _, p := range paths {
 		sep := "?"
@@ -126,6 +127,9 @@ func TestQAWeb_RoleMatrix(t *testing.T) {
 		{common.RoleKepalaSekolah, "/ats/requisitions", 200},
 		{common.RoleKepalaSekolah, "/employees", 403},
 		{common.RoleHRAdmin, "/training/mandatory", 200},
+		{common.RoleHRAdmin, "/dashboard", 200},
+		{common.RoleHRManager, "/dashboard", 200},
+		{common.RolePegawai, "/dashboard", 403},
 		{common.RoleHRAdmin, "/payroll/inputs?period=2026-09", 200},
 		{common.RolePegawai, "/training/courses", 403},
 		{common.RolePegawai, "/attendance", 403},

@@ -127,6 +127,8 @@ func (a *App) Router() http.Handler {
 		api.Group(func(hr chi.Router) {
 			hr.Use(common.RequireAnyRole(rolesHR...))
 
+			hr.Get("/dashboard", a.HRDashboard)
+
 			// Employees
 			hr.Get("/employees", a.ListEmployees)
 			hr.Get("/employees/export", a.ExportEmployees)
