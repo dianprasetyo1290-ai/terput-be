@@ -14,7 +14,7 @@ import (
 func (a *App) InternalMetricFacts(w http.ResponseWriter, r *http.Request) {
 	schoolID := strings.TrimSpace(r.URL.Query().Get("school_id"))
 	if schoolID == "" {
-		common.WriteError(w, http.StatusUnprocessableEntity, "school_id is required")
+		common.WriteError(w, http.StatusUnprocessableEntity, "sekolah wajib dipilih")
 		return
 	}
 	metric := strings.TrimSpace(r.URL.Query().Get("metric"))

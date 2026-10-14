@@ -45,7 +45,7 @@ func (a *App) ListDocuments(w http.ResponseWriter, r *http.Request) {
 	c := common.Guardian(r)
 	applicationID := param(r, "id")
 	if !a.guardianOwnsApplication(r, c.SchoolID, c.GuardianID, applicationID) {
-		common.WriteError(w, http.StatusNotFound, "application not found")
+		common.WriteError(w, http.StatusNotFound, "pendaftaran tidak ditemukan")
 		return
 	}
 	docs, err := a.applicationDocuments(r, c.SchoolID, applicationID)
@@ -326,7 +326,7 @@ func (a *App) DeleteDocument(w http.ResponseWriter, r *http.Request) {
 		   AND app.status='draft' AND d.locked_at IS NULL`,
 		documentID, applicationID, c.SchoolID, c.GuardianID).Scan(&objectKey)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusConflict, "document cannot be deleted")
+		common.WriteError(w, http.StatusConflict, "dokumen yang sudah diverifikasi tidak dapat dihapus")
 		return
 	}
 	if err != nil {
@@ -355,7 +355,7 @@ func (a *App) DownloadDocument(w http.ResponseWriter, r *http.Request) {
 		 WHERE d.id=$1 AND d.application_id=$2 AND d.school_id=$3 AND ap.guardian_id=$4`,
 		param(r, "docId"), param(r, "id"), c.SchoolID, c.GuardianID).Scan(&key, &mime, &size, &checksum, &fileName)
 	if err != nil {
-		common.WriteError(w, http.StatusNotFound, "document not found")
+		common.WriteError(w, http.StatusNotFound, "dokumen tidak ditemukan")
 		return
 	}
 	a.streamObject(w, r, key, mime, checksum, fileName, size)

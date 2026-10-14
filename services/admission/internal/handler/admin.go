@@ -217,7 +217,7 @@ func (a *App) writeAdminApplication(w http.ResponseWriter, r *http.Request, scho
 	row := a.DB.QueryRowContext(r.Context(), listApplicationsSQL+` WHERE a.id=$1 AND a.school_id=$2`, applicationID, schoolID)
 	application, err := scanAdminApplication(row)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "application not found")
+		common.WriteError(w, http.StatusNotFound, "pendaftaran tidak ditemukan")
 		return
 	}
 	if err != nil {
@@ -238,8 +238,9 @@ func (a *App) writeAdminApplication(w http.ResponseWriter, r *http.Request, scho
 		return
 	}
 	result := map[string]any{
-		"application": application,
-		"documents":   documents,
+		"application":  application,
+		"documents":    documents,
+		"form_answers": detail["form_answers"],
 	}
 	var chargeID string
 	if err := a.DB.QueryRowContext(r.Context(),
@@ -736,7 +737,7 @@ func (a *App) UpdateRequirement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "requirement not found")
+		common.WriteError(w, http.StatusNotFound, "persyaratan dokumen tidak ditemukan")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]any{"id": param(r, "id")}, nil)

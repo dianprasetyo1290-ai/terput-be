@@ -181,6 +181,7 @@ func main() {
 		ad.Put("/admin/finance/vouchers/{id}", app.UpdateVoucher)
 
 		ad.Get("/admin/payments", app.PaymentQueue)
+		ad.Get("/admin/payments/{id}/proof", app.AdminPaymentProof)
 		ad.Post("/admin/payments/{id}/review", app.ReviewPayment)
 		ad.Post("/admin/payments/{id}/reversal", app.ReversePayment)
 		ad.Get("/admin/refunds", app.ListRefunds)
@@ -193,6 +194,7 @@ func main() {
 		ad.Get("/admin/selection/scores", app.ListScores)
 		ad.Put("/admin/selection/scores/{applicationId}", app.UpsertScore)
 		ad.Post("/admin/selection/rankings/preview", app.RankingPreview)
+		ad.Get("/admin/selection/rankings", app.LatestRanking)
 		ad.Post("/admin/selection/rankings", app.RunRanking)
 		ad.Post("/admin/selection/decisions/{applicationId}", app.FinalizeDecision)
 		ad.Get("/admin/selection/approvals", app.ListSelectionApprovals)

@@ -23,6 +23,9 @@ import (
 // percentages (0-100); they are converted to basis points on the way in.
 type formulaInput struct {
 	ID           string `json:"id"`
+	PeriodID     string `json:"period_id"`
+	WaveID       string `json:"wave_id"`
+	TrackID      string `json:"track_id"`
 	Name         string `json:"name"`
 	Version      int    `json:"version"`
 	Status       string `json:"status"`
@@ -71,7 +74,11 @@ func (a *App) ListFormulas(w http.ResponseWriter, r *http.Request) {
 	}
 	schoolID := common.EffectiveSchoolID(r)
 	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT id,version,status,formula FROM selection_formula_versions WHERE school_id=$1 ORDER BY created_at DESC`, schoolID)
+		`SELECT f.id,f.version,f.status,f.formula,f.wave_id,COALESCE(w.name,''),f.track_id,COALESCE(t.name,'')
+		 FROM selection_formula_versions f
+		 LEFT JOIN admission_waves w ON w.id=f.wave_id LEFT JOIN admission_tracks t ON t.id=f.track_id
+		 WHERE f.school_id=$1 AND ($2='' OR f.wave_id::text=$2) AND ($3='' OR f.track_id::text=$3)
+		 ORDER BY f.created_at DESC`, schoolID, r.URL.Query().Get("wave_id"), r.URL.Query().Get("track_id"))
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -80,15 +87,17 @@ func (a *App) ListFormulas(w http.ResponseWriter, r *http.Request) {
 	out := []map[string]any{}
 	for rows.Next() {
 		var (
-			id, status string
-			version    int
-			raw        []byte
+			id, status, waveID, waveName, trackID, trackName string
+			version                                          int
+			raw                                              []byte
 		)
-		if err := rows.Scan(&id, &version, &status, &raw); err != nil {
+		if err := rows.Scan(&id, &version, &status, &raw, &waveID, &waveName, &trackID, &trackName); err != nil {
 			writeErr(w, err)
 			return
 		}
-		out = append(out, formulaView(id, version, status, raw))
+		item := formulaView(id, version, status, raw)
+		item["wave_id"], item["wave_name"], item["track_id"], item["track_name"] = waveID, waveName, trackID, trackName
+		out = append(out, item)
 	}
 	common.WriteJSON(w, http.StatusOK, out, nil)
 }
@@ -140,11 +149,23 @@ func (a *App) CreateFormula(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	periodID, waveID, trackID, err := a.defaultScope(r, schoolID)
-	if err != nil {
+	// BUG-161: a formula belongs to one wave + track; the admin picks both.
+	if in.WaveID == "" || in.TrackID == "" {
+		common.WriteError(w, http.StatusUnprocessableEntity, "gelombang dan jalur formula wajib dipilih")
+		return
+	}
+	var periodID, trackPeriod string
+	if err = a.DB.QueryRowContext(r.Context(),
+		`SELECT w.period_id,t.period_id FROM admission_waves w, admission_tracks t
+		 WHERE w.id::text=$1 AND t.id::text=$2 AND w.school_id=$3 AND t.school_id=$3 AND w.deleted_at IS NULL AND t.deleted_at IS NULL`,
+		in.WaveID, in.TrackID, schoolID).Scan(&periodID, &trackPeriod); err == sql.ErrNoRows || (err == nil && periodID != trackPeriod) {
+		common.WriteError(w, http.StatusUnprocessableEntity, "gelombang dan jalur harus berasal dari periode yang sama")
+		return
+	} else if err != nil {
 		writeErr(w, err)
 		return
 	}
+	waveID, trackID := in.WaveID, in.TrackID
 	raw, _ := json.Marshal(spec)
 	checksum := sha256.Sum256(raw)
 
@@ -164,6 +185,9 @@ func (a *App) CreateFormula(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	claims := common.Admin(r)
+	a.audit(r.Context(), schoolID, "selection_formula", id, "formula_created", "admin", claims.UserID, claims.Name, "",
+		nil, map[string]any{"name": spec.Name, "version": version, "status": spec.Status, "wave_id": waveID, "track_id": trackID})
 	common.WriteJSON(w, http.StatusCreated, map[string]any{"id": id, "version": version, "status": spec.Status}, nil)
 }
 
@@ -196,32 +220,13 @@ func (a *App) UpdateFormula(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "formula not found")
+		common.WriteError(w, http.StatusNotFound, "formula tidak ditemukan")
 		return
 	}
+	claims := common.Admin(r)
+	a.audit(r.Context(), schoolID, "selection_formula", param(r, "id"), "formula_updated", "admin", claims.UserID, claims.Name, "",
+		nil, map[string]any{"name": spec.Name, "status": spec.Status})
 	common.WriteJSON(w, http.StatusOK, map[string]any{"id": param(r, "id"), "status": spec.Status}, nil)
-}
-
-// defaultScope resolves a period/wave/track for records the config forms do not
-// scope explicitly.
-func (a *App) defaultScope(r *http.Request, schoolID string) (periodID, waveID, trackID string, err error) {
-	periodID, err = a.resolvePeriodID(r, schoolID, "")
-	if err != nil {
-		return
-	}
-	if err = a.DB.QueryRowContext(r.Context(),
-		`SELECT id FROM admission_waves WHERE school_id=$1 AND period_id=$2 AND deleted_at IS NULL ORDER BY registration_start LIMIT 1`,
-		schoolID, periodID).Scan(&waveID); err == sql.ErrNoRows {
-		return "", "", "", &httpError{http.StatusUnprocessableEntity, "configure a wave for the period first"}
-	} else if err != nil {
-		return
-	}
-	if err = a.DB.QueryRowContext(r.Context(),
-		`SELECT id FROM admission_tracks WHERE school_id=$1 AND period_id=$2 AND deleted_at IS NULL ORDER BY name LIMIT 1`,
-		schoolID, periodID).Scan(&trackID); err == sql.ErrNoRows {
-		return "", "", "", &httpError{http.StatusUnprocessableEntity, "configure a track for the period first"}
-	}
-	return
 }
 
 // ---------------------------------------------------------------------------
@@ -331,12 +336,12 @@ func (a *App) ensureComponent(r *http.Request, schoolID, periodID, componentID, 
 		var resolvedCode string
 		if err := a.DB.QueryRowContext(r.Context(),
 			`SELECT code FROM selection_components WHERE id=$1 AND school_id=$2`, componentID, schoolID).Scan(&resolvedCode); err != nil {
-			return "", "", &httpError{http.StatusNotFound, "component not found"}
+			return "", "", &httpError{http.StatusNotFound, "komponen nilai tidak ditemukan"}
 		}
 		return componentID, resolvedCode, nil
 	}
 	if code == "" {
-		return "", "", &httpError{http.StatusUnprocessableEntity, "component_id or component_code is required"}
+		return "", "", &httpError{http.StatusUnprocessableEntity, "komponen nilai wajib dipilih"}
 	}
 	var id string
 	err := a.DB.QueryRowContext(r.Context(),
@@ -465,7 +470,7 @@ func (a *App) RunRanking(w http.ResponseWriter, r *http.Request) {
 // and returns ranked entries with a deterministic checksum.
 func (a *App) computeRanking(r *http.Request, schoolID, periodID, waveID, trackID, formulaID string) ([]map[string]any, string, int, error) {
 	if periodID == "" || waveID == "" || trackID == "" || formulaID == "" {
-		return nil, "", 0, &httpError{http.StatusUnprocessableEntity, "period_id, wave_id, track_id and formula_id are required"}
+		return nil, "", 0, &httpError{http.StatusUnprocessableEntity, "periode, gelombang, jalur, dan formula wajib dipilih"}
 	}
 	var (
 		raw                       []byte
@@ -533,7 +538,7 @@ func (a *App) computeRanking(r *http.Request, schoolID, periodID, waveID, trackI
 	var quota int
 	if err := a.DB.QueryRowContext(r.Context(),
 		`SELECT quota FROM admission_tracks WHERE id=$1 AND school_id=$2`, trackID, schoolID).Scan(&quota); err != nil {
-		return nil, "", 0, &httpError{http.StatusNotFound, "track not found"}
+		return nil, "", 0, &httpError{http.StatusNotFound, "jalur tidak ditemukan"}
 	}
 
 	ranked, err := model.Rank(list, formula, quota)
@@ -602,4 +607,74 @@ func (a *App) markRanked(ctx context.Context, tx *sql.Tx, schoolID, applicationI
 		}
 	}
 	return nil
+}
+
+// LatestRanking is GET /admin/selection/rankings?wave_id=&track_id=: the most
+// recent final snapshot of a scope with each applicant's current decision, so
+// the committee can resume drafting decisions after leaving the page.
+func (a *App) LatestRanking(w http.ResponseWriter, r *http.Request) {
+	if !common.RequireAdmin(w, r) {
+		return
+	}
+	schoolID := common.EffectiveSchoolID(r)
+	waveID, trackID := r.URL.Query().Get("wave_id"), r.URL.Query().Get("track_id")
+	if waveID == "" || trackID == "" {
+		common.WriteError(w, http.StatusUnprocessableEntity, "gelombang dan jalur wajib dipilih")
+		return
+	}
+	var (
+		runID, formulaID, checksum string
+		createdAt                  time.Time
+		quota                      int
+	)
+	err := a.DB.QueryRowContext(r.Context(),
+		`SELECT rr.id,rr.formula_version_id,rr.input_checksum,rr.created_at,t.quota
+		 FROM ranking_runs rr JOIN admission_tracks t ON t.id=rr.track_id
+		 WHERE rr.school_id=$1 AND rr.wave_id::text=$2 AND rr.track_id::text=$3 AND rr.status='final'
+		 ORDER BY rr.version DESC LIMIT 1`, schoolID, waveID, trackID).Scan(&runID, &formulaID, &checksum, &createdAt, &quota)
+	if err == sql.ErrNoRows {
+		common.WriteJSON(w, http.StatusOK, nil, nil)
+		return
+	}
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	rows, err := a.DB.QueryContext(r.Context(),
+		`SELECT e.application_id,a.registration_number,ap.full_name,e.total_score,e.rank,e.recommendation,a.status,
+		        COALESCE(d.decision,''),COALESCE(d.status,'')
+		 FROM ranking_entries e JOIN applications a ON a.id=e.application_id JOIN applicants ap ON ap.id=a.applicant_id
+		 LEFT JOIN LATERAL (SELECT decision,status FROM decisions WHERE application_id=e.application_id AND status<>'superseded'
+		                    ORDER BY version DESC LIMIT 1) d ON true
+		 WHERE e.ranking_run_id=$1 ORDER BY e.rank`, runID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	defer rows.Close()
+	entries := []map[string]any{}
+	for rows.Next() {
+		var (
+			appID, number, name, rec, appStatus, decision, decisionStatus string
+			total                                                         int64
+			rank                                                          int
+		)
+		if err := rows.Scan(&appID, &number, &name, &total, &rank, &rec, &appStatus, &decision, &decisionStatus); err != nil {
+			writeErr(w, err)
+			return
+		}
+		item := map[string]any{"application_id": appID, "registration_number": number, "applicant_name": name,
+			"total_score": total, "rank": rank, "recommendation": recommendationAPI(rec), "application_status": appStatus}
+		if decision != "" {
+			// Same vocabulary as recommendation (accepted / waitlisted / rejected).
+			item["decision"] = map[string]string{"offered": "accepted"}[decision]
+			if item["decision"] == "" {
+				item["decision"] = decision
+			}
+			item["decision_status"] = decisionStatus
+		}
+		entries = append(entries, item)
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]any{"id": runID, "formula_id": formulaID, "status": "final",
+		"checksum": checksum, "created_at": createdAt, "quota": quota, "entries": entries}, nil)
 }

@@ -23,7 +23,7 @@ func (a *App) resolvePeriodID(r *http.Request, schoolID, explicit string) (strin
 	err := a.DB.QueryRowContext(r.Context(),
 		`SELECT id FROM admission_periods WHERE school_id=$1 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1`, schoolID).Scan(&id)
 	if err == sql.ErrNoRows {
-		return "", &httpError{http.StatusUnprocessableEntity, "no period configured yet"}
+		return "", &httpError{http.StatusUnprocessableEntity, "belum ada periode PPDB yang dikonfigurasi"}
 	}
 	return id, err
 }

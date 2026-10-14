@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 
 	"skci/admission/internal/common"
@@ -94,6 +95,7 @@ func (a *App) ListFormFields(w http.ResponseWriter, r *http.Request) {
 	for key, label := range model.BuiltinApplicantFields {
 		builtin = append(builtin, map[string]string{"key": key, "label": label})
 	}
+	sort.Slice(builtin, func(i, j int) bool { return builtin[i]["label"] < builtin[j]["label"] })
 	common.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "builtin_fields": builtin}, nil)
 }
 

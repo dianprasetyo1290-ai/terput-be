@@ -243,3 +243,35 @@ func (a *App) closeRefund(w http.ResponseWriter, r *http.Request, status string,
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]any{"id": param(r, "id"), "status": status}, nil)
 }
+
+// applicationRefunds lists the refunds of one application for the detail
+// views (staff and guardian). Account numbers are masked.
+func applicationRefunds(ctx context.Context, q queryer, schoolID, applicationID string) ([]map[string]any, error) {
+	rows, err := q.QueryContext(ctx,
+		`SELECT id,stage,paid_idr,refundable_idr,policy_bp,admin_fee_idr,status,COALESCE(method,''),COALESCE(bank_name,''),
+		        COALESCE(account_number,''),COALESCE(reference,''),paid_at,created_at
+		 FROM admission_refunds WHERE school_id=$1 AND application_id=$2 ORDER BY created_at`, schoolID, applicationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var (
+			id, stage, status, method, bank, accNo, ref string
+			paid, refundable, fee                       int64
+			bp                                          int
+			paidAt                                      sql.NullTime
+			createdAt                                   time.Time
+		)
+		if err := rows.Scan(&id, &stage, &paid, &refundable, &bp, &fee, &status, &method, &bank, &accNo, &ref, &paidAt, &createdAt); err != nil {
+			return nil, err
+		}
+		item := map[string]any{"id": id, "stage": stage, "stage_label": stageLabel(stage), "paid_idr": paid,
+			"refundable_idr": refundable, "policy_bp": bp, "admin_fee_idr": fee, "status": status, "method": method,
+			"bank_name": bank, "account_number": model.MaskAccountNumber(accNo), "reference": ref, "created_at": createdAt}
+		timeIfSet(item, "paid_at", nullTimePtr(paidAt))
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}

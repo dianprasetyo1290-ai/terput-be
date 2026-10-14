@@ -93,7 +93,7 @@ func parseTime(value string) (time.Time, error) {
 			return t, nil
 		}
 	}
-	return time.Time{}, errors.New("invalid timestamp")
+	return time.Time{}, errors.New("format waktu tidak valid")
 }
 
 // nullTime turns a zero time into a NULL-friendly value.

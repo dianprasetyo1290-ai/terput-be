@@ -24,13 +24,13 @@ func (a *App) GuardianDashboard(w http.ResponseWriter, r *http.Request) {
 	var name string
 	if err := a.DB.QueryRowContext(r.Context(),
 		`SELECT name FROM guardians WHERE id=$1 AND school_id=$2`, c.GuardianID, c.SchoolID).Scan(&name); err != nil {
-		common.WriteError(w, http.StatusNotFound, "guardian not found")
+		common.WriteError(w, http.StatusNotFound, "akun orang tua tidak ditemukan")
 		return
 	}
 	contact, contactType := a.primaryContact(r, c.SchoolID, c.GuardianID)
 	applicants, err := a.listApplicants(r, c.SchoolID, c.GuardianID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to load applicants")
+		common.WriteError(w, http.StatusInternalServerError, "daftar calon siswa gagal dimuat")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]any{
@@ -98,7 +98,7 @@ func (a *App) ListApplicants(w http.ResponseWriter, r *http.Request) {
 	c := common.Guardian(r)
 	applicants, err := a.listApplicants(r, c.SchoolID, c.GuardianID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to list applicants")
+		common.WriteError(w, http.StatusInternalServerError, "daftar calon siswa gagal dimuat")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, applicants, nil)
@@ -198,11 +198,11 @@ func (a *App) GetApplicant(w http.ResponseWriter, r *http.Request) {
 		param(r, "id"), c.GuardianID, c.SchoolID)
 	m, err := scanApplicantRow(row)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "applicant not found")
+		common.WriteError(w, http.StatusNotFound, "calon siswa tidak ditemukan")
 		return
 	}
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to load applicant")
+		common.WriteError(w, http.StatusInternalServerError, "data calon siswa gagal dimuat")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, m, nil)
@@ -232,7 +232,7 @@ func (a *App) CreateApplicant(w http.ResponseWriter, r *http.Request) {
 		c.SchoolID, c.GuardianID, in.FullName, in.Nickname, in.NISN, in.NIK, in.BirthDate, in.BirthPlace,
 		in.Gender, in.PreviousSchool, in.Address, in.GuardianRelationship, jsonRaw(custom)).Scan(&id)
 	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "failed to create applicant")
+		common.WriteError(w, http.StatusBadRequest, "data calon siswa gagal disimpan")
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, map[string]any{"id": id}, nil)
@@ -264,11 +264,11 @@ func (a *App) UpdateApplicant(w http.ResponseWriter, r *http.Request) {
 		in.FullName, in.Nickname, in.NISN, in.NIK, in.BirthDate, in.BirthPlace, in.Gender,
 		in.PreviousSchool, in.Address, in.GuardianRelationship, id, c.GuardianID, c.SchoolID, jsonRaw(custom))
 	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "failed to update applicant")
+		common.WriteError(w, http.StatusBadRequest, "data calon siswa gagal diperbarui")
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "applicant not found")
+		common.WriteError(w, http.StatusNotFound, "calon siswa tidak ditemukan")
 		return
 	}
 	resp := map[string]any{"id": id}
@@ -293,22 +293,22 @@ func (a *App) DeleteApplicant(w http.ResponseWriter, r *http.Request) {
 		`SELECT status FROM applications WHERE applicant_id=$1 AND school_id=$2 ORDER BY created_at DESC LIMIT 1`, id, c.SchoolID).
 		Scan(&status)
 	if err == nil && status != "draft" {
-		common.WriteError(w, http.StatusConflict, "applicant already has an active application")
+		common.WriteError(w, http.StatusConflict, "calon siswa sudah memiliki pendaftaran aktif")
 		return
 	}
 	if err != nil && err != sql.ErrNoRows {
-		common.WriteError(w, http.StatusInternalServerError, "failed to delete applicant")
+		common.WriteError(w, http.StatusInternalServerError, "data calon siswa gagal dihapus")
 		return
 	}
 	res, err := a.DB.ExecContext(r.Context(),
 		`UPDATE applicants SET deleted_at=now(),updated_at=now() WHERE id=$1 AND guardian_id=$2 AND school_id=$3 AND deleted_at IS NULL`,
 		id, c.GuardianID, c.SchoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to delete applicant")
+		common.WriteError(w, http.StatusInternalServerError, "data calon siswa gagal dihapus")
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "applicant not found")
+		common.WriteError(w, http.StatusNotFound, "calon siswa tidak ditemukan")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]any{"id": id, "deleted": true}, nil)
@@ -333,12 +333,12 @@ func (a *App) CreateApplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.ApplicantID == "" || in.PeriodID == "" || in.WaveID == "" || in.TrackID == "" {
-		common.WriteError(w, http.StatusBadRequest, "applicant_id, period_id, wave_id and track_id are required")
+		common.WriteError(w, http.StatusBadRequest, "calon siswa, periode, gelombang, dan jalur wajib dipilih")
 		return
 	}
 	tx, err := a.DB.BeginTx(r.Context(), nil)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to create application")
+		common.WriteError(w, http.StatusInternalServerError, "pendaftaran gagal dibuat")
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -347,7 +347,7 @@ func (a *App) CreateApplication(w http.ResponseWriter, r *http.Request) {
 	if err = tx.QueryRowContext(r.Context(),
 		`SELECT EXISTS(SELECT 1 FROM applicants WHERE id=$1 AND guardian_id=$2 AND school_id=$3 AND deleted_at IS NULL)`,
 		in.ApplicantID, c.GuardianID, c.SchoolID).Scan(&owned); err != nil || !owned {
-		common.WriteError(w, http.StatusNotFound, "applicant not found")
+		common.WriteError(w, http.StatusNotFound, "calon siswa tidak ditemukan")
 		return
 	}
 
@@ -377,11 +377,11 @@ func (a *App) CreateApplication(w http.ResponseWriter, r *http.Request) {
 	if _, err = tx.ExecContext(r.Context(),
 		`INSERT INTO application_state_events(school_id,application_id,to_status,actor_type,actor_id,version)
 		 VALUES($1,$2,'draft','guardian',$3,1)`, c.SchoolID, id, c.GuardianID); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to create application")
+		common.WriteError(w, http.StatusInternalServerError, "pendaftaran gagal dibuat")
 		return
 	}
 	if err = tx.Commit(); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to create application")
+		common.WriteError(w, http.StatusInternalServerError, "pendaftaran gagal dibuat")
 		return
 	}
 	a.audit(r.Context(), c.SchoolID, "application", id, "application_created", "guardian", c.GuardianID, "", "", nil,
@@ -475,11 +475,11 @@ func (a *App) ApplicationDetail(w http.ResponseWriter, r *http.Request) {
 	c := common.Guardian(r)
 	result, err := a.applicationDetail(r, c.SchoolID, param(r, "id"), "guardian", c.GuardianID)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "application not found")
+		common.WriteError(w, http.StatusNotFound, "pendaftaran tidak ditemukan")
 		return
 	}
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to load application")
+		common.WriteError(w, http.StatusInternalServerError, "pendaftaran gagal dimuat")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, result, nil)
@@ -578,6 +578,19 @@ func (a *App) applicationDetail(r *http.Request, schoolID, applicationID, scope,
 		return nil, err
 	}
 	result["timeline"] = timeline
+	refunds, err := applicationRefunds(r.Context(), a.DB, schoolID, applicationID)
+	if err != nil {
+		return nil, err
+	}
+	result["refunds"] = refunds
+	var dropReason string
+	if err := a.DB.QueryRowContext(r.Context(),
+		`SELECT COALESCE(drop_reason,'') FROM applications WHERE id=$1 AND school_id=$2`, applicationID, schoolID).Scan(&dropReason); err != nil {
+		return nil, err
+	}
+	if dropReason != "" {
+		result["drop_reason"] = dropReason
+	}
 	return result, nil
 }
 

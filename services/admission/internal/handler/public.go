@@ -99,11 +99,11 @@ type discoveryResponse struct {
 func (a *App) Discovery(w http.ResponseWriter, r *http.Request) {
 	schoolID, err := a.resolveSchoolID(r)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to resolve school")
+		common.WriteError(w, http.StatusInternalServerError, "sekolah tidak dikenali")
 		return
 	}
 	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+		common.WriteError(w, http.StatusBadRequest, "sekolah wajib dipilih")
 		return
 	}
 
@@ -126,7 +126,7 @@ func (a *App) Discovery(w http.ResponseWriter, r *http.Request) {
 		 WHERE p.school_id=$1 AND p.status='open' AND p.deleted_at IS NULL
 		 ORDER BY p.created_at DESC`, schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to load discovery")
+		common.WriteError(w, http.StatusInternalServerError, "informasi PPDB gagal dimuat")
 		return
 	}
 	defer periodRows.Close()
@@ -134,7 +134,7 @@ func (a *App) Discovery(w http.ResponseWriter, r *http.Request) {
 		var p discoveryPeriod
 		var open, close sql.NullTime
 		if err := periodRows.Scan(&p.ID, &p.Name, &p.AcademicYear, &p.Status, &p.Timezone, &open, &close); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to load discovery")
+			common.WriteError(w, http.StatusInternalServerError, "informasi PPDB gagal dimuat")
 			return
 		}
 		if open.Valid {
@@ -154,7 +154,7 @@ func (a *App) Discovery(w http.ResponseWriter, r *http.Request) {
 		 WHERE w.school_id=$1 AND w.deleted_at IS NULL AND p.status='open'
 		 ORDER BY w.registration_start`, schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to load discovery")
+		common.WriteError(w, http.StatusInternalServerError, "informasi PPDB gagal dimuat")
 		return
 	}
 	defer waveRows.Close()
@@ -164,7 +164,7 @@ func (a *App) Discovery(w http.ResponseWriter, r *http.Request) {
 		var grade sql.NullInt64
 		if err := waveRows.Scan(&wave.ID, &wave.PeriodID, &wave.Name, &wave.RegistrationOpen, &wave.RegistrationClose, &testAt, &announcement,
 			&wave.EducationLevel, &grade); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to load discovery")
+			common.WriteError(w, http.StatusInternalServerError, "informasi PPDB gagal dimuat")
 			return
 		}
 		if testAt.Valid {
@@ -192,7 +192,7 @@ func (a *App) Discovery(w http.ResponseWriter, r *http.Request) {
 		 WHERE t.school_id=$1 AND t.deleted_at IS NULL AND t.is_active AND p.status='open'
 		 ORDER BY t.name`, schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to load discovery")
+		common.WriteError(w, http.StatusInternalServerError, "informasi PPDB gagal dimuat")
 		return
 	}
 	defer trackRows.Close()
@@ -200,7 +200,7 @@ func (a *App) Discovery(w http.ResponseWriter, r *http.Request) {
 		var t discoveryTrack
 		var fee sql.NullInt64
 		if err := trackRows.Scan(&t.ID, &t.PeriodID, &t.Name, &t.Description, &t.Quota, &t.IsActive, &t.ApplicantCount, &fee); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to load discovery")
+			common.WriteError(w, http.StatusInternalServerError, "informasi PPDB gagal dimuat")
 			return
 		}
 		if fee.Valid {
@@ -218,7 +218,7 @@ func (a *App) Discovery(w http.ResponseWriter, r *http.Request) {
 		 WHERE dr.school_id=$1 AND dr.deleted_at IS NULL AND p.status='open'
 		 ORDER BY dr.name`, schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to load discovery")
+		common.WriteError(w, http.StatusInternalServerError, "informasi PPDB gagal dimuat")
 		return
 	}
 	defer reqRows.Close()
@@ -227,7 +227,7 @@ func (a *App) Discovery(w http.ResponseWriter, r *http.Request) {
 		var maxBytes int64
 		var mimes string
 		if err := reqRows.Scan(&req.ID, &req.Name, &req.Description, &mimes, &maxBytes, &req.Required); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to load discovery")
+			common.WriteError(w, http.StatusInternalServerError, "informasi PPDB gagal dimuat")
 			return
 		}
 		req.AcceptedTypes = parseTextArray(mimes)
@@ -237,7 +237,7 @@ func (a *App) Discovery(w http.ResponseWriter, r *http.Request) {
 
 	out.FormFields, err = formFields(r.Context(), a.DB, schoolID, "", "open", true)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to load discovery")
+		common.WriteError(w, http.StatusInternalServerError, "informasi PPDB gagal dimuat")
 		return
 	}
 

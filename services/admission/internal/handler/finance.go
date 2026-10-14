@@ -24,7 +24,7 @@ func (a *App) GetCharge(w http.ResponseWriter, r *http.Request) {
 	c := common.Guardian(r)
 	applicationID := param(r, "id")
 	if !a.guardianOwnsApplication(r, c.SchoolID, c.GuardianID, applicationID) {
-		common.WriteError(w, http.StatusNotFound, "application not found")
+		common.WriteError(w, http.StatusNotFound, "pendaftaran tidak ditemukan")
 		return
 	}
 	view, err := a.stageChargeView(r.Context(), c.SchoolID, applicationID, r.URL.Query().Get("stage"))
@@ -42,7 +42,7 @@ func (a *App) stageChargeView(ctx context.Context, schoolID, applicationID, stag
 	if err := a.DB.QueryRowContext(ctx,
 		`SELECT status FROM applications WHERE id=$1 AND school_id=$2`, applicationID, schoolID).Scan(&status); err != nil {
 		if err == sql.ErrNoRows {
-			return nil, &httpError{http.StatusNotFound, "application not found"}
+			return nil, &httpError{http.StatusNotFound, "pendaftaran tidak ditemukan"}
 		}
 		return nil, err
 	}
@@ -92,7 +92,7 @@ func (a *App) ApplyVoucher(w http.ResponseWriter, r *http.Request) {
 	c := common.Guardian(r)
 	applicationID := param(r, "id")
 	if !a.guardianOwnsApplication(r, c.SchoolID, c.GuardianID, applicationID) {
-		common.WriteError(w, http.StatusNotFound, "application not found")
+		common.WriteError(w, http.StatusNotFound, "pendaftaran tidak ditemukan")
 		return
 	}
 	var in struct {
@@ -102,7 +102,7 @@ func (a *App) ApplyVoucher(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Code == "" {
-		common.WriteError(w, http.StatusBadRequest, "code is required")
+		common.WriteError(w, http.StatusBadRequest, "kode wajib diisi")
 		return
 	}
 
@@ -136,7 +136,7 @@ func (a *App) redeemVoucher(ctx context.Context, schoolID, applicationID, code s
 		`SELECT period_id,status FROM applications WHERE id=$1 AND school_id=$2 FOR UPDATE`, applicationID, schoolID).
 		Scan(&periodID, &status); err != nil {
 		if err == sql.ErrNoRows {
-			return "", "", &httpError{http.StatusNotFound, "application not found"}
+			return "", "", &httpError{http.StatusNotFound, "pendaftaran tidak ditemukan"}
 		}
 		return "", "", err
 	}
@@ -227,7 +227,7 @@ func (a *App) ListPayments(w http.ResponseWriter, r *http.Request) {
 	c := common.Guardian(r)
 	applicationID := param(r, "id")
 	if !a.guardianOwnsApplication(r, c.SchoolID, c.GuardianID, applicationID) {
-		common.WriteError(w, http.StatusNotFound, "application not found")
+		common.WriteError(w, http.StatusNotFound, "pendaftaran tidak ditemukan")
 		return
 	}
 	rows, err := a.DB.QueryContext(r.Context(),
@@ -279,26 +279,26 @@ func (a *App) SubmitPayment(w http.ResponseWriter, r *http.Request) {
 	c := common.Guardian(r)
 	applicationID := param(r, "id")
 	if !a.guardianOwnsApplication(r, c.SchoolID, c.GuardianID, applicationID) {
-		common.WriteError(w, http.StatusNotFound, "application not found")
+		common.WriteError(w, http.StatusNotFound, "pendaftaran tidak ditemukan")
 		return
 	}
 	if err := r.ParseMultipartForm(a.Config.MaxUploadBytes); err != nil {
-		common.WriteError(w, http.StatusBadRequest, "invalid multipart upload")
+		common.WriteError(w, http.StatusBadRequest, "unggahan tidak valid")
 		return
 	}
 	amount, ok := parsePositive(r.FormValue("amount"))
 	if !ok {
-		common.WriteError(w, http.StatusBadRequest, "a positive amount is required")
+		common.WriteError(w, http.StatusBadRequest, "nominal harus lebih dari nol")
 		return
 	}
 	transferAt, err := parseTime(r.FormValue("transfer_at"))
 	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "transfer_at is invalid")
+		common.WriteError(w, http.StatusBadRequest, "tanggal transfer tidak valid")
 		return
 	}
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "file is required")
+		common.WriteError(w, http.StatusBadRequest, "berkas wajib diunggah")
 		return
 	}
 	defer file.Close()
@@ -388,7 +388,7 @@ func (a *App) PaymentQueue(w http.ResponseWriter, r *http.Request) {
 		 JOIN applications a ON a.id=p.application_id
 		 JOIN applicants ap ON ap.id=a.applicant_id
 		 JOIN charges c ON c.id=p.charge_id
-		 WHERE p.school_id=$1 AND ($2='' OR p.status=$2)
+		 WHERE p.school_id=$1 AND ($2='' OR p.status=$2 OR ($2='pending_review' AND p.status='submitted'))
 		 ORDER BY p.created_at DESC LIMIT $3 OFFSET $4`,
 		schoolID, status, perPage, common.Offset(page, perPage))
 	if err != nil {
@@ -464,6 +464,23 @@ func (a *App) PaymentQueue(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusOK, map[string]any{"items": items}, nil)
 }
 
+// AdminPaymentProof is GET /admin/payments/{id}/proof: streams the transfer
+// proof the guardian uploaded so the reviewer can check it.
+func (a *App) AdminPaymentProof(w http.ResponseWriter, r *http.Request) {
+	if !common.RequireAdmin(w, r) {
+		return
+	}
+	var key, mime, checksum, fileName string
+	var size int64
+	if err := a.DB.QueryRowContext(r.Context(),
+		`SELECT object_key,mime,size_bytes,sha256,COALESCE(file_name,'') FROM payment_submissions WHERE id::text=$1 AND school_id=$2`,
+		param(r, "id"), common.EffectiveSchoolID(r)).Scan(&key, &mime, &size, &checksum, &fileName); err != nil {
+		common.WriteError(w, http.StatusNotFound, "bukti pembayaran tidak ditemukan")
+		return
+	}
+	a.streamObject(w, r, key, mime, checksum, fileName, size)
+}
+
 // ReviewPayment is POST /admin/payments/{id}/review. A verified payment is
 // allocated to the applicant's own installments: explicit allocations must
 // reference installments of this application's stage charge, otherwise the
@@ -488,7 +505,7 @@ func (a *App) ReviewPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if target == model.PaymentRejected && strings.TrimSpace(in.Note) == "" {
-		common.WriteError(w, http.StatusUnprocessableEntity, "a reason is required to reject a payment")
+		common.WriteError(w, http.StatusUnprocessableEntity, "alasan penolakan pembayaran wajib diisi")
 		return
 	}
 	paymentID := param(r, "id")
@@ -510,7 +527,7 @@ func (a *App) ReviewPayment(w http.ResponseWriter, r *http.Request) {
 		 WHERE ps.id=$1 AND ps.school_id=$2 FOR UPDATE OF ps`,
 		paymentID, schoolID).Scan(&status, &uploaderType, &uploaderID, &amount, &applicationID, &stage)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "payment not found")
+		common.WriteError(w, http.StatusNotFound, "pembayaran tidak ditemukan")
 		return
 	}
 	if err != nil {
@@ -526,7 +543,7 @@ func (a *App) ReviewPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if target == model.PaymentVerified && uploaderType == "admin" && uploaderID == claims.UserID {
-		common.WriteError(w, http.StatusConflict, "the uploader cannot verify their own payment")
+		common.WriteError(w, http.StatusConflict, "pengunggah tidak dapat memverifikasi pembayarannya sendiri")
 		return
 	}
 	if target == model.PaymentVerified {
@@ -619,7 +636,7 @@ func (a *App) ReversePayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Reason == "" {
-		common.WriteError(w, http.StatusUnprocessableEntity, "reason is required")
+		common.WriteError(w, http.StatusUnprocessableEntity, "alasan wajib diisi")
 		return
 	}
 	paymentID := param(r, "id")
@@ -639,7 +656,7 @@ func (a *App) ReversePayment(w http.ResponseWriter, r *http.Request) {
 		`SELECT status,amount_idr,application_id FROM payment_submissions WHERE id=$1 AND school_id=$2 FOR UPDATE`, paymentID, schoolID).
 		Scan(&status, &amount, &applicationID)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "payment not found")
+		common.WriteError(w, http.StatusNotFound, "pembayaran tidak ditemukan")
 		return
 	}
 	if err != nil {

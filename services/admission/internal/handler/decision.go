@@ -13,7 +13,7 @@ func (a *App) GetDecision(w http.ResponseWriter, r *http.Request) {
 	c := common.Guardian(r)
 	applicationID := param(r, "id")
 	if !a.guardianOwnsApplication(r, c.SchoolID, c.GuardianID, applicationID) {
-		common.WriteError(w, http.StatusNotFound, "application not found")
+		common.WriteError(w, http.StatusNotFound, "pendaftaran tidak ditemukan")
 		return
 	}
 	view, err := a.decisionView(r, c.SchoolID, applicationID)
@@ -30,7 +30,7 @@ func (a *App) decisionView(r *http.Request, schoolID, applicationID string) (map
 	var status string
 	if err := a.DB.QueryRowContext(r.Context(),
 		`SELECT status FROM applications WHERE id=$1 AND school_id=$2`, applicationID, schoolID).Scan(&status); err != nil {
-		return nil, &httpError{http.StatusNotFound, "application not found"}
+		return nil, &httpError{http.StatusNotFound, "pendaftaran tidak ditemukan"}
 	}
 
 	view := map[string]any{
@@ -145,7 +145,7 @@ func (a *App) FinalizeDecision(w http.ResponseWriter, r *http.Request) {
 		applicationID, schoolID).Scan(&recommendation)
 	override := recommendation != "" && recommendationAPI(recommendation) != in.Decision
 	if override && in.Reason == "" {
-		common.WriteError(w, http.StatusUnprocessableEntity, "a reason is required when overriding the ranking recommendation")
+		common.WriteError(w, http.StatusUnprocessableEntity, "alasan wajib diisi bila keputusan berbeda dari rekomendasi peringkat")
 		return
 	}
 	if in.Reason == "" {
@@ -251,7 +251,7 @@ func (a *App) GetReregistration(w http.ResponseWriter, r *http.Request) {
 	c := common.Guardian(r)
 	applicationID := param(r, "id")
 	if !a.guardianOwnsApplication(r, c.SchoolID, c.GuardianID, applicationID) {
-		common.WriteError(w, http.StatusNotFound, "application not found")
+		common.WriteError(w, http.StatusNotFound, "pendaftaran tidak ditemukan")
 		return
 	}
 
@@ -262,7 +262,7 @@ func (a *App) GetReregistration(w http.ResponseWriter, r *http.Request) {
 	if err := a.DB.QueryRowContext(r.Context(),
 		`SELECT status,period_id FROM applications WHERE id=$1 AND school_id=$2`, applicationID, c.SchoolID).
 		Scan(&status, &periodID); err != nil {
-		common.WriteError(w, http.StatusNotFound, "application not found")
+		common.WriteError(w, http.StatusNotFound, "pendaftaran tidak ditemukan")
 		return
 	}
 

@@ -43,7 +43,7 @@ func WriteError(w http.ResponseWriter, status int, msg string) {
 func Decode(w http.ResponseWriter, r *http.Request, dst any) bool {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err := dec.Decode(dst); err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid request body")
+		WriteError(w, http.StatusBadRequest, "format permintaan tidak valid")
 		return false
 	}
 	return true
@@ -158,11 +158,11 @@ func roleAuth(secret string, allowed map[string]bool) func(http.Handler) http.Ha
 				return []byte(secret), nil
 			}, jwt.WithValidMethods([]string{"HS256"}))
 			if err != nil || !token.Valid {
-				WriteError(w, http.StatusUnauthorized, "invalid admin token")
+				WriteError(w, http.StatusUnauthorized, "sesi tidak valid, silakan masuk kembali")
 				return
 			}
 			if !allowed[claims.ActiveRole] {
-				WriteError(w, http.StatusForbidden, "admin role required")
+				WriteError(w, http.StatusForbidden, "peran Anda tidak diizinkan untuk aksi ini")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), adminKey, claims)))
@@ -179,7 +179,7 @@ func GuardianAuth(secret string) func(http.Handler) http.Handler {
 				return []byte(secret), nil
 			}, jwt.WithValidMethods([]string{"HS256"}))
 			if err != nil || !token.Valid || claims.Scope != GuardianScope || claims.GuardianID == "" {
-				WriteError(w, http.StatusUnauthorized, "invalid guardian token")
+				WriteError(w, http.StatusUnauthorized, "sesi orang tua tidak valid, silakan masuk kembali")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), guardianKey, claims)))
@@ -193,7 +193,7 @@ func InternalAuth(key string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			got := r.Header.Get("X-Internal-Key")
 			if got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(key)) != 1 {
-				WriteError(w, http.StatusUnauthorized, "invalid internal credentials")
+				WriteError(w, http.StatusUnauthorized, "kredensial internal tidak valid")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), internalKey, true)))
@@ -218,7 +218,7 @@ func Guardian(r *http.Request) *GuardianClaims {
 func RequireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	c := Admin(r)
 	if c == nil || (c.ActiveRole != "admin" && c.ActiveRole != "superadmin") {
-		WriteError(w, http.StatusForbidden, "admin role required")
+		WriteError(w, http.StatusForbidden, "hanya admin yang dapat melakukan aksi ini")
 		return false
 	}
 	return true

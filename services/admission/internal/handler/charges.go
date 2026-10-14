@@ -186,7 +186,7 @@ func (a *App) issueChargeTx(ctx context.Context, tx *sql.Tx, schoolID, applicati
 		Scan(&periodID, &waveID, &trackID, &status, &guardianID, &applicantID, &paymentEnd, &regEnd,
 			&reregEnd, &reregDue, &mode, &maxDiscount, &waitlistDays)
 	if err == sql.ErrNoRows {
-		return "", &httpError{http.StatusNotFound, "application not found"}
+		return "", &httpError{http.StatusNotFound, "pendaftaran tidak ditemukan"}
 	}
 	if err != nil {
 		return "", err

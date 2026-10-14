@@ -52,6 +52,14 @@ func (a *App) AdminDashboard(w http.ResponseWriter, r *http.Request) {
 	timeIfSet(period, "registration_open_at", nullTimePtr(open))
 	timeIfSet(period, "registration_close_at", nullTimePtr(close))
 	summary["active_period"] = period
+	// Filter options travel with the summary: leaders (kepala sekolah /
+	// yayasan) can read the dashboard but not the admin config endpoints.
+	options, err := a.dashboardOptions(ctx, schoolID, periodID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	summary["options"] = options
 
 	f := dashboardFilter{school: schoolID, period: periodID, wave: q.Get("wave_id"), track: q.Get("track_id")}
 	totals, err := a.dashboardTotals(ctx, f)
@@ -103,6 +111,38 @@ func (a *App) AdminDashboard(w http.ResponseWriter, r *http.Request) {
 		summary["tasks"] = tasks
 	}
 	common.WriteJSON(w, http.StatusOK, summary, nil)
+}
+
+func (a *App) dashboardOptions(ctx context.Context, schoolID, periodID string) (map[string]any, error) {
+	load := func(q string, args ...any) ([]map[string]any, error) {
+		rows, err := a.DB.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		out := []map[string]any{}
+		for rows.Next() {
+			var id, name string
+			if err := rows.Scan(&id, &name); err != nil {
+				return nil, err
+			}
+			out = append(out, map[string]any{"id": id, "name": name})
+		}
+		return out, rows.Err()
+	}
+	periods, err := load(`SELECT id::text,name||' ('||academic_year||')' FROM admission_periods WHERE school_id=$1 AND deleted_at IS NULL ORDER BY created_at DESC`, schoolID)
+	if err != nil {
+		return nil, err
+	}
+	waves, err := load(`SELECT id::text,name FROM admission_waves WHERE school_id=$1 AND period_id::text=$2 AND deleted_at IS NULL ORDER BY registration_start`, schoolID, periodID)
+	if err != nil {
+		return nil, err
+	}
+	tracks, err := load(`SELECT id::text,name FROM admission_tracks WHERE school_id=$1 AND period_id::text=$2 AND deleted_at IS NULL ORDER BY name`, schoolID, periodID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"periods": periods, "waves": waves, "tracks": tracks}, nil
 }
 
 type dashboardFilter struct{ school, period, wave, track string }
@@ -159,16 +199,16 @@ func reachedStatus(set string) string {
 }
 
 func (a *App) dashboardBreakdown(ctx context.Context, f dashboardFilter, dim string) ([]map[string]any, error) {
-	join, col := `JOIN admission_waves d ON d.id=a.wave_id`, `d.registration_start`
+	join, col, quota := `JOIN admission_waves d ON d.id=a.wave_id`, `d.registration_start`, `NULL::int`
 	if dim == "track" {
-		join, col = `JOIN admission_tracks d ON d.id=a.track_id`, `d.name`
+		join, col, quota = `JOIN admission_tracks d ON d.id=a.track_id`, `d.name`, `d.quota`
 	}
 	rows, err := a.DB.QueryContext(ctx,
-		`SELECT d.id,d.name,count(*),count(*) FILTER (WHERE a.submitted_at IS NOT NULL),
+		`SELECT d.id,d.name,`+quota+`,count(*),count(*) FILTER (WHERE a.submitted_at IS NOT NULL),
 		        count(*) FILTER (WHERE a.status IN('offered','reregistration','converted')),
 		        count(*) FILTER (WHERE a.status IN('reregistration','converted'))
 		 FROM applications a `+join+` WHERE `+dashboardScope+`
-		 GROUP BY d.id,d.name,`+col+` ORDER BY `+col, f.args()...)
+		 GROUP BY d.id,d.name,`+col+`,`+quota+` ORDER BY `+col, f.args()...)
 	if err != nil {
 		return nil, err
 	}
@@ -178,12 +218,17 @@ func (a *App) dashboardBreakdown(ctx context.Context, f dashboardFilter, dim str
 		var (
 			id, name                                 string
 			total, submitted, accepted, reregistered int
+			quota                                    sql.NullInt64
 		)
-		if err := rows.Scan(&id, &name, &total, &submitted, &accepted, &reregistered); err != nil {
+		if err := rows.Scan(&id, &name, &quota, &total, &submitted, &accepted, &reregistered); err != nil {
 			return nil, err
 		}
-		out = append(out, map[string]any{"id": id, "name": name, "total": total, "submitted": submitted,
-			"accepted": accepted, "reregistered": reregistered})
+		item := map[string]any{"id": id, "name": name, "total": total, "submitted": submitted,
+			"accepted": accepted, "reregistered": reregistered}
+		if quota.Valid {
+			item["quota"] = quota.Int64
+		}
+		out = append(out, item)
 	}
 	return out, rows.Err()
 }

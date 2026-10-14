@@ -223,7 +223,7 @@ func (a *App) RequestCorrection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Version < 1 || in.Reason == "" {
-		common.WriteError(w, http.StatusUnprocessableEntity, "reason and version are required")
+		common.WriteError(w, http.StatusUnprocessableEntity, "alasan dan versi data wajib dikirim")
 		return
 	}
 	applicationID := param(r, "id")
@@ -243,7 +243,7 @@ func (a *App) RequestCorrection(w http.ResponseWriter, r *http.Request) {
 		`SELECT status,version FROM applications WHERE id=$1 AND school_id=$2 FOR UPDATE`, applicationID, schoolID).
 		Scan(&status, &version)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "application not found")
+		common.WriteError(w, http.StatusNotFound, "pendaftaran tidak ditemukan")
 		return
 	}
 	if err != nil {
@@ -251,7 +251,7 @@ func (a *App) RequestCorrection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if version != in.Version {
-		common.WriteError(w, http.StatusConflict, "stale application version")
+		common.WriteError(w, http.StatusConflict, "data pendaftaran sudah berubah, muat ulang halaman lalu coba lagi")
 		return
 	}
 	if _, err = tx.ExecContext(r.Context(),
@@ -300,7 +300,7 @@ func (a *App) MarkEligible(w http.ResponseWriter, r *http.Request) {
 	err := a.DB.QueryRowContext(r.Context(),
 		`SELECT status,version FROM applications WHERE id=$1 AND school_id=$2`, applicationID, schoolID).Scan(&status, &version)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "application not found")
+		common.WriteError(w, http.StatusNotFound, "pendaftaran tidak ditemukan")
 		return
 	}
 	if err != nil {
@@ -370,7 +370,7 @@ func (a *App) RejectApplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Reason == "" {
-		common.WriteError(w, http.StatusUnprocessableEntity, "reason is required")
+		common.WriteError(w, http.StatusUnprocessableEntity, "alasan wajib diisi")
 		return
 	}
 	applicationID := param(r, "id")
@@ -396,7 +396,7 @@ func (a *App) RespondDecision(w http.ResponseWriter, r *http.Request) {
 	}
 	response := in.Response
 	if response != "accepted" && response != "declined" {
-		common.WriteError(w, http.StatusUnprocessableEntity, "response must be accepted or declined")
+		common.WriteError(w, http.StatusUnprocessableEntity, "tanggapan harus menerima atau menolak")
 		return
 	}
 	applicationID := param(r, "id")
@@ -409,7 +409,7 @@ func (a *App) RespondDecision(w http.ResponseWriter, r *http.Request) {
 		`SELECT status,version FROM applications WHERE id=$1 AND school_id=$2`, applicationID, c.SchoolID).
 		Scan(&status, &version)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "application not found")
+		common.WriteError(w, http.StatusNotFound, "pendaftaran tidak ditemukan")
 		return
 	}
 	if err != nil {
@@ -499,7 +499,7 @@ func (a *App) transitionTx(ctx context.Context, tx *sql.Tx, schoolID, applicatio
 	)
 	err := tx.QueryRowContext(ctx, query, args...).Scan(&from, &current)
 	if err == sql.ErrNoRows {
-		return nil, &httpError{http.StatusNotFound, "application not found"}
+		return nil, &httpError{http.StatusNotFound, "pendaftaran tidak ditemukan"}
 	}
 	if err != nil {
 		return nil, err
@@ -508,7 +508,7 @@ func (a *App) transitionTx(ctx context.Context, tx *sql.Tx, schoolID, applicatio
 		return nil, &httpError{http.StatusConflict, "data pendaftaran sudah berubah, muat ulang halaman"}
 	}
 	if actorType == "guardian" && !model.GuardianCanTransition(model.ApplicationStatus(from), to) {
-		return nil, &httpError{http.StatusForbidden, "guardian cannot perform this transition"}
+		return nil, &httpError{http.StatusForbidden, "orang tua tidak dapat melakukan perubahan status ini"}
 	}
 	if err := model.ValidateTransition(model.ApplicationStatus(from), to, reason); err != nil {
 		return nil, &httpError{http.StatusUnprocessableEntity, err.Error()}
