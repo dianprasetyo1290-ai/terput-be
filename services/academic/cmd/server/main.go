@@ -170,6 +170,8 @@ func main() {
 		r.Post("/student-status-requests/{id}/apply", h.ApplyStudentStatusRequest)
 		r.Post("/student-status-requests/{id}/cancel", h.CancelStudentStatusRequest)
 		r.Get("/student-status-requests/financial-summary", h.GetStudentFinancialSummaryProxy)
+		r.Post("/student-status-request-attachments", h.UploadStatusRequestAttachment)
+		r.Get("/student-status-requests/{id}/files", h.DownloadStatusRequestAttachment)
 		r.Get("/academic-settings", h.GetAcademicSettings)
 		r.Put("/academic-settings", h.UpdateAcademicSettings)
 

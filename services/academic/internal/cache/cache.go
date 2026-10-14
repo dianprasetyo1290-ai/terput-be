@@ -71,7 +71,9 @@ func (r *recorder) Write(b []byte) (int, error) {
 func cacheKey(r *http.Request) string {
 	scope := "anon"
 	if c := common.FromCtx(r); c != nil {
-		scope = c.SchoolID + ":" + c.UserID
+		// Active role too: one user with several roles (e.g. admin and
+		// walikelas) gets role-scoped lists (menu 78).
+		scope = c.SchoolID + ":" + c.UserID + ":" + c.ActiveRole
 	}
 	sum := sha256.Sum256([]byte(r.Method + " " + r.URL.Path + "?" + r.URL.RawQuery + " " + scope))
 	return keyPrefix + hex.EncodeToString(sum[:])
