@@ -1,3 +1,4 @@
+ALTER TABLE gateway_settings DROP COLUMN IF EXISTS receipt_resend_cooldown_minutes;
 UPDATE reconciliation_exceptions SET status = 'open' WHERE status = 'pending_approval';
 ALTER TABLE reconciliation_exceptions DROP CONSTRAINT IF EXISTS reconciliation_exceptions_status_check;
 ALTER TABLE reconciliation_exceptions ADD CONSTRAINT reconciliation_exceptions_status_check CHECK (status IN ('open', 'resolved'));

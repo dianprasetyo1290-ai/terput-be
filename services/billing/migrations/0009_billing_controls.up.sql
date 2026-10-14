@@ -140,3 +140,7 @@ ALTER TABLE reconciliation_exceptions
     ADD COLUMN requested_by  text NULL,
     ADD COLUMN requested_at  timestamptz NULL,
     ADD COLUMN decision_note text NULL;
+
+-- BUG-163: per-school minimum gap between two resends of the same receipt.
+ALTER TABLE gateway_settings ADD COLUMN receipt_resend_cooldown_minutes integer NOT NULL DEFAULT 10
+    CHECK (receipt_resend_cooldown_minutes >= 0);
