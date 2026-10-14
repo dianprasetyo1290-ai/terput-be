@@ -33,7 +33,7 @@ func guardianSchool(r *http.Request) (string, bool) {
 }
 
 func (a *App) ListGuardianLinks(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	if !a.permit(w, r, "guardians", "view") {
 		return
 	}
 	schoolID, ok := guardianSchool(r)
@@ -68,7 +68,7 @@ func validateGuardianLink(tx *sql.Tx, schoolID, guardianID, studentID string) er
 }
 
 func (a *App) CreateGuardianLink(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	if !a.permit(w, r, "guardians", "create") {
 		return
 	}
 	schoolID, ok := guardianSchool(r)
@@ -123,7 +123,7 @@ func (a *App) CreateGuardianLink(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) UpdateGuardianLink(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	if !a.permit(w, r, "guardians", "edit") {
 		return
 	}
 	schoolID, ok := guardianSchool(r)
@@ -152,7 +152,7 @@ func (a *App) UpdateGuardianLink(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) DeleteGuardianLink(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	if !a.permit(w, r, "guardians", "delete") {
 		return
 	}
 	schoolID, ok := guardianSchool(r)
@@ -301,7 +301,7 @@ type issueClaimRequest struct {
 }
 
 func (a *App) IssueGuardianClaim(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	if !a.permit(w, r, "guardians", "create") {
 		return
 	}
 	schoolID, ok := guardianSchool(r)

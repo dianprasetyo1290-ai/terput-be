@@ -30,6 +30,11 @@ type App struct {
 	PublicAppURL string
 	// MFAIssuer is the label authenticator apps show.
 	MFAIssuer string
+	// SelfURL is identity's internal base URL as other services reach it
+	// (approval callbacks). Empty -> IDENTITY_INTERNAL_URL or http://identity:8081.
+	SelfURL string
+	// HTTPClient for calls to core/notification (nil -> 8 s default).
+	HTTPClient *http.Client
 
 	policyCache policyCache
 }

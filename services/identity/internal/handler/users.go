@@ -461,12 +461,12 @@ func (a *App) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	// AC-83-02: while HRIS is on for one of the user's schools, the name of an
 	// HR-managed account is owned by the hr service, not Data Guru/Pengguna.
 	var hrLocked bool
-	var currentName, curNISN, curNIK, curPhone string
+	var currentName, curNISN, curNIK, curPhone, curReligion string
 	err := a.DB.QueryRow(`SELECT u.managed_by_hr AND EXISTS (
 			SELECT 1 FROM user_school_roles usr
 			JOIN school_features sf ON sf.school_id = usr.school_id AND sf.feature_key = 'hris' AND sf.enabled
-			WHERE usr.user_id = u.id), u.name, COALESCE(u.nisn,''), COALESCE(u.nik,''), COALESCE(u.phone,'')
-		FROM users u WHERE u.id = $1 AND u.deleted_at IS NULL`, id).Scan(&hrLocked, &currentName, &curNISN, &curNIK, &curPhone)
+			WHERE usr.user_id = u.id), u.name, COALESCE(u.nisn,''), COALESCE(u.nik,''), COALESCE(u.phone,''), COALESCE(u.religion,'')
+		FROM users u WHERE u.id = $1 AND u.deleted_at IS NULL`, id).Scan(&hrLocked, &currentName, &curNISN, &curNIK, &curPhone, &curReligion)
 	if err == sql.ErrNoRows {
 		common.WriteError(w, http.StatusNotFound, "user not found")
 		return
@@ -486,6 +486,20 @@ func (a *App) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		}
 		common.WriteValidationError(w, http.StatusBadRequest, msg, errs)
 		return
+	}
+	// BUG-073: a changed religion must come from the Data Referensi list
+	// (stored as its label, which academic matches to Agama subjects).
+	if rel := strings.TrimSpace(deref(req.Religion)); rel != "" && rel != curReligion {
+		label, ok, err := a.referenceLabel(r.Context(), "agama", rel, common.FromCtx(r).SchoolID)
+		if err != nil {
+			common.WriteDBError(w, err, "Gagal memeriksa data referensi")
+			return
+		}
+		if !ok {
+			common.WriteValidationError(w, http.StatusBadRequest, "Agama tidak ada di Data Referensi", map[string]string{"religion": "Pilih agama dari daftar"})
+			return
+		}
+		req.Religion = &label
 	}
 	// Only values that change are checked, so editing an unrelated field of
 	// an existing record never trips over a known shared number.
@@ -612,6 +626,12 @@ func (a *App) ResetPassword(w http.ResponseWriter, r *http.Request) {
 type assignRoleRequest struct {
 	Role     string `json:"role"`
 	SchoolID string `json:"school_id"`
+	// ExceptionReason (BUG-023): when the role forms a forbidden combination,
+	// a reason turns the request into an SoD exception that goes to the
+	// Approval Center instead of being refused. ValidUntil (YYYY-MM-DD) is
+	// optional; the exception lapses after that date.
+	ExceptionReason string `json:"exception_reason"`
+	ValidUntil      string `json:"valid_until"`
 }
 
 // AssignUserRole: "Admin can assign additional roles/jabatan to a user here."
@@ -658,8 +678,19 @@ func (a *App) AssignUserRole(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// BUG-023 / AC-RBAC-08: refuse a forbidden role combination.
-	if !a.checkRoleConflicts(w, r, id, req.Role) {
+	// BUG-023 / AC-RBAC-08: refuse a forbidden role combination, or route it
+	// to the Approval Center as an exception when a reason is given.
+	found, err := a.findRoleConflicts(r.Context(), id, req.Role)
+	if err != nil {
+		common.WriteDBError(w, err, "gagal memeriksa kombinasi peran")
+		return
+	}
+	if len(found) > 0 {
+		if strings.TrimSpace(req.ExceptionReason) == "" {
+			writeRoleConflict(w, found)
+			return
+		}
+		a.requestRoleConflictException(w, r, schoolID, id, req, found)
 		return
 	}
 	var schoolIDArg interface{}

@@ -135,7 +135,7 @@ func (a *App) GetAcademicYear(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) CreateAcademicYear(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	if !a.permit(w, r, "academic_years", "create") {
 		return
 	}
 	claims := common.FromCtx(r)
@@ -212,7 +212,7 @@ func (a *App) loadYearForWrite(w http.ResponseWriter, r *http.Request, id string
 // Omitted dates keep the stored ones. is_current is managed exclusively via
 // SetCurrentAcademicYear. Locked years are read-only.
 func (a *App) UpdateAcademicYear(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	if !a.permit(w, r, "academic_years", "edit") {
 		return
 	}
 	id := chi.URLParam(r, "id")
@@ -267,7 +267,7 @@ func (a *App) UpdateAcademicYear(w http.ResponseWriter, r *http.Request) {
 // migration 0004). Refuses the school's current year (pick another current
 // year first) and locked years.
 func (a *App) DeleteAcademicYear(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	if !a.permit(w, r, "academic_years", "delete") {
 		return
 	}
 	id := chi.URLParam(r, "id")
@@ -295,7 +295,7 @@ func (a *App) DeleteAcademicYear(w http.ResponseWriter, r *http.Request) {
 // schools.current_academic_year_id at it and locks earlier years that ended
 // before this one starts (BR-GEN-02).
 func (a *App) SetCurrentAcademicYear(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	if !a.permit(w, r, "academic_years", "edit") {
 		return
 	}
 	claims := common.FromCtx(r)
@@ -369,7 +369,7 @@ func nullUUID(s string) interface{} {
 // LockAcademicYear: POST /academic-years/{id}/lock {reason} — admin of the
 // unit or superadmin.
 func (a *App) LockAcademicYear(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	if !a.permit(w, r, "academic_years", "edit") {
 		return
 	}
 	claims := common.FromCtx(r)

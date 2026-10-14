@@ -103,6 +103,10 @@ const (
 	RoleAuditor        = "auditor"
 	RoleFinanceManager = "finance_manager"
 	RolePegawai        = "pegawai"
+	// RoleAkuntan is Accounting (PRD role matrix): journals, ledgers and
+	// reports in the accounting service; mapped to the Laravel "Accounting"
+	// role by the accounting /sso bridge. Migration 0022.
+	RoleAkuntan = "akuntan"
 
 	// Operasional sekolah, PRD Bagian 3–4 (T9, migration 0017). Names are
 	// the contract for T10–T26 (docs/prd-sekoci/tasks/T9 §2).
@@ -144,7 +148,7 @@ var OpsRoles = []string{
 
 var AllRoles = append([]string{
 	RoleSuperadmin, RoleAdmin, RoleGuru, RoleSiswa, RoleOrangTua, RoleWalikelas, RoleKepalaSekolah, RoleKepalaYayasan, RolePengawas,
-	RoleHRAdmin, RoleHRManager, RolePayrollOfficer, RoleRecruiter, RoleTrainingAdmin, RoleAuditor, RoleFinanceManager, RolePegawai,
+	RoleHRAdmin, RoleHRManager, RolePayrollOfficer, RoleRecruiter, RoleTrainingAdmin, RoleAuditor, RoleFinanceManager, RolePegawai, RoleAkuntan,
 }, OpsRoles...)
 
 var DashboardRoles = map[string]bool{
