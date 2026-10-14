@@ -128,16 +128,16 @@ func TestTransportE2E(t *testing.T) {
 	}
 
 	// 3. Test AC-121-01: Allocate 2 students (capacity 2) -> ok
-	s1 := "student-001"
-	s2 := "student-002"
-	s3 := "student-003"
-	err = store.CreateAllocations(ctx, schoolID, []string{s1, s2}, route.ID, dbStops[0].ID, today, "admin-1")
+	s1 := "00000000-0000-4000-8000-0000000000a1"
+	s2 := "00000000-0000-4000-8000-0000000000a2"
+	s3 := "00000000-0000-4000-8000-0000000000a3"
+	err = store.CreateAllocations(ctx, schoolID, []string{s1, s2}, route.ID, dbStops[0].ID, today, "00000000-0000-4000-8000-0000000000ad")
 	if err != nil {
 		t.Fatalf("allocate 2 students: %v", err)
 	}
 
 	// Allocate 3rd student -> must fail with ErrCapacityFull
-	err = store.CreateAllocations(ctx, schoolID, []string{s3}, route.ID, dbStops[0].ID, today, "admin-1")
+	err = store.CreateAllocations(ctx, schoolID, []string{s3}, route.ID, dbStops[0].ID, today, "00000000-0000-4000-8000-0000000000ad")
 	if err == nil {
 		t.Fatalf("AC-121-01: expected 3rd student allocation to fail due to capacity, but succeeded")
 	}
@@ -165,7 +165,7 @@ func TestTransportE2E(t *testing.T) {
 		StopID:        &dbStops[0].ID,
 		Event:         "board",
 		Source:        "scan",
-		RecordedBy:    "driver-user",
+		RecordedBy:    "00000000-0000-4000-8000-0000000000d1",
 		RecordedAt:    today,
 		ClientEventID: "client-ev-1",
 	})

@@ -746,11 +746,15 @@ func (s *Store) CreateAllocations(ctx context.Context, schoolID string, studentU
 	// 5. Insert each student
 	for _, sid := range studentUserIDs {
 		// End any previous open allocation for this student
-		_, _ = tx.ExecContext(ctx, `
+		// A failed statement aborts the whole transaction, so its error
+		// must not be dropped (the next INSERT would only report 25P02).
+		if _, err := tx.ExecContext(ctx, `
 			UPDATE transport_allocations
 			SET end_date = $1, end_reason = 'Ganti rute/alokasi baru', updated_at = now()
 			WHERE school_id = $2 AND student_user_id = $3 AND end_date IS NULL
-		`, startDate.AddDate(0, 0, -1), schoolID, sid)
+		`, startDate.AddDate(0, 0, -1), schoolID, sid); err != nil {
+			return err
+		}
 
 		// Insert new allocation
 		if _, err := tx.ExecContext(ctx, `
