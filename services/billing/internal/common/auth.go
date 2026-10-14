@@ -20,7 +20,64 @@ const (
 	RoleFinanceAdmin   = "finance_admin"
 	RoleAccounting     = "accounting"
 	RoleKasir          = "kasir"
+	RoleKepalaYayasan  = "kepala_yayasan"
+	RoleKepalaSekolah  = "kepala_sekolah"
 )
+
+// financeStaff may manage billing (PRD menus 17–25: Finance Admin, Finance
+// Manager; admin acts as Finance Admin). financeViewers may additionally
+// read finance reports (dashboard, aging) without changing anything.
+var (
+	financeStaff   = []string{RoleAdmin, RoleSuperadmin, RoleFinanceManager, RoleFinanceAdmin}
+	financeViewers = append(append([]string{}, financeStaff...), RoleKepalaYayasan, RoleKepalaSekolah)
+)
+
+func hasRole(role string, allowed []string) bool {
+	for _, a := range allowed {
+		if role == a {
+			return true
+		}
+	}
+	return false
+}
+
+// TenantFor resolves the school a request acts on: a superadmin may pick a
+// tenant with ?school_id=, every other role is pinned to its JWT school_id.
+func TenantFor(r *http.Request, c *Claims) string {
+	if c.ActiveRole == RoleSuperadmin {
+		return EffectiveSchoolID(r)
+	}
+	return c.SchoolID
+}
+
+func requireTenant(w http.ResponseWriter, r *http.Request, allowed []string) (*Claims, string) {
+	c := FromCtx(r)
+	if c == nil || !hasRole(c.ActiveRole, allowed) {
+		WriteError(w, http.StatusForbidden, "akses keuangan ditolak untuk peran ini")
+		return nil, ""
+	}
+	schoolID := TenantFor(r, c)
+	if schoolID == "" {
+		WriteError(w, http.StatusBadRequest, "school_id is required")
+		return nil, ""
+	}
+	return c, schoolID
+}
+
+// RequireFinanceStaff admits the roles that manage billing and returns the
+// tenant school.
+func RequireFinanceStaff(w http.ResponseWriter, r *http.Request) (*Claims, string) {
+	return requireTenant(w, r, financeStaff)
+}
+
+// RequireFinanceViewer admits finance staff plus the read-only report roles
+// (Kepala Yayasan, Kepala Sekolah) and returns the tenant school.
+func RequireFinanceViewer(w http.ResponseWriter, r *http.Request) (*Claims, string) {
+	return requireTenant(w, r, financeViewers)
+}
+
+// IsFinanceStaff reports whether role may change billing data.
+func IsFinanceStaff(role string) bool { return hasRole(role, financeStaff) }
 
 // Claims is the identity JWT payload billing-service verifies. It never
 // issues tokens — identity is the only login authority.
@@ -138,7 +195,7 @@ func RequireCashier(w http.ResponseWriter, r *http.Request) *Claims {
 	return c
 }
 
-// RequireBillReader admits admin/superadmin plus guru/walikelas for read-only
+// RequireBillReader admits finance viewers plus guru/walikelas for read-only
 // bill listings (guru "Keuangan Kelas"). Returns the claims and the tenant:
 // teachers are pinned to their own JWT school_id, never the ?school_id=
 // override, so a teacher can't read another school's bills. Handlers must
@@ -150,11 +207,11 @@ func RequireBillReader(w http.ResponseWriter, r *http.Request) (*Claims, string)
 		WriteError(w, http.StatusForbidden, "admin role required")
 		return nil, ""
 	}
-	switch c.ActiveRole {
-	case RoleAdmin, RoleSuperadmin:
-		return c, EffectiveSchoolID(r)
-	case RoleGuru, RoleWalikelas:
+	switch {
+	case c.ActiveRole == RoleGuru || c.ActiveRole == RoleWalikelas:
 		return c, c.SchoolID
+	case hasRole(c.ActiveRole, financeViewers):
+		return c, TenantFor(r, c)
 	}
 	WriteError(w, http.StatusForbidden, "admin role required")
 	return nil, ""

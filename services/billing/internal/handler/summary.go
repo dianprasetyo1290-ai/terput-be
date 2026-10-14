@@ -16,7 +16,7 @@ import (
 // ponytail: per-bill aggregation happens in Go over every bill of the period;
 // move into SQL if a school ever has 100k+ bills a year.
 func (a *App) FinanceSummary(w http.ResponseWriter, r *http.Request) {
-	c, schoolID := adminSchool(w, r)
+	c, schoolID := common.RequireFinanceViewer(w, r)
 	if c == nil {
 		return
 	}

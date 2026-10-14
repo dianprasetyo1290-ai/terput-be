@@ -15,18 +15,10 @@ import (
 // processing reverses verified payments of the bill (bill_payment_reversals
 // tagged with refund_id), lowering the bill's paid balance.
 
-// adminSchool is the shared admin + tenant guard for the refund routes.
+// adminSchool is the shared finance-staff + tenant guard (Finance Admin and
+// Finance Manager, PRD menus 18–25).
 func adminSchool(w http.ResponseWriter, r *http.Request) (*common.Claims, string) {
-	c := common.RequireAdmin(w, r)
-	if c == nil {
-		return nil, ""
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
-		return nil, ""
-	}
-	return c, schoolID
+	return common.RequireFinanceStaff(w, r)
 }
 
 // ListRefunds is GET /admin/refunds?status=&student_user_id=.

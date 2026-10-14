@@ -12,12 +12,8 @@ import (
 // discount/scholarship rules (bill_discounts) with how much each has actually
 // been applied (bill_discount_steps). ?scholarship=true limits to beasiswa.
 func (a *App) ListDiscounts(w http.ResponseWriter, r *http.Request) {
-	if common.RequireAdmin(w, r) == nil {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+	c, schoolID := common.RequireFinanceStaff(w, r)
+	if c == nil {
 		return
 	}
 	scholarship := strings.TrimSpace(r.URL.Query().Get("scholarship")) == "true"
@@ -73,12 +69,8 @@ func (a *App) ListDiscounts(w http.ResponseWriter, r *http.Request) {
 // discount, the total actually applied to non-void bills (from the immutable
 // bill_discount_steps snapshot). Filters: ?student_user_id=, ?scholarship=true.
 func (a *App) ListDiscountRecipients(w http.ResponseWriter, r *http.Request) {
-	if common.RequireAdmin(w, r) == nil {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+	c, schoolID := common.RequireFinanceStaff(w, r)
+	if c == nil {
 		return
 	}
 	studentID := strings.TrimSpace(r.URL.Query().Get("student_user_id"))

@@ -87,12 +87,8 @@ func componentKind(c componentInput) string {
 
 // CreateScheme is POST /admin/schemes.
 func (a *App) CreateScheme(w http.ResponseWriter, r *http.Request) {
-	if common.RequireAdmin(w, r) == nil {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+	c, schoolID := common.RequireFinanceStaff(w, r)
+	if c == nil {
 		return
 	}
 	var in schemeInput
@@ -137,12 +133,8 @@ func (a *App) CreateScheme(w http.ResponseWriter, r *http.Request) {
 // UpdateScheme is PUT /admin/schemes/{id}. Components are replaced when the
 // payload carries any.
 func (a *App) UpdateScheme(w http.ResponseWriter, r *http.Request) {
-	if common.RequireAdmin(w, r) == nil {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+	c, schoolID := common.RequireFinanceStaff(w, r)
+	if c == nil {
 		return
 	}
 	var in schemeInput
@@ -215,12 +207,8 @@ func insertComponents(ctx context.Context, tx *sql.Tx, schoolID, schemeID string
 // ArchiveScheme is DELETE /admin/schemes/{id} — a soft archive, never a hard
 // delete, so already-generated bills keep their scheme reference.
 func (a *App) ArchiveScheme(w http.ResponseWriter, r *http.Request) {
-	if common.RequireAdmin(w, r) == nil {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+	c, schoolID := common.RequireFinanceStaff(w, r)
+	if c == nil {
 		return
 	}
 	id := param(r, "id")
@@ -240,12 +228,8 @@ func (a *App) ArchiveScheme(w http.ResponseWriter, r *http.Request) {
 
 // ListSchemes is GET /admin/schemes.
 func (a *App) ListSchemes(w http.ResponseWriter, r *http.Request) {
-	if common.RequireAdmin(w, r) == nil {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+	c, schoolID := common.RequireFinanceStaff(w, r)
+	if c == nil {
 		return
 	}
 	year := strings.TrimSpace(r.URL.Query().Get("academic_year_id"))
@@ -289,12 +273,8 @@ func (a *App) ListSchemes(w http.ResponseWriter, r *http.Request) {
 
 // GetScheme is GET /admin/schemes/{id}.
 func (a *App) GetScheme(w http.ResponseWriter, r *http.Request) {
-	if common.RequireAdmin(w, r) == nil {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+	c, schoolID := common.RequireFinanceStaff(w, r)
+	if c == nil {
 		return
 	}
 	row := a.DB.QueryRowContext(r.Context(),
@@ -370,13 +350,8 @@ func (a *App) schemeComponents(ctx context.Context, schoolID, schemeID string) (
 // GenerateBills is POST /admin/bills/generate. It is idempotent per
 // (school, scheme, student, period).
 func (a *App) GenerateBills(w http.ResponseWriter, r *http.Request) {
-	claims := common.RequireAdmin(w, r)
+	claims, schoolID := common.RequireFinanceStaff(w, r)
 	if claims == nil {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
 		return
 	}
 	var in generateRequest
@@ -466,12 +441,8 @@ func (a *App) ListBills(w http.ResponseWriter, r *http.Request) {
 
 // ListArrears is GET /admin/arrears — bills that still owe money.
 func (a *App) ListArrears(w http.ResponseWriter, r *http.Request) {
-	if common.RequireAdmin(w, r) == nil {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+	c, schoolID := common.RequireFinanceViewer(w, r)
+	if c == nil {
 		return
 	}
 	year := common.IntParam(r, "period_year")
@@ -537,12 +508,8 @@ func (a *App) ListArrears(w http.ResponseWriter, r *http.Request) {
 
 // ExportReconciliation is GET /admin/reconciliation.csv.
 func (a *App) ExportReconciliation(w http.ResponseWriter, r *http.Request) {
-	if common.RequireAdmin(w, r) == nil {
-		return
-	}
-	schoolID := common.EffectiveSchoolID(r)
-	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+	c, schoolID := common.RequireFinanceStaff(w, r)
+	if c == nil {
 		return
 	}
 	year := common.IntParam(r, "period_year")
