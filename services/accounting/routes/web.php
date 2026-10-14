@@ -21,6 +21,8 @@ use App\Livewire\Pages\Home;
 use App\Livewire\Pages\AutoPosting\AutoPosting;
 use App\Livewire\Pages\Import\Import;
 use App\Livewire\Pages\JournalDetail\JournalDetail;
+use App\Livewire\Pages\JournalTemplate\JournalTemplate;
+use App\Livewire\Pages\PeriodReopen\PeriodReopen;
 use App\Livewire\Pages\Report\Consolidation\Consolidation;
 use App\Livewire\Pages\Report\Statements\Statements;
 use App\Livewire\Pages\Report\TrialBalance\TrialBalance;
@@ -102,6 +104,12 @@ Route::middleware([
     });
     Route::group(['middleware' => ['can:viewjournal_validation']], function () {
         Route::get('/journalvalidation', JV::class);
+    });
+    Route::group(['middleware' => ['can:viewjournal_template']], function () {
+        Route::get('/journaltemplate', JournalTemplate::class)->name('journal-template');
+    });
+    Route::group(['middleware' => ['can:viewperiod_reopen']], function () {
+        Route::get('/period-reopen', PeriodReopen::class)->name('period-reopen');
     });
     Route::group(['middleware' => ['can:viewauto_posting']], function () {
         Route::get('/autoposting', AutoPosting::class)->name('autoposting');

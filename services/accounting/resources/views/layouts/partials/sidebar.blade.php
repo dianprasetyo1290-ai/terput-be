@@ -65,13 +65,13 @@
                 </li>
                 <!-- Transaction -->
                 @canany(['viewjournal_transaction', 'viewjournal_validation', 'viewend_of_month', 'viewhistory_journal',
-                    'viewhistory_journal_validation', 'viewend_of_year', 'viewprior_year_adjustment', 'viewauto_posting'])
+                    'viewhistory_journal_validation', 'viewend_of_year', 'viewprior_year_adjustment', 'viewauto_posting', 'viewjournal_template', 'viewperiod_reopen'])
                     <li class="nav-item-header">
                         <div class="text-uppercase font-size-xs line-height-xs">Transaction</div> <i class="icon-menu"
                             title="Forms"></i>
                     </li>
                     <li
-                        class="nav-item nav-item-submenu {{ Request::is(['historyjournalvalidation', 'endofyear', 'prior-year-adjustment', 'journalvalidation', 'endofmonth', 'journaltransaction', 'historyjournaltransaction', 'autoposting']) ? 'nav-item-expanded nav-item-open' : '' }}">
+                        class="nav-item nav-item-submenu {{ Request::is(['historyjournalvalidation', 'endofyear', 'prior-year-adjustment', 'journalvalidation', 'endofmonth', 'journaltransaction', 'historyjournaltransaction', 'autoposting', 'journaltemplate', 'period-reopen']) ? 'nav-item-expanded nav-item-open' : '' }}">
                         <a href="#" class="nav-link"><i class="icon-book"></i> <span>Transaction</span></a>
                         <ul class="nav nav-group-sub" data-submenu-title="User pages">
                             @canany('viewjournal_transaction')
@@ -85,6 +85,11 @@
                                         class="nav-link {{ Request::is(['journalvalidation']) ? 'active' : '' }}">Approval Jurnal</a>
                                 </li>
                             @endcanany
+                            @canany('viewjournal_template')
+                                <li class="nav-item"><a href="{{ url('journaltemplate') }}"
+                                        class="nav-link {{ Request::is(['journaltemplate']) ? 'active' : '' }}">Template &amp; Jurnal Berulang</a>
+                                </li>
+                            @endcanany
                             @canany('viewauto_posting')
                                 <li class="nav-item"><a href="{{ url('autoposting') }}"
                                         class="nav-link {{ Request::is(['autoposting']) ? 'active' : '' }}">Posting Otomatis</a>
@@ -93,6 +98,11 @@
                             @canany('viewend_of_month')
                                 <li class="nav-item"><a href="{{ url('endofmonth') }}"
                                         class="nav-link {{ Request::is(['endofmonth']) ? 'active' : '' }}">End of Month</a>
+                                </li>
+                            @endcanany
+                            @canany('viewperiod_reopen')
+                                <li class="nav-item"><a href="{{ url('period-reopen') }}"
+                                        class="nav-link {{ Request::is(['period-reopen']) ? 'active' : '' }}">Buka Kembali Periode</a>
                                 </li>
                             @endcanany
                             @canany('viewhistory_journal')
@@ -164,7 +174,7 @@
                 <!-- /Report -->
 
                 <!-- Report Generator -->
-                @canany(['viewreport_row', 'viewreport_column', 'viewfinal_design'])
+                @canany(['viewreport_row_design', 'viewfinal_design'])
                     <li class="nav-item-header">
                         <div class="text-uppercase font-size-xs line-height-xs">Report Generator</div> <i class="icon-menu"
                             title="Layout options"></i>
@@ -174,7 +184,7 @@
                         <a href="#" class="nav-link"><i class="icon-file-presentation2"></i> <span>Report
                                 Generator</span></a>
                         <ul class="nav nav-group-sub" data-submenu-title="User pages">
-                            @canany('viewreport_row')
+                            @canany('viewreport_row_design')
                                 <li class="nav-item"><a href="{{ route('generator.row') }}"
                                         class="nav-link {{ Request::is(['generator/row-generator', 'generator/row-generator/detail/*']) ? 'active' : '' }}">Report
                                         Row Design</a>
