@@ -168,7 +168,9 @@ func (s *Store) GetStudentStatusRequest(ctx context.Context, schoolID, id string
 }
 
 // ListStudentStatusRequests returns a paginated list of status requests.
-func (s *Store) ListStudentStatusRequests(ctx context.Context, schoolID, kind, status, studentUserID string, limit, offset int) ([]model.StudentStatusRequest, int, error) {
+// homeroomUserID, when set (wali kelas), limits the list to requests whose
+// source or destination classroom has that homeroom teacher.
+func (s *Store) ListStudentStatusRequests(ctx context.Context, schoolID, kind, status, studentUserID, homeroomUserID string, limit, offset int) ([]model.StudentStatusRequest, int, error) {
 	where := `WHERE ($1 = '' OR school_id::text = $1)`
 	args := []any{schoolID}
 
@@ -183,6 +185,11 @@ func (s *Store) ListStudentStatusRequests(ctx context.Context, schoolID, kind, s
 	if studentUserID != "" {
 		args = append(args, studentUserID)
 		where += fmt.Sprintf(" AND student_user_id::text = $%d", len(args))
+	}
+	if homeroomUserID != "" {
+		args = append(args, homeroomUserID)
+		where += fmt.Sprintf(` AND EXISTS (SELECT 1 FROM classrooms c WHERE c.school_id = student_status_requests.school_id
+			AND c.homeroom_teacher_user_id::text = $%d AND c.id IN (from_classroom_id, to_classroom_id))`, len(args))
 	}
 
 	var total int

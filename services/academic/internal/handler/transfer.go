@@ -424,7 +424,8 @@ func (h *Handler) CancelStudentStatusRequest(w http.ResponseWriter, r *http.Requ
 
 // ListStudentStatusRequests is GET /student-status-requests (admin, walikelas, kepala_sekolah).
 func (h *Handler) ListStudentStatusRequests(w http.ResponseWriter, r *http.Request) {
-	if _, ok := requireMenu78Role(w, r, model.CanViewStatusRequests); !ok {
+	claims, ok := requireMenu78Role(w, r, model.CanViewStatusRequests)
+	if !ok {
 		return
 	}
 	schoolID, ok := scopeSchoolID(w, r)
@@ -450,7 +451,13 @@ func (h *Handler) ListStudentStatusRequests(w http.ResponseWriter, r *http.Reque
 	}
 	offset := (page - 1) * perPage
 
-	list, total, err := h.Store.ListStudentStatusRequests(r.Context(), schoolID, kind, status, studentUserID, perPage, offset)
+	// A wali kelas only sees requests of the classes they are homeroom
+	// teacher of (QA-PAY round 2).
+	homeroom := ""
+	if claims.ActiveRole == "walikelas" {
+		homeroom = claims.UserID
+	}
+	list, total, err := h.Store.ListStudentStatusRequests(r.Context(), schoolID, kind, status, studentUserID, homeroom, perPage, offset)
 	if err != nil {
 		common.WriteError(w, http.StatusInternalServerError, "failed to list status requests: "+err.Error())
 		return
@@ -482,6 +489,9 @@ func (h *Handler) GetStudentStatusRequest(w http.ResponseWriter, r *http.Request
 	}
 	if req == nil {
 		common.WriteError(w, http.StatusNotFound, "status request not found")
+		return
+	}
+	if !h.requireOwnStatusRequestIfWaliKelas(w, r, schoolID, req) {
 		return
 	}
 
@@ -742,6 +752,21 @@ func (h *Handler) GetStudentFinancialSummaryProxy(w http.ResponseWriter, r *http
 		common.WriteError(w, http.StatusBadRequest, "student_user_id is required")
 		return
 	}
+	// A wali kelas may only look up students of their own class.
+	if c := common.FromCtx(r); c != nil && c.ActiveRole == "walikelas" {
+		enr, err := h.Store.GetActiveStudentEnrollment(r.Context(), schoolID, studentUserID)
+		if err != nil {
+			common.WriteError(w, http.StatusInternalServerError, "failed to check student enrollment: "+err.Error())
+			return
+		}
+		if enr == nil {
+			common.WriteError(w, http.StatusForbidden, "forbidden: siswa bukan anggota kelas perwalian Anda")
+			return
+		}
+		if !h.requireOwnClassroomIfWaliKelas(w, r, schoolID, enr.ClassroomID) {
+			return
+		}
+	}
 
 	if h.Billing == nil {
 		common.WriteJSON(w, http.StatusOK, map[string]any{
@@ -813,4 +838,29 @@ func (h *Handler) UpdateAcademicSettings(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, settings, nil)
+}
+
+// requireOwnStatusRequestIfWaliKelas: a wali kelas may only open a request
+// whose source or destination classroom is one they are homeroom teacher of.
+// Other roles pass through unchanged.
+func (h *Handler) requireOwnStatusRequestIfWaliKelas(w http.ResponseWriter, r *http.Request, schoolID string, req *model.StudentStatusRequest) bool {
+	claims := common.FromCtx(r)
+	if claims == nil || claims.ActiveRole != "walikelas" {
+		return true
+	}
+	for _, id := range []*string{req.FromClassroomID, req.ToClassroomID} {
+		if id == nil || *id == "" {
+			continue
+		}
+		c, err := h.Store.GetClassroom(r.Context(), schoolID, *id)
+		if err != nil {
+			common.WriteError(w, http.StatusInternalServerError, err.Error())
+			return false
+		}
+		if c != nil && c.HomeroomTeacherUserID != nil && *c.HomeroomTeacherUserID == claims.UserID {
+			return true
+		}
+	}
+	common.WriteError(w, http.StatusForbidden, "forbidden: pengajuan ini bukan dari kelas perwalian Anda")
+	return false
 }
