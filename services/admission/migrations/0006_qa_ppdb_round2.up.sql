@@ -69,4 +69,17 @@ CREATE INDEX IF NOT EXISTS admission_refunds_school_idx ON admission_refunds(sch
 -- ---------------------------------------------------------------------------
 -- SEKOCI parent account <-> PPDB guardian (BUG-108)
 -- ---------------------------------------------------------------------------
+-- Deployed data has accounts linked to two guardian rows (an empty seed row
+-- plus the row the parent registered with). Keep the link on the row with the
+-- most applicants (ties: oldest) and park the others' link in
+-- identity_user_id_unlinked — no row is deleted.
+ALTER TABLE guardians ADD COLUMN IF NOT EXISTS identity_user_id_unlinked uuid;
+WITH ranked AS (
+    SELECT g.id, row_number() OVER (
+        PARTITION BY g.school_id, g.identity_user_id
+        ORDER BY (SELECT count(*) FROM applicants a WHERE a.guardian_id = g.id) DESC, g.created_at, g.id) AS rn
+    FROM guardians g WHERE g.identity_user_id IS NOT NULL
+)
+UPDATE guardians g SET identity_user_id_unlinked = g.identity_user_id, identity_user_id = NULL, updated_at = now()
+FROM ranked r WHERE r.id = g.id AND r.rn > 1;
 CREATE UNIQUE INDEX IF NOT EXISTS guardians_identity_user_idx ON guardians(school_id,identity_user_id) WHERE identity_user_id IS NOT NULL;
