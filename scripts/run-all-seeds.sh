@@ -63,6 +63,7 @@ seed teratai_notification 22_notification_features.sql
 seed teratai_admission    23_admission_features.sql
 seed teratai_insight      24_insight_features.sql
 seed teratai_quality      25_quality_features.sql
+seed teratai_billing      40_billing_features.sql
 seed teratai_academic     30_academic_features.sql
 seed teratai_attendance   31_attendance_features.sql
 seed teratai_exam         32_exam_features.sql
@@ -71,5 +72,12 @@ seed teratai_report       34_report_features.sql
 seed teratai_studentlife  35_studentlife_features.sql
 seed teratai_hr           50_hr_features.sql
 seed teratai_ops          60_ops_features.sql
+
+# Accounting (Laravel, schema per tenant): additive demo data, idempotent by
+# itself. Never ModulesSeeder/db:seed here — they truncate.
+if [ "${SKIP_ACCOUNTING:-0}" != "1" ]; then
+  echo "--> accounting:seed-demo ($ACC)"
+  docker exec "$ACC" php artisan accounting:seed-demo
+fi
 
 echo "=== ALL SEED DATA SUCCESSFULLY APPLIED ==="
