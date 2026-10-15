@@ -224,3 +224,52 @@ Route `/keuangan/pengaturan-gateway` untuk finance_manager, admin, dan superadmi
 - Kategori layanan menu 81 tetap admin/superadmin. Petugas kategori hanya memproses permintaan.
 - Penghapusan provider tidak disediakan (API memang tidak punya DELETE). Provider dinonaktifkan lewat toggle.
 - Autodebit orang tua tidak meminta nomor rekening. Aktivasi berjalan di halaman bank lewat `redirect_url` provider.
+
+## Putaran 3
+
+`feat/QA-BILL` sudah di-merge ke `feat/QA-PAY` (5c6aacf, tanpa konflik). Test DB billing dimigrasi ke versi 9 (0009 dari QA-BILL); up → down 1 → up bersih.
+
+| Item | Status | Commit | File | Test |
+|---|---|---|---|---|
+| (1) Nama sekolah di-hardcode di kuitansi gateway | FIXED | 4bdaf29 | billing handler/gateway_webhook.go | (suite gateway: TestPurposeChargeAndHook membuat kuitansi) |
+| (2) `InternalStudentRefund` lewat core approval | FIXED | 1c24d0b | billing handler/transfer_billing.go; academic client/billing.go, handler/transfer.go | TestInternalStudentRefund_Idempotency (diperluas) |
+| (3) Deposit pada ringkasan mutasi selalu 0 | FIXED | aadeb15 | billing handler/transfer_billing.go | TestInternalStudentFinancialSummary_Deposit |
+| (4) Test handler gagal/flaky | FIXED | 0229623 (+245266c putaran 1) | billing handler/gateway_ext_test.go | `go test ./...` 6x hijau |
+
+### Rincian
+- **(1)** `issueGatewayReceipt` memakai `receiptNames`, helper yang sama dengan kuitansi kasir: nama sekolah dan siswa diambil dari identity, nama pembayar dari user `payer_user_id` (fallback wali pertama, lalu nama siswa). Bila identity tidak dikonfigurasi, yang dipakai ID, bukan nama palsu. Tidak ada lagi string "Teratai" di kode billing.
+- **(2)** Polanya sama dengan `CreateRefund`:
+  - Baris `bill_refunds` disimpan `requested`, lalu `submitApproval` dikirim dengan `request_type=refund`, `amount_idr` dan callback `/internal/refunds/{id}/callback`. `approval_id` ikut disimpan.
+  - Bila core menolak atau belum dikonfigurasi, baris refund dihapus dan respons 422/503/502. Retry dengan idempotency key yang sama mulai bersih. Replay setelah sukses tetap 200 dengan id yang sama.
+  - Maker = `requested_by` baru dari academic (pengaju menu 78). Pemanggil lama tanpa field ini memakai student id seperti sebelumnya.
+  - Academic sekarang mencatat (log) galat refund. Sebelumnya galat itu diabaikan (`_ =`). Withdrawal tetap jalan karena keputusan keluar sudah melalui approval menu 78.
+- **(3)** Sesuai PRD:
+  - BR-FIN-04: kelebihan bayar menjadi deposit.
+  - FR-78-002: ringkasan harus menampilkan deposit.
+  - FR-78-006 / AC-78-03: deposit siswa keluar diajukan refund.
+  - BR-STU-03: saldo sebelum tanggal efektif tetap di unit asal.
+
+  Karena itu nilai 0 adalah bug. `financial-summary` kini membaca `student_deposits.balance_idr`, sehingga snapshot, flag `has_deposit` dan keputusan refund melihat saldo yang benar. Pada pindah unit deposit **tidak** dipindahkan, tetap tercatat di unit asal (BR-STU-03).
+- **(4)** Akar masalah yang dilihat QA-BILL ada di versi base dan sudah diperbaiki di 245266c (putaran 1):
+  - Fixture adhoc memakai `$1` untuk uuid dan text sekaligus; sekarang `$4` untuk `source_ref`.
+  - Test purpose/checkout bergantung pada baris provider `nicepay` sisa di DB sebagai fallback sim. Sekarang `simNicepay()` diinjeksi per App.
+
+  Putaran ini menambah idempotency key unik per run di TestPurposeChargeAndHook. Data per test sudah terisolasi: school, siswa, wali dan provider memakai UUID atau kode unik. Tidak ditemukan UPDATE/DELETE global di test maupun job.
+
+  Verifikasi `go test ./... -count=1` billing:
+  - 3x berturut-turut di `skci_qa_pay_billing` (DB lama) dan 3x di `skci_qa_pay_billing_fresh` (DB baru, migrate up), semuanya hijau.
+  - Tiga test target dijalankan `-count=40`: hijau.
+
+### Verifikasi putaran 3
+```
+# billing  go vet ./... bersih; go test ./... -count=1 ×6 (2 DB) → semua ok
+# academic go vet ./... bersih; go test ./... -count=1 → ok common, handler, model, store
+# core     go vet ./... bersih; go test ./... -count=1 → ok
+# web      npx vue-tsc -b → tanpa galat; npm run build → ✓ built
+# gofmt    file yang diubah bersih; gateway_ext_test.go sudah tidak rapi sejak base (struct extFixture), dibiarkan
+```
+
+### Untuk review / kontrak
+- **Core:** flow approval `refund` wajib ada per sekolah. Tanpa flow ini, refund dari withdrawal ditolak dan hanya tercatat di log academic. Sebaiknya galat ini juga masuk Integration Exception Queue; bisa ditambahkan kemudian.
+- **QA-BILL (refund deposit):** refund internal ditautkan ke tagihan terakhir siswa (`student_bill_id`), atau NULL bila tidak ada tagihan. `ProcessRefund` membuat reversal pembayaran pada tagihan tersebut. Untuk refund yang sumbernya deposit, yang seharusnya didebit adalah `student_deposits` (melalui `deposit_movements`). Ini perlu keputusan QA-BILL dan tidak diubah di sini.
+- Test DB baru `skci_qa_pay_billing_fresh` dibuat lokal (docker psql ke Postgres toolchain). Boleh dihapus.
