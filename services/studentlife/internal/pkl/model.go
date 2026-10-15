@@ -330,6 +330,22 @@ func CountFilled(placements []Placement) int {
 }
 
 // CanRecordAttendance validates if attendance can be recorded today (FR-140-002).
+// jakarta is the school-day timezone for PKL attendance. Falls back to a
+// fixed UTC+7 zone when tzdata is missing (e.g. a bare alpine image).
+var jakarta = func() *time.Location {
+	if loc, err := time.LoadLocation("Asia/Jakarta"); err == nil {
+		return loc
+	}
+	return time.FixedZone("WIB", 7*60*60)
+}()
+
+// WorkDay returns t's calendar day in Asia/Jakarta as midnight UTC, the
+// same form a DATE column (work_date, starts_on) scans into.
+func WorkDay(t time.Time) time.Time {
+	y, m, d := t.In(jakarta).Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
+
 func CanRecordAttendance(p Placement, today time.Time) error {
 	if p.Status != PlacementStatusActive {
 		return errors.New("Hanya penempatan aktif yang dapat mencatat kehadiran")

@@ -793,6 +793,7 @@ func (h *Handler) RefreshMetrics(w http.ResponseWriter, r *http.Request) {
 		updated++
 	}
 	fresh, _ := h.store.GetSelfEvaluation(r.Context(), schoolID, id)
+	_ = h.store.AttachStandardScores(r.Context(), schoolID, fresh)
 	msg := fmt.Sprintf("%d indikator metrik diperbarui", updated)
 	if len(failed) > 0 {
 		msg += "; sumber metrik tidak tersedia untuk: " + strings.Join(failed, ", ")

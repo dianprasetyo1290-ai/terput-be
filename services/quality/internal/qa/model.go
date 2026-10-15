@@ -120,8 +120,20 @@ type QASelfEvaluation struct {
 	FinalizedBy      *string              `json:"finalized_by,omitempty"`
 	Version          int                  `json:"version"`
 	Items            []QASelfEvalItem     `json:"items,omitempty"`
-	CreatedAt        time.Time            `json:"created_at"`
-	UpdatedAt        time.Time            `json:"updated_at"`
+	// StandardScores: per-standard weighted score of the scored items
+	// (standards with no scored indicator are omitted).
+	StandardScores []SelfEvalStandardScore `json:"standard_scores,omitempty"`
+	CreatedAt      time.Time               `json:"created_at"`
+	UpdatedAt      time.Time               `json:"updated_at"`
+}
+
+// SelfEvalStandardScore is one standard's aggregate on a self evaluation.
+type SelfEvalStandardScore struct {
+	StandardID string  `json:"standard_id"`
+	Code       string  `json:"code"`
+	Name       string  `json:"name"`
+	ScoreMilli int64   `json:"score_milli"`
+	Score      float64 `json:"score"`
 }
 
 type QASelfEvalItem struct {

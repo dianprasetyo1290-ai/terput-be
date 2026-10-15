@@ -463,6 +463,7 @@ func (h *Handler) GetSelfEvaluation(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusNotFound, "self evaluation not found")
 		return
 	}
+	_ = h.store.AttachStandardScores(r.Context(), schoolID, se)
 	common.WriteJSON(w, http.StatusOK, se)
 }
 

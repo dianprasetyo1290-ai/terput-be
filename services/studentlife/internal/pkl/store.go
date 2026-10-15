@@ -1066,11 +1066,14 @@ func (s *Store) RecordCheckIn(ctx context.Context, schoolID, placementID string,
 	if err != nil {
 		return nil, err
 	}
-	if err := CanRecordAttendance(*pl, now); err != nil {
+	day := WorkDay(now)
+	if err := CanRecordAttendance(*pl, day); err != nil {
 		return nil, err
 	}
 
-	today := now.Truncate(24 * time.Hour)
+	// work_date is the Asia/Jakarta calendar day (not the UTC day), sent as
+	// a plain date string so the DB session timezone cannot shift it.
+	today := day.Format("2006-01-02")
 	id := store.NewID()
 	var created Attendance
 	err = s.DB.QueryRowContext(ctx, `
@@ -1091,7 +1094,7 @@ func (s *Store) RecordCheckIn(ctx context.Context, schoolID, placementID string,
 }
 
 func (s *Store) RecordCheckOut(ctx context.Context, schoolID, placementID string, now time.Time) (*Attendance, error) {
-	today := now.Truncate(24 * time.Hour)
+	today := WorkDay(now).Format("2006-01-02")
 	var updated Attendance
 	err := s.DB.QueryRowContext(ctx, `
 		UPDATE pkl_attendance

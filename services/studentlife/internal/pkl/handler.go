@@ -957,7 +957,7 @@ func (h *Handler) CreatePlacement(w http.ResponseWriter, r *http.Request) {
 	creatorID := claims.UserID
 
 	status := PlacementStatusPlanned
-	todayStr := time.Now().Format("2006-01-02")
+	todayStr := WorkDay(time.Now()).Format("2006-01-02")
 	if startsOn.Format("2006-01-02") <= todayStr {
 		status = PlacementStatusActive
 	}
@@ -1855,7 +1855,7 @@ func (h *Handler) StudentSubmitLeave(w http.ResponseWriter, r *http.Request) {
 		wdStr := strings.TrimSpace(r.FormValue("work_date"))
 		wd, err := time.Parse("2006-01-02", wdStr)
 		if err != nil {
-			wd = time.Now()
+			wd = WorkDay(time.Now())
 		}
 		workDate = wd
 
@@ -1888,7 +1888,7 @@ func (h *Handler) StudentSubmitLeave(w http.ResponseWriter, r *http.Request) {
 		note = strings.TrimSpace(body.Note)
 		wd, err := time.Parse("2006-01-02", body.WorkDate)
 		if err != nil {
-			wd = time.Now()
+			wd = WorkDay(time.Now())
 		}
 		workDate = wd
 		attachmentKey = body.AttachmentKey

@@ -75,6 +75,39 @@ func scoreEvaluation(inst *QAInstrument, se *QASelfEvaluation) EvaluationScore {
 	return out
 }
 
+// standardScores converts scoreEvaluation's per-standard reports into the
+// self-evaluation response shape, keeping only standards that have a score.
+func standardScores(inst *QAInstrument, se *QASelfEvaluation) []SelfEvalStandardScore {
+	out := []SelfEvalStandardScore{}
+	for _, st := range scoreEvaluation(inst, se).Standards {
+		if st.ScoreMilli == nil {
+			continue
+		}
+		out = append(out, SelfEvalStandardScore{
+			StandardID: st.StandardID,
+			Code:       st.Code,
+			Name:       st.Name,
+			ScoreMilli: *st.ScoreMilli,
+			Score:      float64(*st.ScoreMilli) / 1000,
+		})
+	}
+	return out
+}
+
+// AttachStandardScores loads the evaluation's instrument and fills
+// se.StandardScores. A missing instrument leaves it empty.
+func (s *Store) AttachStandardScores(ctx context.Context, schoolID string, se *QASelfEvaluation) error {
+	if se == nil {
+		return nil
+	}
+	inst, err := s.GetInstrument(ctx, schoolID, se.InstrumentID)
+	if err != nil || inst == nil {
+		return err
+	}
+	se.StandardScores = standardScores(inst, se)
+	return nil
+}
+
 // latestEvaluation: the newest finalized evaluation of the instrument (and
 // academic year when given), else the newest of any status.
 func (s *Store) latestEvaluation(ctx context.Context, schoolID, instrumentID, academicYearID string) (string, error) {

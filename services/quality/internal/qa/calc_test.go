@@ -167,3 +167,25 @@ func TestIsLocked_And_UnitCompatible(t *testing.T) {
 		t.Error("percent_bp vs idr should not be compatible")
 	}
 }
+
+func TestStandardScores(t *testing.T) {
+	inst := &QAInstrument{Standards: []QAStandard{
+		{ID: "s1", Code: "SKL", Name: "Lulusan", WeightBP: 5000, Items: []QAItem{{Indicators: []QAIndicator{
+			{ID: "i1", WeightBP: 5000}, {ID: "i2", WeightBP: 5000},
+		}}}},
+		{ID: "s2", Code: "SI", Name: "Isi", WeightBP: 5000, Items: []QAItem{{Indicators: []QAIndicator{
+			{ID: "i3", WeightBP: 10000},
+		}}}},
+	}}
+	three, four := 3, 4
+	se := &QASelfEvaluation{Items: []QASelfEvalItem{
+		{IndicatorID: "i1", Score: &three}, {IndicatorID: "i2", Score: &four},
+	}}
+	got := standardScores(inst, se)
+	if len(got) != 1 {
+		t.Fatalf("want only the scored standard, got %+v", got)
+	}
+	if got[0].StandardID != "s1" || got[0].Code != "SKL" || got[0].ScoreMilli != 3500 || got[0].Score != 3.5 {
+		t.Fatalf("unexpected standard score: %+v", got[0])
+	}
+}

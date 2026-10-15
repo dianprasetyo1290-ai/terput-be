@@ -331,3 +331,15 @@ func TestBuildCertificatePDF_FR141003(t *testing.T) {
 	}
 }
 
+
+func TestWorkDayUsesJakarta(t *testing.T) {
+	// 2026-10-14 18:30 UTC is 2026-10-15 01:30 WIB.
+	got := WorkDay(time.Date(2026, 10, 14, 18, 30, 0, 0, time.UTC))
+	if got.Format("2006-01-02") != "2026-10-15" {
+		t.Fatalf("WorkDay = %s; want 2026-10-15", got.Format("2006-01-02"))
+	}
+	got = WorkDay(time.Date(2026, 10, 15, 16, 59, 0, 0, time.UTC))
+	if got.Format("2006-01-02") != "2026-10-15" {
+		t.Fatalf("WorkDay = %s; want 2026-10-15", got.Format("2006-01-02"))
+	}
+}
