@@ -699,7 +699,12 @@ func (h *Handler) applyRequest(r *http.Request, req *model.StudentStatusRequest)
 			_ = h.Billing.ExitStudent(ctx, req.SchoolID, req.StudentUserID, req.EffectiveDate, policy)
 			// Refund if refund_amount_idr > 0 (FR-78-006, AC-78-03)
 			if req.RefundAmountIDR != nil && *req.RefundAmountIDR > 0 {
-				_ = h.Billing.RefundStudent(ctx, req.SchoolID, req.StudentUserID, *req.RefundAmountIDR, "Refund penarikan siswa", "withdrawal:"+req.ID)
+				// Billing routes it through core's Approval Center (maker = requester);
+				// a refusal must not block the withdrawal itself, but it is logged.
+				if err := h.Billing.RefundStudent(ctx, req.SchoolID, req.StudentUserID, *req.RefundAmountIDR,
+					"Refund penarikan siswa", "withdrawal:"+req.ID, req.RequestedBy); err != nil {
+					log.Printf("withdrawal %s: refund request to billing failed: %v", req.ID, err)
+				}
 			}
 		}
 		if h.Identity != nil {

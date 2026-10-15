@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"skci/billing/internal/client"
 	"skci/billing/internal/common"
 	"skci/billing/internal/model"
 )
@@ -110,13 +111,24 @@ func (a *App) InternalStudentFinancialSummary(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Overpayment deposit (BR-FIN-04) of this unit. Per BR-STU-03 it stays
+	// recorded at the origin unit on a unit transfer; Menu 78 shows it so
+	// finance can approve a refund (FR-78-002/006, AC-78-03).
+	var depositIDR int64
+	if err := a.DB.QueryRowContext(r.Context(),
+		`SELECT COALESCE(balance_idr,0) FROM student_deposits WHERE school_id=$1 AND student_user_id::text=$2`,
+		schoolID, studentID).Scan(&depositIDR); err != nil && err != sql.ErrNoRows {
+		writeErr(w, err)
+		return
+	}
+
 	common.WriteJSON(w, http.StatusOK, map[string]any{
 		"student_user_id":       studentID,
 		"school_id":             schoolID,
 		"total_outstanding_idr": totalOutstanding,
 		"open_bills_idr":        openBills,
 		"unmatured_bills_idr":   unmaturedBills,
-		"deposit_idr":           0, // No deposit schema in billing yet; returns 0
+		"deposit_idr":           depositIDR,
 		"refundable_idr":        totalRefundable,
 		"bills":                 bills,
 	}, nil)
@@ -254,6 +266,7 @@ type internalRefundRequest struct {
 	AmountIDR      int64  `json:"amount_idr"`
 	Reason         string `json:"reason"`
 	IdempotencyKey string `json:"idempotency_key"`
+	RequestedBy    string `json:"requested_by"`
 }
 
 // InternalStudentRefund creates a refund request for a student with an idempotency key (FR-78-006, AC-78-03).
@@ -332,8 +345,13 @@ func (a *App) InternalStudentRefund(w http.ResponseWriter, r *http.Request) {
 		reqKey = in.IdempotencyKey
 	}
 
-	// Internal actor UUID for requested_by
-	internalActorID := studentID
+	// The maker is the staff member who filed the Menu 78 request (sent by
+	// academic as requested_by). Older callers send none; the student id is
+	// then recorded, as before, and core decides whether it accepts it.
+	makerID := strings.TrimSpace(in.RequestedBy)
+	if makerID == "" {
+		makerID = studentID
+	}
 
 	err = tx.QueryRowContext(r.Context(), `
 		INSERT INTO bill_refunds (
@@ -341,7 +359,7 @@ func (a *App) InternalStudentRefund(w http.ResponseWriter, r *http.Request) {
 		) VALUES (
 			$1, $2, $3, $4, $5, 'requested', $6, $7
 		) RETURNING id
-	`, schoolID, billIDParam, studentID, in.AmountIDR, in.Reason, internalActorID, reqKey).Scan(&newRefundID)
+	`, schoolID, billIDParam, studentID, in.AmountIDR, in.Reason, makerID, reqKey).Scan(&newRefundID)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -352,13 +370,46 @@ func (a *App) InternalStudentRefund(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Same rule as /admin/refunds: the decision belongs to core's Approval
+	// Center (request type 'refund'). If core does not take the request the
+	// row is removed so a retry with the same idempotency key starts clean.
+	amount := in.AmountIDR
+	billRef := ""
+	if s, ok := billIDParam.(string); ok {
+		billRef = s
+	}
+	resp, err := a.submitApproval(r.Context(), client.ApprovalRequest{
+		SchoolID: schoolID, RequestType: reqTypeRefund, SourceID: newRefundID,
+		Title: "Refund penarikan/mutasi siswa",
+		Summary: map[string]any{
+			"student_user_id": studentID, "student_bill_id": billRef,
+			"amount_idr": in.AmountIDR, "reason": in.Reason,
+			"origin": "academic_status_request", "idempotency_key": in.IdempotencyKey,
+		},
+		AmountIDR: &amount, MakerUserID: makerID,
+		CallbackURL:   a.Config.Gateway.BillingInternalURL + "/internal/refunds/" + newRefundID + "/callback",
+		CorrelationID: newRefundID, IdempotencyKey: "refund:" + newRefundID,
+	})
+	if err != nil {
+		_, _ = a.DB.ExecContext(r.Context(), `DELETE FROM bill_refunds WHERE id::text=$1 AND status='requested'`, newRefundID)
+		writeErr(w, err)
+		return
+	}
+	if _, err = a.DB.ExecContext(r.Context(),
+		`UPDATE bill_refunds SET approval_id=$1,updated_at=now() WHERE id::text=$2`, resp.ID, newRefundID); err != nil {
+		writeErr(w, err)
+		return
+	}
+
 	a.audit(r.Context(), schoolID, "refund", newRefundID, "refund_requested_internal", "internal",
-		studentID, "", in.Reason, nil, map[string]any{"amount_idr": in.AmountIDR, "idempotency_key": in.IdempotencyKey})
+		makerID, "", in.Reason, nil, map[string]any{"amount_idr": in.AmountIDR, "idempotency_key": in.IdempotencyKey,
+			"approval_id": resp.ID, "student_user_id": studentID})
 
 	common.WriteJSON(w, http.StatusCreated, map[string]any{
-		"id":         newRefundID,
-		"status":     "requested",
-		"amount_idr": in.AmountIDR,
+		"id":          newRefundID,
+		"status":      "requested",
+		"amount_idr":  in.AmountIDR,
+		"approval_id": resp.ID,
 	}, nil)
 }
 

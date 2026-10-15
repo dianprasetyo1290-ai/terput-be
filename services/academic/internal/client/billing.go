@@ -91,14 +91,16 @@ func (c *BillingClient) ExitStudent(ctx context.Context, schoolID, studentUserID
 	return nil
 }
 
-// RefundStudent calls POST /internal/students/{id}/refund
-func (c *BillingClient) RefundStudent(ctx context.Context, schoolID, studentUserID string, amountIDR int64, reason, idempotencyKey string) error {
+// RefundStudent calls POST /internal/students/{id}/refund. Billing files the
+// refund in core's Approval Center with requestedBy as the maker.
+func (c *BillingClient) RefundStudent(ctx context.Context, schoolID, studentUserID string, amountIDR int64, reason, idempotencyKey, requestedBy string) error {
 	url := fmt.Sprintf("%s/internal/students/%s/refund", c.BaseURL, studentUserID)
 	body, _ := json.Marshal(map[string]any{
 		"school_id":       schoolID,
 		"amount_idr":      amountIDR,
 		"reason":          reason,
 		"idempotency_key": idempotencyKey,
+		"requested_by":    requestedBy,
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {

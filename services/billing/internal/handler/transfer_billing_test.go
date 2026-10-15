@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"skci/billing/internal/client"
 	"skci/billing/internal/common"
 	"skci/billing/internal/config"
 )
@@ -340,8 +341,14 @@ func TestInternalStudentRefund_Idempotency(t *testing.T) {
 	schoolID := newUUID()
 	studentID := newUUID()
 	idempotencyKey := fmt.Sprintf("refund-key-%s", newUUID())
+	makerID := newUUID()
 
+	core := &fakeCore{}
+	coreSrv := httptest.NewServer(core.handler())
+	defer coreSrv.Close()
 	app := New(db, config.Config{}, stubIdentity{}, nil)
+	app.Core = client.New(coreSrv.URL, "k")
+	app.Config.Gateway.BillingInternalURL = "http://billing:8080"
 	srv := httptest.NewServer(newBillingTestRouter(app))
 	defer srv.Close()
 
@@ -350,7 +357,28 @@ func TestInternalStudentRefund_Idempotency(t *testing.T) {
 		"amount_idr":      200000,
 		"reason":          "Kelebihan bayar mutasi keluar",
 		"idempotency_key": idempotencyKey,
+		"requested_by":    makerID,
 	}
+
+	// Core refuses (no approval flow): nothing is stored, the caller sees 422.
+	core.refuse = true
+	refusedBody, _ := json.Marshal(refundPayload)
+	reqR, _ := http.NewRequest(http.MethodPost, srv.URL+"/internal/students/"+studentID+"/refund", bytes.NewReader(refusedBody))
+	reqR.Header.Set("Content-Type", "application/json")
+	respR, err := http.DefaultClient.Do(reqR)
+	if err != nil {
+		t.Fatalf("refused refund request: %v", err)
+	}
+	respR.Body.Close()
+	if respR.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 when core refuses, got %d", respR.StatusCode)
+	}
+	var leftover int
+	_ = db.QueryRow(`SELECT count(*) FROM bill_refunds WHERE school_id=$1`, schoolID).Scan(&leftover)
+	if leftover != 0 {
+		t.Fatalf("refused refund must not remain, found %d rows", leftover)
+	}
+	core.refuse = false
 	body, _ := json.Marshal(refundPayload)
 
 	// First call -> 201 Created
@@ -375,6 +403,18 @@ func TestInternalStudentRefund_Idempotency(t *testing.T) {
 	if res1.Data.ID == "" {
 		t.Fatalf("expected refund id in response")
 	}
+	appr := core.lastApproval(t)
+	if appr.RequestType != reqTypeRefund || appr.SourceID != res1.Data.ID || appr.MakerUserID != makerID ||
+		appr.AmountIDR == nil || *appr.AmountIDR != 200000 ||
+		appr.CallbackURL != "http://billing:8080/internal/refunds/"+res1.Data.ID+"/callback" {
+		t.Fatalf("approval request mismatch: %+v", appr)
+	}
+	var approvalID, requestedBy, status string
+	_ = db.QueryRow(`SELECT COALESCE(approval_id,''),requested_by::text,status FROM bill_refunds WHERE id=$1`, res1.Data.ID).
+		Scan(&approvalID, &requestedBy, &status)
+	if approvalID == "" || requestedBy != makerID || status != "requested" {
+		t.Fatalf("refund row: approval_id=%q requested_by=%q status=%q", approvalID, requestedBy, status)
+	}
 
 	// Second call with same idempotency key -> 200 OK with same ID
 	body2, _ := json.Marshal(refundPayload)
@@ -398,5 +438,45 @@ func TestInternalStudentRefund_Idempotency(t *testing.T) {
 	_ = json.NewDecoder(resp2.Body).Decode(&res2)
 	if res2.Data.ID != res1.Data.ID {
 		t.Errorf("expected idempotent refund ID %q, got %q", res1.Data.ID, res2.Data.ID)
+	}
+}
+
+// Menu 78 financial summary reports the BR-FIN-04 deposit balance instead of
+// a constant 0 (FR-78-002, AC-78-03).
+func TestInternalStudentFinancialSummary_Deposit(t *testing.T) {
+	db := setupBillingTestDB(t)
+	defer db.Close()
+
+	schoolID, studentID, otherID := newUUID(), newUUID(), newUUID()
+	if _, err := db.Exec(`INSERT INTO student_deposits (school_id, student_user_id, balance_idr) VALUES ($1, $2, 200000)`,
+		schoolID, studentID); err != nil {
+		t.Fatalf("seed deposit: %v", err)
+	}
+	app := New(db, config.Config{}, stubIdentity{}, nil)
+	srv := httptest.NewServer(newBillingTestRouter(app))
+	defer srv.Close()
+
+	get := func(id string) int64 {
+		resp, err := http.Get(srv.URL + "/internal/students/" + id + "/financial-summary?school_id=" + schoolID)
+		if err != nil {
+			t.Fatalf("summary: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("summary status %d", resp.StatusCode)
+		}
+		var env struct {
+			Data struct {
+				DepositIDR int64 `json:"deposit_idr"`
+			} `json:"data"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&env)
+		return env.Data.DepositIDR
+	}
+	if got := get(studentID); got != 200000 {
+		t.Fatalf("deposit_idr = %d, want 200000", got)
+	}
+	if got := get(otherID); got != 0 {
+		t.Fatalf("deposit_idr without deposit row = %d, want 0", got)
 	}
 }

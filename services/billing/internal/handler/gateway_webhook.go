@@ -373,11 +373,20 @@ func (a *App) issueGatewayReceipt(ctx context.Context, t *gatewayTxState, now ti
 	if t.Purpose == PurposeWalletTopup {
 		what = "Top-up dompet"
 	}
+	// Names come from identity (school data), never a hardcoded school;
+	// the payer is the user who paid, falling back to receiptNames' rule.
+	payer := ""
+	if t.PayerUserID != "" && a.IdentitySvc.Configured() {
+		if u, err := a.IdentitySvc.User(ctx, t.PayerUserID); err == nil && u.Name != "" {
+			payer = u.Name
+		}
+	}
+	schoolName, studentName, payerName := a.receiptNames(ctx, t.SchoolID, t.StudentUserID, payer)
 	docKey, _ := a.generateReceiptDocument(ctx, t.SchoolID, ReceiptDetails{
 		ReceiptNo:   receiptNo,
-		SchoolName:  "Sekolah Teratai Putih",
-		StudentName: "Siswa",
-		PayerName:   "Orang Tua",
+		SchoolName:  schoolName,
+		StudentName: studentName,
+		PayerName:   payerName,
 		AmountIDR:   t.TotalIDR,
 		MethodLabel: t.Kind,
 		Date:        now,
