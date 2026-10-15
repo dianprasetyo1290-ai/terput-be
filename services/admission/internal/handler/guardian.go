@@ -129,6 +129,9 @@ func (a *App) listApplicants(r *http.Request, schoolID, guardianID string) ([]ma
 		if err != nil {
 			return nil, err
 		}
+		// Lists never carry the full NIK; the guardian reads it on the
+		// applicant detail (GET /guardian/applicants/{id}) to edit it.
+		m["nik"] = model.MaskNIK(m["nik"].(string))
 		out = append(out, m)
 	}
 	return out, rows.Err()

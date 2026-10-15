@@ -429,8 +429,18 @@ func TestNIKAndScore(t *testing.T) {
 			t.Errorf("NIK %q", nik)
 		}
 	}
-	if MaskNIK("3216098778901234") != "************1234" || MaskNIK("12") != "**" {
-		t.Error("mask")
+	for in, want := range map[string]string{
+		"":                 "",
+		"12":               "**",
+		"1234":             "****",
+		"123456":           "**3456",
+		"3216098778901234": "3216********1234",
+		"3201000000000001": "3201********0001",
+		"3201********0001": "3201********0001", // masking twice is harmless
+	} {
+		if got := MaskNIK(in); got != want {
+			t.Errorf("MaskNIK(%q) = %q, want %q", in, got, want)
+		}
 	}
 	cases := []struct {
 		score, max int64
