@@ -15,6 +15,12 @@ MANIFEST=(
   "core:correlation.go"
   "notification:correlation.go"
   "notification:exception_report.go"
+  "identity:correlation.go"
+  "identity:exception_report.go"
+  "ops:correlation.go"
+  "ops:exception_report.go"
+  "hr:correlation.go"
+  "hr:exception_report.go"
 )
 
 check=0
