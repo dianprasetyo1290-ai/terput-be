@@ -40,8 +40,7 @@ func (a *App) InternalStudentFinancialSummary(w http.ResponseWriter, r *http.Req
 		                  WHERE p.student_bill_id=b.id AND p.school_id=b.school_id AND p.status='verified'), 0),
 		        COALESCE((SELECT sum(rv.amount_idr) FROM bill_payment_reversals rv JOIN bill_payments p ON p.id=rv.payment_id
 		                  WHERE p.student_bill_id=b.id AND p.school_id=b.school_id), 0),
-		        COALESCE((SELECT sum(f.amount_idr) FROM bill_refunds f
-		                  WHERE f.student_bill_id=b.id AND f.school_id=b.school_id AND f.status IN ('requested','approved')), 0)
+		        `+pendingSQL("''")+`
 		 FROM student_bills b LEFT JOIN billing_schemes s ON s.id=b.scheme_id
 		 WHERE b.school_id=$1 AND b.student_user_id::text=$2
 		 ORDER BY b.period_year, b.period_month, b.created_at`,
@@ -326,19 +325,21 @@ func (a *App) InternalStudentRefund(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Try to find a bill with refundable balance
-	var candidateBillID sql.NullString
-	_ = tx.QueryRowContext(r.Context(), `
-		SELECT b.id::text FROM student_bills b
-		WHERE b.school_id=$1 AND b.student_user_id::text=$2
-		ORDER BY b.created_at DESC LIMIT 1
-	`, schoolID, studentID).Scan(&candidateBillID)
-
-	var newRefundID string
-	var billIDParam any = nil
-	if candidateBillID.Valid && candidateBillID.String != "" {
-		billIDParam = candidateBillID.String
+	// Split the amount: the overpayment deposit first (paid out of
+	// student_deposits, no bill touched), then the paid balance of bills,
+	// newest first. A refund the two cannot cover is refused.
+	depositAvail, refundables, err := studentRefundablesQ(r.Context(), tx, schoolID, studentID)
+	if err != nil {
+		writeErr(w, err)
+		return
 	}
+	depositIDR, shares, serr := model.SplitStudentRefund(in.AmountIDR, depositAvail, refundables)
+	if serr != nil {
+		common.WriteError(w, http.StatusUnprocessableEntity,
+			"nominal refund melebihi deposit dan saldo terbayar tagihan siswa yang masih dapat dikembalikan")
+		return
+	}
+	var newRefundID string
 
 	var reqKey any = nil
 	if in.IdempotencyKey != "" {
@@ -355,14 +356,24 @@ func (a *App) InternalStudentRefund(w http.ResponseWriter, r *http.Request) {
 
 	err = tx.QueryRowContext(r.Context(), `
 		INSERT INTO bill_refunds (
-			school_id, student_bill_id, student_user_id, amount_idr, reason, status, requested_by, idempotency_key
+			school_id, student_bill_id, student_user_id, amount_idr, deposit_idr, reason, status, requested_by, idempotency_key
 		) VALUES (
-			$1, $2, $3, $4, $5, 'requested', $6, $7
+			$1, NULL, $2, $3, $4, $5, 'requested', $6, $7
 		) RETURNING id
-	`, schoolID, billIDParam, studentID, in.AmountIDR, in.Reason, makerID, reqKey).Scan(&newRefundID)
+	`, schoolID, studentID, in.AmountIDR, depositIDR, in.Reason, makerID, reqKey).Scan(&newRefundID)
 	if err != nil {
 		writeErr(w, err)
 		return
+	}
+	billShares := make([]map[string]any, 0, len(shares))
+	for _, sh := range shares {
+		if _, err = tx.ExecContext(r.Context(),
+			`INSERT INTO bill_refund_parts(school_id,refund_id,student_bill_id,amount_idr) VALUES($1,$2,$3,$4)`,
+			schoolID, newRefundID, sh.BillID, sh.AmountIDR); err != nil {
+			writeErr(w, err)
+			return
+		}
+		billShares = append(billShares, map[string]any{"student_bill_id": sh.BillID, "amount_idr": sh.AmountIDR})
 	}
 
 	if err = tx.Commit(); err != nil {
@@ -374,16 +385,12 @@ func (a *App) InternalStudentRefund(w http.ResponseWriter, r *http.Request) {
 	// Center (request type 'refund'). If core does not take the request the
 	// row is removed so a retry with the same idempotency key starts clean.
 	amount := in.AmountIDR
-	billRef := ""
-	if s, ok := billIDParam.(string); ok {
-		billRef = s
-	}
 	resp, err := a.submitApproval(r.Context(), client.ApprovalRequest{
 		SchoolID: schoolID, RequestType: reqTypeRefund, SourceID: newRefundID,
 		Title: "Refund penarikan/mutasi siswa",
 		Summary: map[string]any{
-			"student_user_id": studentID, "student_bill_id": billRef,
-			"amount_idr": in.AmountIDR, "reason": in.Reason,
+			"student_user_id": studentID, "amount_idr": in.AmountIDR, "reason": in.Reason,
+			"deposit_idr": depositIDR, "bill_parts": billShares,
 			"origin": "academic_status_request", "idempotency_key": in.IdempotencyKey,
 		},
 		AmountIDR: &amount, MakerUserID: makerID,
@@ -392,6 +399,7 @@ func (a *App) InternalStudentRefund(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		_, _ = a.DB.ExecContext(r.Context(), `DELETE FROM bill_refunds WHERE id::text=$1 AND status='requested'`, newRefundID)
+		a.reportRefundApprovalFailure(r.Context(), schoolID, studentID, newRefundID, in.IdempotencyKey, in.Reason, in.AmountIDR, err)
 		writeErr(w, err)
 		return
 	}
@@ -403,12 +411,14 @@ func (a *App) InternalStudentRefund(w http.ResponseWriter, r *http.Request) {
 
 	a.audit(r.Context(), schoolID, "refund", newRefundID, "refund_requested_internal", "internal",
 		makerID, "", in.Reason, nil, map[string]any{"amount_idr": in.AmountIDR, "idempotency_key": in.IdempotencyKey,
-			"approval_id": resp.ID, "student_user_id": studentID})
+			"approval_id": resp.ID, "student_user_id": studentID, "deposit_idr": depositIDR, "bill_parts": billShares})
 
 	common.WriteJSON(w, http.StatusCreated, map[string]any{
 		"id":          newRefundID,
 		"status":      "requested",
 		"amount_idr":  in.AmountIDR,
+		"deposit_idr": depositIDR,
+		"bill_parts":  billShares,
 		"approval_id": resp.ID,
 	}, nil)
 }

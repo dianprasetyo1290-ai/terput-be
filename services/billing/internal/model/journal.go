@@ -228,14 +228,23 @@ func ReceiptJournal(set JournalSettings, comps map[string]ComponentAccount, d Re
 	return NetJournal(ps)
 }
 
-// RefundJournal books processed bill refunds: refund account debit, cash
-// credit (FR-34-003).
-func RefundJournal(set JournalSettings, totalIDR int64) ([]JournalLine, error) {
-	m := missing{}
-	ps := []Posting{
-		{Acc: m.need(set.RefundAcc, "refund"), Desc: "Refund tagihan", DebitIDR: totalIDR},
-		{Acc: m.need(set.CashAcc, "kas"), Desc: "Pembayaran refund", DebitIDR: -totalIDR},
+// RefundJournal books processed refunds (FR-34-003): the part that returns
+// bill payments debits the refund account, the part paid out of a student's
+// overpayment deposit debits the deposit liability, and cash is credited
+// with the total.
+func RefundJournal(set JournalSettings, billIDR, depositIDR int64) ([]JournalLine, error) {
+	if billIDR < 0 || depositIDR < 0 {
+		return nil, fmt.Errorf("refund amounts must not be negative")
 	}
+	m := missing{}
+	var ps []Posting
+	if billIDR > 0 {
+		ps = append(ps, Posting{Acc: m.need(set.RefundAcc, "refund"), Desc: "Refund tagihan", DebitIDR: billIDR})
+	}
+	if depositIDR > 0 {
+		ps = append(ps, Posting{Acc: m.need(set.DepositAcc, "deposit siswa"), Desc: "Pengembalian deposit siswa", DebitIDR: depositIDR})
+	}
+	ps = append(ps, Posting{Acc: m.need(set.CashAcc, "kas"), Desc: "Pembayaran refund", DebitIDR: -(billIDR + depositIDR)})
 	if err := m.err(); err != nil {
 		return nil, err
 	}

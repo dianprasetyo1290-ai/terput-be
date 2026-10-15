@@ -92,3 +92,47 @@ func RefundNoticeText(status, amount, note, transferRef string) (title, body str
 	}
 	return "", ""
 }
+
+// RefundableBill is one bill's paid balance that a student refund may still
+// return (verified - reversed - refunds already pending against it).
+type RefundableBill struct {
+	BillID        string
+	RefundableIDR int64
+}
+
+// BillRefundShare is the part of a student refund that reverses payments of
+// one bill.
+type BillRefundShare struct {
+	BillID    string
+	AmountIDR int64
+}
+
+// SplitStudentRefund splits a withdrawal/transfer refund (Menu 78) into the
+// portion paid out of the student's overpayment deposit and the portions
+// that return payments of individual bills. The deposit is used first: it is
+// money the school holds without any bill behind it, so returning it never
+// reopens a bill. The remainder is taken from bills in the order given. It
+// fails when the deposit and the bills together cannot cover the amount.
+func SplitStudentRefund(amount, depositAvailable int64, bills []RefundableBill) (int64, []BillRefundShare, error) {
+	if amount <= 0 {
+		return 0, nil, errors.New("refund amount must be positive")
+	}
+	deposit := min(max(depositAvailable, 0), amount)
+	left := amount - deposit
+	var shares []BillRefundShare
+	for _, b := range bills {
+		if left == 0 {
+			break
+		}
+		if b.RefundableIDR <= 0 {
+			continue
+		}
+		take := min(b.RefundableIDR, left)
+		shares = append(shares, BillRefundShare{BillID: b.BillID, AmountIDR: take})
+		left -= take
+	}
+	if left > 0 {
+		return 0, nil, fmt.Errorf("refund melebihi deposit dan saldo terbayar tagihan sebesar %d", left)
+	}
+	return deposit, shares, nil
+}

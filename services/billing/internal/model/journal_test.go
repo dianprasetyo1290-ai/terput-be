@@ -123,13 +123,42 @@ func TestReceiptJournal(t *testing.T) {
 }
 
 func TestRefundJournal(t *testing.T) {
-	lines, err := RefundJournal(testSet, 150000)
-	if err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		name          string
+		set           JournalSettings
+		bill, deposit int64
+		want          map[string][2]int64 // account -> debit, credit
+		err           bool
+	}{
+		{"bill only", testSet, 150000, 0, map[string][2]int64{"4-1900": {150000, 0}, "1-1100": {0, 150000}}, false},
+		{"deposit only", testSet, 0, 80000, map[string][2]int64{"2-1500": {80000, 0}, "1-1100": {0, 80000}}, false},
+		{"combined", testSet, 150000, 80000,
+			map[string][2]int64{"4-1900": {150000, 0}, "2-1500": {80000, 0}, "1-1100": {0, 230000}}, false},
+		{"deposit only needs no refund account", JournalSettings{CashAcc: "K", DepositAcc: "D"}, 0, 5,
+			map[string][2]int64{"D": {5, 0}, "K": {0, 5}}, false},
+		{"bill without refund account", JournalSettings{CashAcc: "K"}, 1, 0, nil, true},
+		{"deposit without deposit account", JournalSettings{CashAcc: "K", RefundAcc: "R"}, 0, 1, nil, true},
+		{"negative", testSet, -1, 0, nil, true},
 	}
-	balanced(t, lines)
-	if _, err := RefundJournal(JournalSettings{CashAcc: "K"}, 1); err == nil {
-		t.Fatal("refund without refund account must fail")
+	for _, tc := range cases {
+		lines, err := RefundJournal(tc.set, tc.bill, tc.deposit)
+		if (err != nil) != tc.err {
+			t.Errorf("%s: err %v", tc.name, err)
+			continue
+		}
+		if tc.err {
+			continue
+		}
+		balanced(t, lines)
+		if len(lines) != len(tc.want) {
+			t.Errorf("%s: lines %+v", tc.name, lines)
+			continue
+		}
+		for _, l := range lines {
+			if w := tc.want[l.AccCode]; w != [2]int64{l.DebitIDR, l.CreditIDR} {
+				t.Errorf("%s: %s = %d/%d want %v", tc.name, l.AccCode, l.DebitIDR, l.CreditIDR, w)
+			}
+		}
 	}
 }
 

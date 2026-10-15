@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -69,7 +70,7 @@ func (a *App) ListRefunds(w http.ResponseWriter, r *http.Request) {
 		        COALESCE(f.processed_by::text,''),f.processed_at,f.created_at,
 		        COALESCE(b.period_year,0),COALESCE(b.period_month,0),COALESCE(b.net_idr,0),COALESCE(s.name,''),
 		        COALESCE(f.approval_id,''),COALESCE(f.transfer_ref,''),COALESCE(to_char(f.transfer_date,'YYYY-MM-DD'),''),
-		        COALESCE(f.process_note,'')
+		        COALESCE(f.process_note,''),f.deposit_idr
 		 FROM bill_refunds f
 		 LEFT JOIN student_bills b ON b.id=f.student_bill_id
 		 LEFT JOIN billing_schemes s ON s.id=b.scheme_id
@@ -85,14 +86,14 @@ func (a *App) ListRefunds(w http.ResponseWriter, r *http.Request) {
 		var (
 			id, billID, student, reason, st, reqBy, decBy, note, procBy, schemeName string
 			approvalID, transferRef, transferDate, processNote                      string
-			amount, net                                                             int64
+			amount, net, depositIDR                                                 int64
 			decAt, procAt                                                           sql.NullTime
 			createdAt                                                               time.Time
 			year, month                                                             int
 		)
 		if err := rows.Scan(&id, &billID, &student, &amount, &reason, &st, &reqBy, &decBy, &decAt, &note,
 			&procBy, &procAt, &createdAt, &year, &month, &net, &schemeName,
-			&approvalID, &transferRef, &transferDate, &processNote); err != nil {
+			&approvalID, &transferRef, &transferDate, &processNote, &depositIDR); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -103,6 +104,7 @@ func (a *App) ListRefunds(w http.ResponseWriter, r *http.Request) {
 			"period_year": year, "period_month": month, "bill_net_idr": net, "scheme_name": schemeName,
 			"approval_id": approvalID, "via_approval_center": approvalID != "",
 			"transfer_ref": transferRef, "transfer_date": transferDate, "process_note": processNote,
+			"deposit_idr": depositIDR,
 		}
 		if decAt.Valid {
 			m["decided_at"] = decAt.Time
@@ -130,8 +132,7 @@ func refundableQ(r *http.Request, q queryer, schoolID, billID, excludeID string)
 	}
 	var pending int64
 	if err := q.QueryRowContext(r.Context(),
-		`SELECT COALESCE(sum(amount_idr),0) FROM bill_refunds
-		 WHERE school_id=$1 AND student_bill_id::text=$2 AND status IN ('requested','approved') AND id::text<>$3`,
+		`SELECT `+pendingSQL("$3")+` FROM student_bills b WHERE b.school_id=$1 AND b.id::text=$2`,
 		schoolID, billID, excludeID).Scan(&pending); err != nil {
 		return 0, err
 	}
@@ -311,8 +312,9 @@ func (a *App) DecideRefund(w http.ResponseWriter, r *http.Request) {
 
 // ProcessRefund is POST /admin/refunds/{id}/process {transfer_ref,
 // transfer_date?, note?}. Only an approved refund is processed, against the
-// bank transfer that paid it out; it reverses the bill's verified payments
-// newest first.
+// bank transfer that paid it out. Bill portions reverse the bill's verified
+// payments newest first; a deposit portion reduces student_deposits with a
+// deposit movement and leaves bill payments untouched.
 func (a *App) ProcessRefund(w http.ResponseWriter, r *http.Request) {
 	c, schoolID := adminSchool(w, r)
 	if c == nil {
@@ -340,11 +342,14 @@ func (a *App) ProcessRefund(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var status, billID, reason string
-	var amount int64
+	var status, studentID, reason string
+	var billID sql.NullString
+	var amount, depositIDR int64
+	var isWallet bool
 	err = tx.QueryRowContext(r.Context(),
-		`SELECT status,student_bill_id::text,amount_idr,reason FROM bill_refunds
-		 WHERE id::text=$1 AND school_id=$2 FOR UPDATE`, id, schoolID).Scan(&status, &billID, &amount, &reason)
+		`SELECT status,student_bill_id::text,student_user_id::text,amount_idr,deposit_idr,reason,wallet_id IS NOT NULL FROM bill_refunds
+		 WHERE id::text=$1 AND school_id=$2 FOR UPDATE`, id, schoolID).
+		Scan(&status, &billID, &studentID, &amount, &depositIDR, &reason, &isWallet)
 	if err == sql.ErrNoRows {
 		common.WriteError(w, http.StatusNotFound, "refund tidak ditemukan")
 		return
@@ -357,41 +362,36 @@ func (a *App) ProcessRefund(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusUnprocessableEntity, "hanya refund yang sudah disetujui yang dapat diproses")
 		return
 	}
-	if _, err = tx.ExecContext(r.Context(),
-		`SELECT 1 FROM student_bills WHERE id::text=$1 AND school_id=$2 FOR UPDATE`, billID, schoolID); err != nil {
-		writeErr(w, err)
+	if isWallet {
+		common.WriteError(w, http.StatusUnprocessableEntity, "refund saldo dompet tidak diproses dari menu refund tagihan")
 		return
 	}
-
-	rows, err := tx.QueryContext(r.Context(),
-		`SELECT p.id::text,p.amount_idr-COALESCE((SELECT sum(rv.amount_idr) FROM bill_payment_reversals rv WHERE rv.payment_id=p.id),0)
-		 FROM bill_payments p WHERE p.student_bill_id::text=$1 AND p.school_id=$2 AND p.status='verified'
-		 ORDER BY p.verified_at DESC,p.id`, billID, schoolID)
+	// The bill portions reverse payments of their bills; the deposit
+	// portion only reduces the student's deposit balance.
+	shares, err := refundBillShares(r.Context(), tx, schoolID, id, billID, amount-depositIDR)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	var sources []model.RefundSource
-	for rows.Next() {
-		var s model.RefundSource
-		if err := rows.Scan(&s.PaymentID, &s.Remaining); err != nil {
-			rows.Close()
+	sortShares(shares)
+	for _, sh := range shares {
+		if err = reverseBillShare(r.Context(), tx, schoolID, id, reason, c.UserID, sh); err != nil {
+			if errors.Is(err, errRefundSourceShort) {
+				common.WriteError(w, http.StatusUnprocessableEntity, "saldo terbayar tagihan tidak lagi mencukupi nominal refund")
+				return
+			}
 			writeErr(w, err)
 			return
 		}
-		sources = append(sources, s)
 	}
-	rows.Close()
-	parts, err := model.SpreadRefund(amount, sources)
-	if err != nil {
-		common.WriteError(w, http.StatusUnprocessableEntity, "saldo terbayar tagihan tidak lagi mencukupi nominal refund")
-		return
-	}
-	for _, p := range parts {
-		if _, err = tx.ExecContext(r.Context(),
-			`INSERT INTO bill_payment_reversals(school_id,payment_id,amount_idr,reason,actor_id,idempotency_key,refund_id)
-			 VALUES($1,$2,$3,$4,$5,$6,$7)`,
-			schoolID, p.PaymentID, p.AmountIDR, "Refund: "+reason, c.UserID, "refund:"+id+":"+p.PaymentID, id); err != nil {
+	var depositBefore, depositAfter int64
+	if depositIDR > 0 {
+		depositBefore, depositAfter, err = payRefundFromDeposit(r.Context(), tx, schoolID, studentID, id, reason, depositIDR)
+		if errors.Is(err, errRefundSourceShort) {
+			common.WriteError(w, http.StatusUnprocessableEntity, "saldo deposit siswa tidak lagi mencukupi porsi deposit refund")
+			return
+		}
+		if err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -407,17 +407,22 @@ func (a *App) ProcessRefund(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	if err = recomputeBillStatusQ(r.Context(), tx, schoolID, billID); err != nil {
-		writeErr(w, err)
-		return
-	}
 	if err = tx.Commit(); err != nil {
 		writeErr(w, err)
 		return
 	}
+	billParts := make([]map[string]any, 0, len(shares))
+	for _, sh := range shares {
+		billParts = append(billParts, map[string]any{"student_bill_id": sh.BillID, "amount_idr": sh.AmountIDR})
+	}
 	a.auditBoth(r.Context(), schoolID, "billing", "refund", id, "refund_processed", c.ActiveRole, c.UserID, reason,
-		map[string]any{"status": status}, map[string]any{"status": "processed", "bill_id": billID, "amount_idr": amount,
+		map[string]any{"status": status}, map[string]any{"status": "processed", "bill_id": billID.String, "amount_idr": amount,
+			"deposit_idr": depositIDR, "bill_parts": billParts,
 			"transfer_ref": proof.Ref, "transfer_date": proof.Date.Format("2006-01-02")})
+	if depositIDR > 0 {
+		a.auditBoth(r.Context(), schoolID, "billing", "student_deposit", studentID, "deposit_refunded", c.ActiveRole, c.UserID, reason,
+			map[string]any{"balance_idr": depositBefore}, map[string]any{"balance_idr": depositAfter, "refund_id": id, "amount_idr": depositIDR})
+	}
 	a.notifyRefund(r.Context(), schoolID, id, model.RefundProcessed, "")
 	common.WriteJSON(w, http.StatusOK, map[string]any{"id": id, "status": "processed", "transfer_ref": proof.Ref}, nil)
 }

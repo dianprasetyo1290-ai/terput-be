@@ -352,6 +352,12 @@ func TestInternalStudentRefund_Idempotency(t *testing.T) {
 	srv := httptest.NewServer(newBillingTestRouter(app))
 	defer srv.Close()
 
+	// The refund is paid out of the student's overpayment deposit.
+	if _, err := db.Exec(`INSERT INTO student_deposits (school_id, student_user_id, balance_idr) VALUES ($1,$2,200000)`,
+		schoolID, studentID); err != nil {
+		t.Fatal(err)
+	}
+
 	refundPayload := map[string]any{
 		"school_id":       schoolID,
 		"amount_idr":      200000,
@@ -377,6 +383,14 @@ func TestInternalStudentRefund_Idempotency(t *testing.T) {
 	_ = db.QueryRow(`SELECT count(*) FROM bill_refunds WHERE school_id=$1`, schoolID).Scan(&leftover)
 	if leftover != 0 {
 		t.Fatalf("refused refund must not remain, found %d rows", leftover)
+	}
+	// ...and the refusal is reported to core's Integration Exception Queue.
+	core.mu.Lock()
+	excs := append([]client.ExceptionEvent(nil), core.excs...)
+	core.mu.Unlock()
+	if len(excs) != 1 || excs[0].Kind != "callback" || excs[0].Severity != "critical" || excs[0].SchoolID != schoolID ||
+		excs[0].IdempotencyKey != "refund-approval:"+idempotencyKey || excs[0].SourceService != "billing" {
+		t.Fatalf("exception queue = %+v", excs)
 	}
 	core.refuse = false
 	body, _ := json.Marshal(refundPayload)

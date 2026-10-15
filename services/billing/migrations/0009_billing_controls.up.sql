@@ -241,3 +241,21 @@ CREATE TABLE payment_imports (
     created_at   timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX payment_imports_school_idx ON payment_imports (school_id, created_at DESC);
+
+-- QA-BILL round 3: a withdrawal/transfer refund (Menu 78) is split into the
+-- part paid out of the student's overpayment deposit (deposit_idr, reduces
+-- student_deposits on processing) and the parts that return payments of
+-- specific bills (bill_refund_parts). Such a refund has no single
+-- student_bill_id.
+ALTER TABLE bill_refunds
+    ADD COLUMN deposit_idr bigint NOT NULL DEFAULT 0,
+    ADD CONSTRAINT bill_refunds_deposit_range CHECK (deposit_idr >= 0 AND deposit_idr <= amount_idr);
+CREATE TABLE bill_refund_parts (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id       uuid NOT NULL,
+    refund_id       uuid NOT NULL REFERENCES bill_refunds(id) ON DELETE CASCADE,
+    student_bill_id uuid NOT NULL REFERENCES student_bills(id),
+    amount_idr      bigint NOT NULL CHECK (amount_idr > 0),
+    UNIQUE (refund_id, student_bill_id)
+);
+CREATE INDEX bill_refund_parts_bill_idx ON bill_refund_parts (school_id, student_bill_id);

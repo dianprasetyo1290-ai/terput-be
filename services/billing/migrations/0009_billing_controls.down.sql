@@ -1,3 +1,5 @@
+DROP TABLE IF EXISTS bill_refund_parts;
+ALTER TABLE bill_refunds DROP CONSTRAINT IF EXISTS bill_refunds_deposit_range, DROP COLUMN IF EXISTS deposit_idr;
 DROP TABLE IF EXISTS payment_imports;
 DELETE FROM bill_payment_allocations WHERE payment_id IN (SELECT id FROM bill_payments WHERE source = 'import');
 DELETE FROM bill_payments WHERE source = 'import';

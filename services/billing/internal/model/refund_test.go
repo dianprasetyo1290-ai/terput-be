@@ -78,3 +78,49 @@ func TestRefundNoticeText(t *testing.T) {
 		}
 	}
 }
+
+func TestSplitStudentRefund(t *testing.T) {
+	bills := []RefundableBill{{"b-new", 300000}, {"b-zero", 0}, {"b-old", 200000}}
+	cases := []struct {
+		name            string
+		amount, deposit int64
+		bills           []RefundableBill
+		wantDeposit     int64
+		wantShares      []BillRefundShare
+		err             bool
+	}{
+		{"deposit only", 150000, 400000, bills, 150000, nil, false},
+		{"deposit exactly", 400000, 400000, bills, 400000, nil, false},
+		{"deposit then overpaid bill", 500000, 400000, bills, 400000, []BillRefundShare{{"b-new", 100000}}, false},
+		{"spans bills skipping empty", 800000, 400000, bills, 400000,
+			[]BillRefundShare{{"b-new", 300000}, {"b-old", 100000}}, false},
+		{"no deposit", 250000, 0, bills, 0, []BillRefundShare{{"b-new", 250000}}, false},
+		{"negative deposit treated as none", 100000, -5, bills, 0, []BillRefundShare{{"b-new", 100000}}, false},
+		{"everything", 900000, 400000, bills, 400000,
+			[]BillRefundShare{{"b-new", 300000}, {"b-old", 200000}}, false},
+		{"exceeds deposit and bills", 900001, 400000, bills, 0, nil, true},
+		{"exceeds deposit without bills", 1, 0, nil, 0, nil, true},
+		{"zero amount", 0, 400000, bills, 0, nil, true},
+	}
+	for _, tc := range cases {
+		dep, shares, err := SplitStudentRefund(tc.amount, tc.deposit, tc.bills)
+		if (err != nil) != tc.err {
+			t.Errorf("%s: err %v", tc.name, err)
+			continue
+		}
+		if dep != tc.wantDeposit || len(shares) != len(tc.wantShares) {
+			t.Errorf("%s: got deposit %d shares %+v", tc.name, dep, shares)
+			continue
+		}
+		var sum int64
+		for i, s := range shares {
+			if s != tc.wantShares[i] {
+				t.Errorf("%s: share %d = %+v want %+v", tc.name, i, s, tc.wantShares[i])
+			}
+			sum += s.AmountIDR
+		}
+		if !tc.err && dep+sum != tc.amount {
+			t.Errorf("%s: parts %d+%d do not add up to %d", tc.name, dep, sum, tc.amount)
+		}
+	}
+}
