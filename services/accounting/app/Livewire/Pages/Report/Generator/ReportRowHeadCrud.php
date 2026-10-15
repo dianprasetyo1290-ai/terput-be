@@ -110,10 +110,22 @@ class ReportRowHeadCrud extends Component
         $this->reportRowHeadId = null;
     }
 
+    public function sort($order)
+    {
+        $this->order = strtoupper((string) $order) === 'DESC' ? 'desc' : 'asc';
+        $this->resetPage();
+    }
+
+    public function limits($limit)
+    {
+        $this->limit = in_array((int) $limit, [10, 30, 50, 100], true) ? (int) $limit : 10;
+        $this->resetPage();
+    }
+
     public function render()
     {
         return view('livewire.pages.report.generator.report-row-head-crud',[
-            'data' => ReportRowHead::paginate(10),
+            'data' => ReportRowHead::orderBy('id', $this->order)->paginate($this->limit),
         ]);
     }
 }

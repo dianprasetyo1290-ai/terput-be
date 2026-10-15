@@ -76,6 +76,7 @@ class PriorYearAdjustmentUiTest extends TestCase
             'curr_code' => 'Rp',
         ]);
 
+        $this->actingAsSuperAdmin();
         Livewire::test(PriorYearAdjustment::class)
             ->call('selectSession', $session->id)
             ->call('confirmFinalizeAdjustment')
@@ -93,6 +94,7 @@ class PriorYearAdjustmentUiTest extends TestCase
             'description' => 'Late audit adjustment',
         ]);
 
+        $this->actingAsSuperAdmin();
         Livewire::test(PriorYearAdjustment::class)
             ->call('selectSession', $session->id)
             ->call('confirmFinalizeAdjustment')
@@ -119,6 +121,7 @@ class PriorYearAdjustmentUiTest extends TestCase
             'curr_code' => 'Rp',
         ]);
 
+        $this->actingAsSuperAdmin();
         Livewire::test(PriorYearAdjustment::class)
             ->call('selectSession', $session->id)
             ->call('confirmDeleteDraft', $session->id)
@@ -185,6 +188,7 @@ class PriorYearAdjustmentUiTest extends TestCase
             'curr_code' => 'Rp',
         ]);
 
+        $this->actingAsSuperAdmin();
         Livewire::test(PriorYearAdjustment::class)
             ->set('listFilterYear', '2025')
             ->set('search', 'audit')
@@ -257,5 +261,16 @@ class PriorYearAdjustmentUiTest extends TestCase
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+    }
+
+    /** The central Livewire guard (QA round 2) needs a signed-in user. */
+    private function actingAsSuperAdmin(): void
+    {
+        \Spatie\Permission\Models\Role::findOrCreate('SuperAdmin', 'web');
+        $user = \App\Models\User::query()->forceCreate([
+            'user_id' => 'SA'.substr(uniqid(), -6), 'user_name' => 'Super Admin', 'email' => uniqid().'@uji.test', 'password' => bcrypt('secret'),
+        ]);
+        $user->assignRole('SuperAdmin');
+        $this->actingAs($user);
     }
 }

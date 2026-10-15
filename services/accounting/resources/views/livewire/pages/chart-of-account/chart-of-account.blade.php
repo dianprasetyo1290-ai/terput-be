@@ -151,6 +151,20 @@
                         </div>
 
                         <div class="form-group row">
+                            <label class="col-form-label col-lg-2">{{ __('Unit') }}</label>
+                            <div class="col-lg-10">
+                                <select class="form-control @error('coa.unit_scope') is-invalid @enderror" wire:model="coa.unit_scope">
+                                    <option value="">{{ __('— Semua unit (akun bersama) —') }}</option>
+                                    @foreach ($divisions as $d)
+                                        <option value="{{ $d->div_code }}">{{ $d->div_code }} — {{ $d->div_name }}</option>
+                                    @endforeach
+                                </select>
+                                <small class="form-text text-muted">Akun khusus unit hanya dapat dipakai baris jurnal unit tersebut. Terkunci setelah akun memiliki transaksi.</small>
+                                @foreach ($errors->get('coa.unit_scope') as $m)<div class="text-danger small">{{ $m }}</div>@endforeach
+                            </div>
+                        </div>
+
+                        <div class="form-group row">
                             <label class="col-form-label col-lg-2">{{ __('Status & Tanda') }}</label>
                             <div class="col-lg-10">
                                 <label class="mr-3"><input type="checkbox" wire:model="coa.is_active"> Aktif</label>
@@ -253,6 +267,16 @@
                             <option value="inactive">Nonaktif</option>
                         </select>
                     </div>
+                    <label class="col-form-label col-md-1">Unit</label>
+                    <div class="col-md-2">
+                        <select class="form-control form-control-sm" wire:model.live="unit">
+                            <option value="">Semua</option>
+                            <option value="shared">Akun bersama</option>
+                            @foreach ($divisions as $d)
+                                <option value="{{ $d->div_code }}">{{ $d->div_code }}</option>
+                            @endforeach
+                        </select>
+                    </div>
                     <label class="col-form-label col-md-1">Show</label>
                     <div class="col-md-2">
                         <div class="btn-group justify-content-center">
@@ -309,6 +333,7 @@
                                     @if (isset($parentCodes[$row->acc_code]))<span class="badge badge-info">Induk</span>@endif
                                     @if ($row->is_control)<span class="badge badge-warning">Kontrol</span>@endif
                                     @if ($row->is_interunit)<span class="badge badge-light">Antar-unit</span>@endif
+                                    @if ($row->unit_scope)<span class="badge badge-primary">Unit {{ $row->unit_scope }}</span>@endif
                                 </td>
                                 @canany(['editchart_of_account', 'deletechart_of_account'])
                                     <td class="text-center">
@@ -350,6 +375,67 @@
                 </table>
                 {{ $data->links() }}
             </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header"><h5 class="card-title">Template COA per Unit</h5></div>
+        <div class="card-body">
+            <p class="small text-muted mb-2">Simpan akun bersama yang aktif sebagai template, lalu salin ke unit (SD/SMP/…).
+                Salinan berkode <code>&lt;kode&gt;.&lt;UNIT&gt;</code>, khusus unit tersebut, dan dapat disesuaikan di atas. Menyalin ulang hanya menambah akun yang belum ada.</p>
+            @if ($tplMessage)
+                <div class="alert alert-success">{{ $tplMessage }}</div>
+            @endif
+            @can('createchart_of_account')
+                <div class="row">
+                    <div class="col-md-6">
+                        <label class="font-weight-bold">Simpan COA bersama sebagai template</label>
+                        <input type="text" class="form-control mb-1 @error('coaTpl.name') is-invalid @enderror" placeholder="Nama template" wire:model="coaTpl.name">
+                        @foreach ($errors->get('coaTpl.name') as $m)<div class="text-danger small">{{ $m }}</div>@endforeach
+                        <input type="text" class="form-control mb-2" placeholder="Keterangan (opsional)" wire:model="coaTpl.description">
+                        <button type="button" class="btn btn-primary" wire:click="saveTemplate" wire:loading.attr="disabled">Simpan Template</button>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="font-weight-bold">Salin template ke unit</label>
+                        <select class="form-control mb-1 @error('coaCopy.template_id') is-invalid @enderror" wire:model="coaCopy.template_id">
+                            <option value="">Pilih template</option>
+                            @foreach ($coaTemplates as $t)
+                                <option value="{{ $t->id }}">{{ $t->name }} ({{ $t->accounts }} akun)</option>
+                            @endforeach
+                        </select>
+                        @foreach ($errors->get('coaCopy.template_id') as $m)<div class="text-danger small">{{ $m }}</div>@endforeach
+                        <select class="form-control mb-2 @error('coaCopy.div_code') is-invalid @enderror" wire:model="coaCopy.div_code">
+                            <option value="">Pilih unit</option>
+                            @foreach ($divisions as $d)
+                                <option value="{{ $d->div_code }}">{{ $d->div_code }} — {{ $d->div_name }}</option>
+                            @endforeach
+                        </select>
+                        @foreach ($errors->get('coaCopy.div_code') as $m)<div class="text-danger small">{{ $m }}</div>@endforeach
+                        <button type="button" class="btn btn-success" wire:click="copyTemplate" wire:loading.attr="disabled"
+                            wire:confirm="Salin template ke unit terpilih? Akun baru akan dibuat.">Salin ke Unit</button>
+                    </div>
+                </div>
+                <hr>
+            @endcan
+            <table class="table table-sm">
+                <thead class="thead-light"><tr><th>Template</th><th>Keterangan</th><th class="text-right">Akun</th><th>Dibuat</th>@can('deletechart_of_account')<th></th>@endcan</tr></thead>
+                <tbody>
+                    @forelse ($coaTemplates as $t)
+                        <tr>
+                            <td>{{ $t->name }}</td>
+                            <td class="small">{{ $t->description }}</td>
+                            <td class="text-right">{{ $t->accounts }}</td>
+                            <td class="small">{{ $t->created_by }} · {{ $t->created_at }}</td>
+                            @can('deletechart_of_account')
+                                <td class="text-right"><button class="btn btn-sm btn-light" wire:click="deleteTemplate({{ $t->id }})"
+                                    wire:confirm="Hapus template {{ $t->name }}?">Hapus</button></td>
+                            @endcan
+                        </tr>
+                    @empty
+                        <tr><td colspan="5" class="text-center text-muted">Belum ada template COA.</td></tr>
+                    @endforelse
+                </tbody>
+            </table>
         </div>
     </div>
 </div>

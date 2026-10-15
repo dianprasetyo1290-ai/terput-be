@@ -8,6 +8,10 @@ use App\Models\ChartOfAccount as ModelsChartOfAccount;
 use App\Models\Currency;
 use App\Support\Accounts;
 use App\Support\AuditLog;
+use App\Support\CoaTemplates;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Validation\Rule;
 use Livewire\Component;
@@ -35,6 +39,7 @@ class ChartOfAccount extends Component
         'is_cash' => false,
         'is_interunit' => false,
         'is_control' => false,
+        'unit_scope' => null,
     ];
 
     public $listSubGroup = [];
@@ -44,6 +49,13 @@ class ChartOfAccount extends Component
     public $blockers = [];
     public $blockedCode;
     public $search, $order = "ASC", $limit = 10, $status = 'all';
+    /** '' = all, 'shared' = shared accounts, or a div_code (QA BUG-141). */
+    public $unit = '';
+
+    /** COA templates per unit (QA BUG-141). */
+    public $coaTpl = ['name' => '', 'description' => ''];
+    public $coaCopy = ['template_id' => '', 'div_code' => ''];
+    public $tplMessage = null;
 
     public function updatedCoaAccGroup($value = '')
     {
@@ -84,6 +96,61 @@ class ChartOfAccount extends Component
     public function updatedStatus()
     {
         $this->resetPage();
+    }
+
+    public function updatedUnit()
+    {
+        $this->resetPage();
+    }
+
+    // ---- COA templates per unit (QA BUG-141) ----------------------------
+
+    private function templateAction(callable $fn): void
+    {
+        $this->resetValidation();
+        try {
+            $this->tplMessage = $fn();
+        } catch (ValidationException $e) {
+            $this->tplMessage = null;
+            foreach ($e->errors() as $k => $msgs) {
+                foreach ($msgs as $m) {
+                    $this->addError($k, $m);
+                }
+            }
+        }
+    }
+
+    public function saveTemplate(): void
+    {
+        $this->authorize('createchart_of_account');
+        $this->templateAction(function () {
+            $id = CoaTemplates::saveFromCoa((string) $this->coaTpl['name'], $this->coaTpl['description'] ?: null, (string) Auth::id());
+            $n = DB::table('acc_coa_template_lines')->where('template_id', $id)->count();
+            $this->coaTpl = ['name' => '', 'description' => ''];
+
+            return "Template COA disimpan ($n akun bersama).";
+        });
+    }
+
+    public function copyTemplate(): void
+    {
+        $this->authorize('createchart_of_account');
+        $this->templateAction(function () {
+            $r = CoaTemplates::copyToUnit((int) $this->coaCopy['template_id'], (string) $this->coaCopy['div_code'], (string) Auth::id());
+
+            return "Template disalin ke unit {$this->coaCopy['div_code']}: {$r['created']} akun dibuat, {$r['skipped']} sudah ada (dilewati). "
+                .'Akun unit berkode <kode>.'.$this->coaCopy['div_code'].' dan hanya dapat dipakai baris jurnal unit tersebut.';
+        });
+    }
+
+    public function deleteTemplate(int $id): void
+    {
+        $this->authorize('deletechart_of_account');
+        $this->templateAction(function () use ($id) {
+            CoaTemplates::delete($id, (string) Auth::id());
+
+            return 'Template COA dihapus. Akun yang sudah disalin tidak berubah.';
+        });
     }
 
     public function add($id = "")
@@ -150,6 +217,7 @@ class ChartOfAccount extends Component
             'coa.is_cash' => 'boolean',
             'coa.is_interunit' => 'boolean',
             'coa.is_control' => 'boolean',
+            'coa.unit_scope' => 'nullable|exists:mst_division,div_code',
         ];
     }
 
@@ -164,7 +232,7 @@ class ChartOfAccount extends Component
     public function save()
     {
         $this->authorize($this->idNya ? 'editchart_of_account' : 'createchart_of_account');
-        foreach (['sub_acc_group', 'acc_currency', 'parent_code'] as $k) {
+        foreach (['sub_acc_group', 'acc_currency', 'parent_code', 'unit_scope'] as $k) {
             if (($this->coa[$k] ?? null) === '') {
                 $this->coa[$k] = null;
             }
@@ -190,6 +258,9 @@ class ChartOfAccount extends Component
             if ((int) $current->acc_group !== $group) {
                 $errors['coa.acc_group'][] = 'Kelompok akun terkunci: akun sudah memiliki transaksi/saldo.';
             }
+        }
+        if ($current && ($current->unit_scope ?? null) !== ($this->coa['unit_scope'] ?? null) && Accounts::hasActivity($code)) {
+            $errors['coa.unit_scope'][] = 'Unit akun terkunci: akun sudah memiliki transaksi/saldo.';
         }
         if ($current && Accounts::isParent($code) && $this->coa['is_control']) {
             $errors['coa.is_control'][] = 'Akun induk tidak dapat menjadi akun kontrol.';
@@ -285,6 +356,11 @@ class ChartOfAccount extends Component
         } elseif ($this->status === 'inactive') {
             $data->where('is_active', false);
         }
+        if ($this->unit === 'shared') {
+            $data->whereNull('unit_scope');
+        } elseif ($this->unit !== '' && $this->unit !== null) {
+            $data->where('unit_scope', (string) $this->unit);
+        }
         $data->orderBy('acc_code', $this->order === 'DESC' ? 'DESC' : 'ASC');
 
         return view('livewire.pages.chart-of-account.chart-of-account', [
@@ -297,6 +373,9 @@ class ChartOfAccount extends Component
                 ->when($this->idNya, fn ($q, $id) => $q->where('acc_code', '!=', $id))
                 ->get(['acc_code', 'acc_name']),
             'parentCodes' => ModelsChartOfAccount::whereNotNull('parent_code')->distinct()->pluck('parent_code')->flip(),
+            'divisions' => DB::table('mst_division')->orderBy('div_code')->get(['div_code', 'div_name']),
+            'coaTemplates' => DB::table('acc_coa_templates as t')->leftJoin('acc_coa_template_lines as l', 'l.template_id', '=', 't.id')
+                ->groupBy('t.id')->orderBy('t.name')->selectRaw('t.*, count(l.id) as accounts')->get(),
         ]);
     }
 }

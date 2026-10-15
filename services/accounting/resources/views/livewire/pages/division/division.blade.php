@@ -16,6 +16,9 @@
 
         </div>
         <div class="card-body">
+            @if ($error)
+                <div class="alert alert-danger">{{ $error }}</div>
+            @endif
 
             @if ($form)
                 <form action="#" wire:submit="save">
@@ -29,7 +32,7 @@
                             <div class="col-lg-10">
                                 <input type="text"
                                     class="form-control @error('division.div_code') is-invalid  @enderror"
-                                    wire:model="division.div_code">
+                                    wire:model="division.div_code" @if ($idNya) readonly @endif>
                                 @error('division.div_code')
                                     <div class="invalid-feedback">
                                         {{ $errors->first('division.div_code') }}
@@ -52,6 +55,22 @@
                             </div>
                         </div>
 
+                        @if (! $idNya)
+                            @can('createchart_of_account')
+                                <div class="form-group row">
+                                    <label class="col-form-label col-lg-2">{{ __('Template COA') }}</label>
+                                    <div class="col-lg-10">
+                                        <select class="form-control" wire:model="coaTemplate">
+                                            <option value="">— Tanpa salinan COA (pakai akun bersama) —</option>
+                                            @foreach ($coaTemplates as $t)
+                                                <option value="{{ $t->id }}">{{ $t->name }}</option>
+                                            @endforeach
+                                        </select>
+                                        <small class="form-text text-muted">Opsional: buat akun khusus unit dari template COA (kelola di menu Chart of Account).</small>
+                                    </div>
+                                </div>
+                            @endcan
+                        @endif
                     </fieldset>
 
                     <div class="card-footer bg-white d-flex justify-content-between align-items-center py-2">

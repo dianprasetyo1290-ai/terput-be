@@ -91,4 +91,53 @@
             @endif
         </div>
     </div>
+
+    @php $money = fn ($v) => $v === null ? '-' : number_format((float) $v, 2, ',', '.'); @endphp
+    <div class="card">
+        <div class="card-header"><h5 class="card-title">Kontrol Total Piutang (Migrasi)</h5></div>
+        <div class="card-body">
+            <p class="small text-muted">Piutang per siswa disimpan di Billing; totalnya harus sama dengan saldo akun kontrol piutang di akuntansi.
+                Bandingkan setelah impor saldo awal dan impor tagihan awal di Billing, lalu lakukan sign-off.</p>
+            <button type="button" class="btn btn-outline-primary" wire:click="reconcile" wire:loading.attr="disabled">Cek ke Billing</button>
+            @if ($recon)
+                <table class="table table-sm mt-3">
+                    <tbody>
+                        @foreach ($recon['accounts'] as $acc)
+                            <tr><td>Akun kontrol {{ $acc['acc_code'] }} {{ $acc['acc_name'] }}</td><td class="text-right">{{ $money($acc['ending']) }}</td></tr>
+                        @endforeach
+                        <tr><th>Saldo awal akun kontrol (periode 0, {{ $recon['year'] }})</th><td class="text-right">{{ $money($recon['opening']) }}</td></tr>
+                        <tr><th>Saldo akun kontrol saat ini</th><td class="text-right">{{ $money($recon['ledger']) }}</td></tr>
+                        <tr><th>Total piutang per siswa di Billing @if ($recon['students'] !== null)({{ $recon['students'] }} siswa)@endif</th><td class="text-right">{{ $money($recon['billing']) }}</td></tr>
+                        @if ($recon['difference'] !== null)
+                            <tr class="{{ abs($recon['difference']) < 0.01 ? 'table-success' : 'table-danger' }}"><th>Selisih</th><td class="text-right">{{ $money($recon['difference']) }}</td></tr>
+                        @endif
+                    </tbody>
+                </table>
+                @if ($recon['error'])
+                    <div class="alert alert-secondary">{{ $recon['error'] }}</div>
+                @endif
+                @can('createimport_data')
+                    @if ($recon['billing'] !== null)
+                        <div class="form-group">
+                            <label>Catatan sign-off @if (abs((float) $recon['difference']) >= 0.01)<span class="text-danger">(wajib: jelaskan selisih)</span>@endif</label>
+                            <textarea class="form-control" rows="2" wire:model="signOffNote" maxlength="1000"></textarea>
+                            @foreach ($errors->get('signOffNote') as $m)<div class="text-danger small">{{ $m }}</div>@endforeach
+                        </div>
+                        <button type="button" class="btn btn-success" wire:click="signOff" wire:confirm="Catat sign-off migrasi piutang?">Sign-off Migrasi Piutang</button>
+                    @endif
+                @endcan
+            @endif
+            @foreach ($errors->get('signOffNote') as $m)
+                @if (! $recon || $recon['billing'] === null)<div class="text-danger small mt-2">{{ $m }}</div>@endif
+            @endforeach
+            @if ($signOffMessage)
+                <div class="alert alert-success mt-3">{{ $signOffMessage }}</div>
+            @endif
+            @if ($lastSignOff)
+                <div class="small text-muted mt-3">Sign-off terakhir: {{ $lastSignOff->user_id }} pada {{ $lastSignOff->created_at }} —
+                    akuntansi {{ $money($lastSignOff->detail['ledger'] ?? null) }}, billing {{ $money($lastSignOff->detail['billing'] ?? null) }},
+                    selisih {{ $money($lastSignOff->detail['difference'] ?? null) }}@if (!empty($lastSignOff->detail['note'])) ({{ $lastSignOff->detail['note'] }})@endif.</div>
+            @endif
+        </div>
+    </div>
 </div>

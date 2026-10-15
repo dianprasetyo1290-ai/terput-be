@@ -17,6 +17,9 @@
         </div>
 
         <div class="card-body">
+            <div class="alert alert-info">Jurnal histori berasal dari periode yang sudah ditutup dan hanya dapat dilihat.
+                Koreksi dilakukan melalui <a href="{{ url('period-reopen') }}">Buka Kembali Periode</a> (periode terakhir, dengan persetujuan)
+                atau <a href="{{ url('prior-year-adjustment') }}">Penyesuaian Tahun Lalu</a>.</div>
             @if ($formDetail)
                 {{-- ============================================ --}}
                 {{-- DETAIL FORM --}}
@@ -46,6 +49,7 @@
                         </div>
                     </div>
 
+                    @if ($writable)
                     {{-- Form Detail Entri --}}
                     <div class="p-6 mb-5 bg-white border border-gray-200 rounded-xl">
                         <h6 class="flex items-center mb-5 text-sm font-semibold tracking-wide text-blue-700 uppercase">
@@ -192,17 +196,19 @@
                         </div>
                     </div>
 
+                    @endif
+
                     {{-- Action Buttons --}}
                     <div class="mb-5 d-flex justify-content-between align-items-center">
                         <button type="button" class="btn btn-light border" wire:click="batal">
                             <i class="mr-1 icon-arrow-left16"></i>Batal
                         </button>
-                        @can('createhistory_journal_detail')
+                        @if ($writable)
                             <button type="submit" class="btn btn-primary" wire:loading.attr="disabled">
                                 <i class="mr-1 icon-floppy-disk"></i>Simpan Detail
                                 <span wire:loading wire:target="saveDetail" class="spinner-border spinner-border-sm ml-1"></span>
                             </button>
-                        @endcan
+                        @endif
                     </div>
 
                     {{-- Tabel Daftar Detail --}}
@@ -221,9 +227,9 @@
                                     <th class="text-right">Debit</th>
                                     <th class="text-right">Kredit</th>
                                     <th class="text-center">Mata Uang</th>
-                                    @canany(['edithistory_journal_detail', 'deletehistory_journal_detail'])
+                                    @if ($writable)
                                         <th class="text-center" style="width: 60px">Aksi</th>
-                                    @endcanany
+                                    @endif
                                 </tr>
                             </thead>
                             <tbody>
@@ -247,7 +253,7 @@
                                         <td class="text-center">
                                             <span class="px-2 py-1 rounded-md" style="font-size: 0.75rem; font-weight: 500; color: #475569; background-color: #f1f5f9; border: 1px solid #e2e8f0;">{{ $row['curr_code'] }}</span>
                                         </td>
-                                        @canany(['edithistory_journal_detail', 'deletehistory_journal_detail'])
+                                        @if ($writable)
                                             <td class="text-center">
                                                 <div class="list-icons">
                                                     <div class="dropdown">
@@ -255,23 +261,23 @@
                                                             <i class="icon-menu9"></i>
                                                         </a>
                                                         <div class="dropdown-menu dropdown-menu-right">
-                                                            @can('edithistory_journal_detail')
+                                                            @if ($writable)
                                                                 <a href="#" class="dropdown-item"
                                                                     wire:click.prevent='detail("{{ $row['trans_no'] }}","{{ $row['id'] }}")'>
                                                                     <i class="icon-pencil"></i> Edit
                                                                 </a>
-                                                            @endcan
-                                                            @can('deletehistory_journal_detail')
+                                                            @endif
+                                                            @if ($writable)
                                                                 <a href="#" class="dropdown-item text-danger"
                                                                     wire:click.prevent='confirmDeleteDetail("{{ $row['id'] }}")'>
                                                                     <i class="icon-trash"></i> Hapus
                                                                 </a>
-                                                            @endcan
+                                                            @endif
                                                         </div>
                                                     </div>
                                                 </div>
                                             </td>
-                                        @endcanany
+                                        @endif
                                     </tr>
                                 @empty
                                     <tr>
@@ -443,13 +449,13 @@
                 {{-- ============================================ --}}
                 {{-- LIST VIEW --}}
                 {{-- ============================================ --}}
-                @can('createhistory_journal')
+                @if ($writable)
                     <div class="mb-5">
                         <button type="button" class="btn btn-primary btn-lg rounded-lg shadow-sm" wire:click="add">
                             <i class="mr-2 icon-plus-circle2"></i>Tambah History Transaksi Jurnal
                         </button>
                     </div>
-                @endcan
+                @endif
 
                 {{-- Filter and Search Section --}}
                 <div class="p-4 mb-5 bg-white border border-gray-200 rounded-xl">
@@ -558,9 +564,9 @@
                                 @can('viewhistory_journal_detail')
                                     <th class="text-center">Detail</th>
                                 @endcan
-                                @canany(['edithistory_journal', 'deletehistory_journal'])
+                                @if ($writable)
                                     <th class="text-center" style="width: 60px">Aksi</th>
-                                @endcanany
+                                @endif
                             </tr>
                         </thead>
                         <tbody>
@@ -609,7 +615,7 @@
                                             </a>
                                         </td>
                                     @endcan
-                                    @canany(['edithistory_journal', 'deletehistory_journal'])
+                                    @if ($writable)
                                         <td class="text-center">
                                             <div class="list-icons">
                                                 <div class="dropdown">
@@ -617,23 +623,23 @@
                                                         <i class="icon-menu9"></i>
                                                     </a>
                                                     <div class="dropdown-menu dropdown-menu-right">
-                                                        @can('edithistory_journal')
+                                                        @if ($writable)
                                                             <a href="#" class="dropdown-item"
                                                                 wire:click.prevent='add("{{ Crypt::encrypt($row->trans_no) }}")'>
                                                                 <i class="icon-pencil"></i> Edit
                                                             </a>
-                                                        @endcan
-                                                        @can('deletehistory_journal')
+                                                        @endif
+                                                        @if ($writable)
                                                             <a href="#" class="dropdown-item text-danger"
                                                                 wire:click.prevent='confirmDelete("{{ Crypt::encrypt($row->trans_no) }}")'>
                                                                 <i class="icon-trash"></i> Hapus
                                                             </a>
-                                                        @endcan
+                                                        @endif
                                                     </div>
                                                 </div>
                                             </div>
                                         </td>
-                                    @endcanany
+                                    @endif
                                 </tr>
                             @empty
                                 <tr>

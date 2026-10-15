@@ -55,26 +55,6 @@
                             </div>
                         </div>
                     </div>
-                    <label class="col-form-label col-md-1">Show</label>
-                    <div class="col-md-2">
-                        <div class="btn-group justify-content-center">
-                            <a href="#" class="btn alpha-indigo dropdown-toggle" data-toggle="dropdown"
-                                aria-expanded="false">
-                                {{ $limit }}
-                                items
-                            </a>
-
-                            <div class="dropdown-menu" x-placement="bottom-start"
-                                style="position: absolute; will-change: transform; top: 0px; left: 0px; transform: translate3d(163px, 36px, 0px);">
-                                <a class="dropdown-item" href="#" wire:click.prevent="limits('30')">30
-                                    items</a>
-                                <a class="dropdown-item" href="#" wire:click.prevent="limits('50')">50
-                                    items</a>
-                                <a class="dropdown-item" href="#" wire:click.prevent="limits('100')">100
-                                    items</a>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </div>
             <div class="datatable-scroll">

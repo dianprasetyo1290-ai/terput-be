@@ -33,5 +33,10 @@ class AppServiceProvider extends ServiceProvider
         Gate::before(function ($user, $ability) {
             return $user->hasRole('SuperAdmin') ? true : null;
         });
+
+        // Permission floor for every Livewire action (QA round 2), see LivewireGuard.
+        \Livewire\on('call', function ($component, $method) {
+            \App\Support\LivewireGuard::check($component, (string) $method);
+        });
     }
 }

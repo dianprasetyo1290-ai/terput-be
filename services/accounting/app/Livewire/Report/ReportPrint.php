@@ -23,9 +23,10 @@ class ReportPrint extends Component
     {
         if ($id) {
             $this->report = ReportFinal::with(['reportData.reportRowHead.reportRowDetail', 'reportColHead.reportColDetails'])->find($id);
-        } else {
-            session()->flash('error', 'Report ID is required.');
-            $this->report = null;
+        }
+        if (! $this->report) {
+            // No (or an unknown) report: back to the report list, not a 500.
+            abort(new \Illuminate\Http\RedirectResponse(route('report.financial')));
         }
 
         if (!isset($this->periode)) {

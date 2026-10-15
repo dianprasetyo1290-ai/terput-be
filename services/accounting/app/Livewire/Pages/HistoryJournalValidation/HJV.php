@@ -11,7 +11,8 @@ class HJV extends Component
     public function render()
     {
         // Ambil nilai yang dicari
-        $searchValue = Parameter::first()->period - 1;
+        $param = Parameter::first();
+        $searchValue = max(0, (int) optional($param)->period - 1);
         // Format nilai dengan menambahkan nol di depan jika kurang dari 10
         $formattedSearchValue = str_pad($searchValue, 2, '0', STR_PAD_LEFT);
 
@@ -22,8 +23,8 @@ class HJV extends Component
         }
 
         // Query dengan Eloquent untuk memilih kolom-kolom
-        $results = Period::select($columns)
-            ->where('period_name', 'ilike', '%' . Parameter::first()->year . '%')->get();
+        $results = $columns ? Period::select($columns)
+            ->where('period_name', 'ilike', '%' . optional($param)->year . '%')->get() : collect();
 
         // Ambil data dari hasil query
         $data = $results->map(function ($item) use ($columns) {

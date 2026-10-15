@@ -47,8 +47,10 @@ final class Accounts
      * Reasons a journal line may not post to $code; empty = postable.
      *
      * @param  bool  $manual  manual journal (control accounts are refused)
+     * @param  string|null  $divCode  the line's unit; a unit-scoped account
+     *                                (QA BUG-141) only takes its own unit's lines
      */
-    public static function postingProblems(string $code, bool $manual = true): array
+    public static function postingProblems(string $code, bool $manual = true, ?string $divCode = null): array
     {
         $acc = self::find($code);
         if (! $acc) {
@@ -60,6 +62,10 @@ final class Accounts
         }
         if (self::isParent($code)) {
             $problems[] = "Akun $code adalah akun induk; posting hanya ke akun detail.";
+        }
+        $scope = $acc->unit_scope ?? null;
+        if ($scope !== null && $scope !== '' && $divCode !== null && $divCode !== '' && $scope !== $divCode) {
+            $problems[] = "Akun $code khusus unit $scope; tidak dapat dipakai untuk baris unit $divCode.";
         }
         if ($manual && ($acc->is_control ?? false)) {
             $problems[] = "Akun $code adalah akun kontrol (sub-ledger di SEKOCI) dan hanya diisi posting otomatis. Koreksi melalui transaksi sumber (tagihan/pembayaran).";

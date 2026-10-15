@@ -60,7 +60,11 @@ class ReportRowDetails extends Component
         ];
     }
 
-    public function mount($id) {
+    public function mount($id = null) {
+        // Opened without (or with an unknown) row design: back to the list.
+        if (! ctype_digit((string) $id) || ! \App\Models\ReportRowHead::whereKey($id)->exists()) {
+            abort(new \Illuminate\Http\RedirectResponse(route('generator.row')));
+        }
         $this->report_row_head_id = $id;
     }
 

@@ -34,6 +34,7 @@ class EndOfYearUiTest extends TestCase
         $this->seedEndOfYearReferenceData();
         $this->seedCurrentYearBalances();
 
+        $this->actingAsSuperAdmin();
         Livewire::test(EOY::class)
             ->call('confirmGenerate')
             ->assertSet('showConfirmModal', true)
@@ -304,5 +305,16 @@ class EndOfYearUiTest extends TestCase
                 'updated_at' => now(),
             ],
         ]);
+    }
+
+    /** The central Livewire guard (QA round 2) needs a signed-in user. */
+    private function actingAsSuperAdmin(): void
+    {
+        \Spatie\Permission\Models\Role::findOrCreate('SuperAdmin', 'web');
+        $user = \App\Models\User::query()->forceCreate([
+            'user_id' => 'SA'.substr(uniqid(), -6), 'user_name' => 'Super Admin', 'email' => uniqid().'@uji.test', 'password' => bcrypt('secret'),
+        ]);
+        $user->assignRole('SuperAdmin');
+        $this->actingAs($user);
     }
 }

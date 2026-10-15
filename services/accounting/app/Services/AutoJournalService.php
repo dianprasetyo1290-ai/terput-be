@@ -42,6 +42,10 @@ class AutoJournalService
         $transDate = (string) ($payload['trans_date'] ?? Carbon::now()->toDateString());
         $description = (string) ($payload['description'] ?? '');
         $lines = (array) ($payload['lines'] ?? []);
+        // QA BUG-148: the billing/payment ids behind this journal, so the GL
+        // drilldown can list the source transactions. Optional; bad shapes are
+        // dropped rather than failing the journal.
+        $this->sourceRefs = self::cleanSourceRefs($payload['source_refs'] ?? null);
 
         // Idempotency (BR-INT-01, AC-98-02) comes first: a retry of a journal
         // that was already booked must return the original number even when
@@ -148,6 +152,26 @@ class AutoJournalService
                 'trans_no' => '',
                 'message' => 'Akun induk tidak dapat diposting (posting hanya ke akun detail): '.implode(', ', array_unique($parentAccounts)),
                 'invalid_accounts' => array_values(array_unique($parentAccounts)),
+            ]);
+        }
+
+        // QA BUG-141: a unit's own account only takes that unit's lines.
+        $scopeProblems = [];
+        foreach ($lines as $line) {
+            $accCode = (string) ($line['acc_code'] ?? '');
+            $div = ! empty($line['div_code']) ? (string) $line['div_code'] : null;
+            if ($accCode !== '' && ! in_array($accCode, $invalidAccounts, true) && $div !== null) {
+                $scope = DB::table('mst_account')->where('acc_code', $accCode)->value('unit_scope');
+                if ($scope !== null && $scope !== '' && $scope !== $div) {
+                    $scopeProblems[] = "$accCode (unit $scope) untuk baris unit $div";
+                }
+            }
+        }
+        if (! empty($scopeProblems)) {
+            return $this->fail($source, $reference, $transDate, $totalDebit, [
+                'status' => 422,
+                'trans_no' => '',
+                'message' => 'Akun khusus unit dipakai unit lain: '.implode(', ', array_unique($scopeProblems)),
             ]);
         }
 
@@ -269,6 +293,37 @@ class AutoJournalService
         return $result;
     }
 
+    /** @var array<string, array<string>> source_refs of the journal being posted */
+    private array $sourceRefs = [];
+
+    /**
+     * {"<type>": ["<id>", ...]} with type [a-z0-9_]{1,40}, ids up to 100
+     * chars, at most 5000 ids in total; anything else is ignored.
+     *
+     * @return array<string, array<string>>
+     */
+    public static function cleanSourceRefs(mixed $refs): array
+    {
+        if (! is_array($refs)) {
+            return [];
+        }
+        $out = [];
+        $n = 0;
+        foreach ($refs as $type => $ids) {
+            if (! is_string($type) || ! preg_match('/^[a-z0-9_]{1,40}$/', $type) || ! is_array($ids)) {
+                continue;
+            }
+            foreach ($ids as $id) {
+                if ((is_string($id) || is_int($id)) && ($id = trim((string) $id)) !== '' && strlen($id) <= 100 && $n < 5000) {
+                    $out[$type][] = $id;
+                    $n++;
+                }
+            }
+        }
+
+        return array_map(fn ($ids) => array_values(array_unique($ids)), $out);
+    }
+
     /** trans_no of a journal already booked for (source, reference), open or closed period. */
     private function findExisting(string $source, string $reference): ?string
     {
@@ -322,6 +377,9 @@ class AutoJournalService
         ];
         if ($amount > 0) {
             $values['amount'] = $amount;
+        }
+        if ($this->sourceRefs !== []) {
+            $values['source_ids'] = json_encode($this->sourceRefs);
         }
         $kind = mb_substr($source !== '' ? $source : 'unknown', 0, 20);
         $q = DB::table('acc_auto_postings')->where('kind', $kind)->where('reference', $reference);

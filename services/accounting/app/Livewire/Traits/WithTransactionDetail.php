@@ -106,7 +106,7 @@ trait WithTransactionDetail
             return;
         }
 
-        if ($problems = \App\Support\Accounts::postingProblems((string) $this->jtdetail['acc_code'])) {
+        if ($problems = \App\Support\Accounts::postingProblems((string) $this->jtdetail['acc_code'], true, (string) $this->jtdetail['div_code'])) {
             foreach ($problems as $m) {
                 $this->addError('jtdetail.acc_code', $m);
             }
@@ -136,7 +136,7 @@ trait WithTransactionDetail
             // Bug 7 fix: single query with eager load, reuse $al->trans_account
             $al = TransactionType::with('akunLawan')->where('trans_code', $this->jtdetail['trans_code'])->first();
             if ($al->akunLawan) {
-                if ($problems = \App\Support\Accounts::postingProblems((string) $al->trans_account)) {
+                if ($problems = \App\Support\Accounts::postingProblems((string) $al->trans_account, true, (string) $this->jtdetail['div_code'])) {
                     foreach ($problems as $m) {
                         $this->addError('jtdetail.acc_code', "Akun lawan tipe transaksi: $m");
                     }
