@@ -282,10 +282,12 @@ func (a *App) walletMovements(w http.ResponseWriter, r *http.Request, schoolID, 
 	common.WriteJSON(w, http.StatusOK, items, common.Meta{Page: page, PerPage: perPage, Total: total})
 }
 
-// AdminListWallets is GET /admin/wallets?q=&status= (admin, canteen_admin).
+// AdminListWallets is GET /admin/wallets?q=&status= (admin, canteen_admin, and
+// finance_manager read-only: PRD menu 125 "Finance Admin" = finance_manager,
+// the only finance role identity issues; QA-PAY round 4).
 // Grouped per student: both wallet kinds and the active card, if any.
 func (a *App) AdminListWallets(w http.ResponseWriter, r *http.Request) {
-	_, schoolID := common.RequireRoles(w, r, common.RoleAdmin, common.RoleCanteenAdmin)
+	_, schoolID := common.RequireRoles(w, r, common.RoleAdmin, common.RoleCanteenAdmin, common.RoleFinanceManager)
 	if schoolID == "" || !a.requireFeature(w, r, schoolID, featureWallet) {
 		return
 	}
@@ -343,7 +345,7 @@ func (a *App) AdminListWallets(w http.ResponseWriter, r *http.Request) {
 
 // AdminStudentWallets is GET /admin/students/{studentUserId}/wallets.
 func (a *App) AdminStudentWallets(w http.ResponseWriter, r *http.Request) {
-	_, schoolID := common.RequireRoles(w, r, common.RoleAdmin, common.RoleCanteenAdmin)
+	_, schoolID := common.RequireRoles(w, r, common.RoleAdmin, common.RoleCanteenAdmin, common.RoleFinanceManager)
 	if schoolID == "" || !a.requireFeature(w, r, schoolID, featureWallet) {
 		return
 	}
@@ -365,9 +367,9 @@ func (a *App) AdminCloseWallet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Disposition          string `json:"disposition"`
-		TargetStudentUserID  string `json:"target_student_user_id"`
-		Reason               string `json:"reason"`
+		Disposition         string `json:"disposition"`
+		TargetStudentUserID string `json:"target_student_user_id"`
+		Reason              string `json:"reason"`
 	}
 	if !common.Decode(w, r, &in) {
 		return
@@ -482,11 +484,11 @@ func (a *App) AdminCloseWallet(w http.ResponseWriter, r *http.Request) {
 		amount := wl.BalanceIDR
 		resp, err := a.Core.RequestApproval(r.Context(), client.ApprovalRequest{
 			SchoolID: schoolID, RequestType: reqTypeWalletTransfer, SourceID: closureID,
-			Title:   "Pemindahan saldo dompet siswa",
-			Summary: map[string]any{"wallet_id": wl.ID, "kind": wl.Kind, "from_student_user_id": wl.StudentUserID, "to_student_user_id": in.TargetStudentUserID, "reason": reason},
+			Title:     "Pemindahan saldo dompet siswa",
+			Summary:   map[string]any{"wallet_id": wl.ID, "kind": wl.Kind, "from_student_user_id": wl.StudentUserID, "to_student_user_id": in.TargetStudentUserID, "reason": reason},
 			AmountIDR: &amount, MakerUserID: c.UserID, SubjectUserID: wl.StudentUserID,
-			CallbackURL:    a.Config.Gateway.BillingInternalURL + "/internal/wallets/transfer-callback",
-			CorrelationID:  closureID, IdempotencyKey: "wallet-transfer:" + closureID,
+			CallbackURL:   a.Config.Gateway.BillingInternalURL + "/internal/wallets/transfer-callback",
+			CorrelationID: closureID, IdempotencyKey: "wallet-transfer:" + closureID,
 		})
 		if err != nil {
 			// Roll the closure back so the admin can retry; nothing moved yet.
