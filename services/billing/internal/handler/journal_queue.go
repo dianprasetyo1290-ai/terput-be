@@ -72,7 +72,7 @@ var dailyKinds = []dailyKind{
 	{
 		kind: "refund", prefix: "bil:rfnd", source: sourceBilling,
 		days: `SELECT DISTINCT school_id::text, to_char(processed_at AT TIME ZONE $3, 'YYYY-MM-DD') FROM bill_refunds
-		        WHERE status = 'processed' AND wallet_id IS NULL AND student_bill_id IS NOT NULL
+		        WHERE status = 'processed' AND wallet_id IS NULL
 		          AND processed_at >= $1 AND processed_at < $2`,
 		build: (*App).buildRefund,
 	},
@@ -503,9 +503,13 @@ func (a *App) buildReceipt(ctx context.Context, schoolID string, start, end time
 }
 
 func (a *App) buildRefund(ctx context.Context, schoolID string, start, end time.Time) (*journalDraft, error) {
-	const where = `school_id = $1 AND status = 'processed' AND wallet_id IS NULL AND student_bill_id IS NOT NULL AND processed_at >= $2 AND processed_at < $3`
-	var total int64
-	if err := a.DB.QueryRowContext(ctx, `SELECT COALESCE(sum(amount_idr), 0) FROM bill_refunds WHERE `+where, schoolID, start, end).Scan(&total); err != nil {
+	// Bill refunds and student refunds (Menu 78, possibly split between
+	// bill payments and the overpayment deposit). Wallet refunds stay
+	// excluded, as before.
+	const where = `school_id = $1 AND status = 'processed' AND wallet_id IS NULL AND processed_at >= $2 AND processed_at < $3`
+	var total, deposit int64
+	if err := a.DB.QueryRowContext(ctx, `SELECT COALESCE(sum(amount_idr), 0), COALESCE(sum(deposit_idr), 0) FROM bill_refunds WHERE `+where,
+		schoolID, start, end).Scan(&total, &deposit); err != nil {
 		return nil, err
 	}
 	if total == 0 {
@@ -515,7 +519,7 @@ func (a *App) buildRefund(ctx context.Context, schoolID string, start, end time.
 	if err != nil {
 		return nil, err
 	}
-	lines, err := model.RefundJournal(set, total)
+	lines, err := model.RefundJournal(set, total-deposit, deposit)
 	if err != nil {
 		return nil, buildErr(err)
 	}
