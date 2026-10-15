@@ -165,6 +165,7 @@ func main() {
 	}
 
 	syncJob := procurement.NewSyncJob(db, apiClient, cfg.AccountingURL, cfg.InternalKey)
+	syncJob.Reporter = common.NewExceptionReporter(cfg.CoreURL, cfg.InternalKey, "ops")
 
 	runner := jobs.NewRunner(db, cfg.JobInterval)
 	runner.Register("facility_preventive", func(ctx context.Context, _ *sql.DB) error { return fac.RunPreventive(ctx) })

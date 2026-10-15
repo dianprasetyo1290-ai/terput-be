@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"skci/ops/internal/common"
 )
 
 type ActualQueryItem struct {
@@ -36,7 +38,7 @@ func NewAccountingClient(baseURL, internalKey string) *HTTPAccountingClient {
 	return &HTTPAccountingClient{
 		BaseURL:     strings.TrimRight(baseURL, "/"),
 		InternalKey: internalKey,
-		HTTP:        &http.Client{Timeout: 15 * time.Second},
+		HTTP:        &http.Client{Timeout: 15 * time.Second, Transport: common.CorrelationTransport{}},
 	}
 }
 
