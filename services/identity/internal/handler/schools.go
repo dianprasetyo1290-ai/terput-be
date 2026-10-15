@@ -141,7 +141,7 @@ func (a *App) ListSchools(w http.ResponseWriter, r *http.Request) {
 
 	var total int
 	if err := a.DB.QueryRow(countQuery, args...).Scan(&total); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to list schools")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat daftar unit")
 		return
 	}
 	args = append(args, perPage, (page-1)*perPage)
@@ -149,7 +149,7 @@ func (a *App) ListSchools(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := a.DB.Query(query, args...)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to list schools")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat daftar unit")
 		return
 	}
 	defer rows.Close()
@@ -157,7 +157,7 @@ func (a *App) ListSchools(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		s, err := scanSchool(rows)
 		if err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to list schools")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal memuat daftar unit")
 			return
 		}
 		out = append(out, s)
@@ -190,7 +190,7 @@ func (a *App) CreateSchool(w http.ResponseWriter, r *http.Request) {
 		req.PrincipalName, req.PrincipalUserID, req.AccountingEntityCode, req.SettlementBankName, req.SettlementAccountNumber, req.SettlementAccountName)
 	s, err := scanSchool(row)
 	if err != nil {
-		common.WriteDBError(w, err, "failed to create school")
+		common.WriteDBError(w, err, "Gagal membuat unit")
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, s, nil)
@@ -200,20 +200,20 @@ func (a *App) GetSchool(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	id := chi.URLParam(r, "id")
 	if claims == nil && !common.IsInternal(r) {
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "Sesi tidak ditemukan. Silakan masuk kembali")
 		return
 	}
 	if claims != nil && claims.ActiveRole != common.RoleSuperadmin && claims.SchoolID != id {
-		common.WriteError(w, http.StatusForbidden, "cannot access another school")
+		common.WriteError(w, http.StatusForbidden, "Tidak dapat mengakses unit lain")
 		return
 	}
 	row := a.DB.QueryRow(`SELECT `+schoolCols+` FROM schools WHERE id = $1 AND deleted_at IS NULL`, id)
 	s, err := scanSchool(row)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "school not found")
+		common.WriteError(w, http.StatusNotFound, "Unit tidak ditemukan")
 		return
 	} else if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to get school")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat unit")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, s, nil)
@@ -229,7 +229,7 @@ func (a *App) UpdateSchool(w http.ResponseWriter, r *http.Request) {
 	} else if claims.ActiveRole == common.RoleAdmin && claims.SchoolID == id {
 		// ok
 	} else {
-		common.WriteError(w, http.StatusForbidden, "forbidden")
+		common.WriteError(w, http.StatusForbidden, "Akses ditolak")
 		return
 	}
 	var req schoolRequest
@@ -240,10 +240,10 @@ func (a *App) UpdateSchool(w http.ResponseWriter, r *http.Request) {
 	req.trim()
 	cur, err := scanSchool(a.DB.QueryRow(`SELECT `+schoolCols+` FROM schools WHERE id=$1 AND deleted_at IS NULL`, id))
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "school not found")
+		common.WriteError(w, http.StatusNotFound, "Unit tidak ditemukan")
 		return
 	} else if err != nil {
-		common.WriteDBError(w, err, "failed to update school")
+		common.WriteDBError(w, err, "Gagal memperbarui unit")
 		return
 	}
 	if errs := req.validate(&cur); len(errs) > 0 {
@@ -274,10 +274,10 @@ func (a *App) UpdateSchool(w http.ResponseWriter, r *http.Request) {
 		req.PrincipalName, req.PrincipalUserID, req.AccountingEntityCode, req.SettlementBankName, req.SettlementAccountNumber, req.SettlementAccountName)
 	s, err := scanSchool(row)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "school not found")
+		common.WriteError(w, http.StatusNotFound, "Unit tidak ditemukan")
 		return
 	} else if err != nil {
-		common.WriteDBError(w, err, "failed to update school")
+		common.WriteDBError(w, err, "Gagal memperbarui unit")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, s, nil)
@@ -290,11 +290,11 @@ func (a *App) DeleteSchool(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	res, err := a.DB.Exec(`UPDATE schools SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to delete school")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menghapus unit")
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "school not found")
+		common.WriteError(w, http.StatusNotFound, "Unit tidak ditemukan")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"id": id}, nil)
@@ -322,7 +322,7 @@ func (a *App) setSchoolActive(w http.ResponseWriter, r *http.Request, active boo
 			FROM user_school_roles usr JOIN users u ON u.id = usr.user_id AND u.deleted_at IS NULL
 			WHERE usr.school_id=$1 AND usr.status='active'`, id).Scan(&impact.ActiveStudents, &impact.ActiveTeachers, &impact.ActiveUsers)
 		if err != nil {
-			common.WriteDBError(w, err, "failed to update school status")
+			common.WriteDBError(w, err, "Gagal memperbarui status unit")
 			return
 		}
 		if impact.ActiveUsers > 0 && (!body.Confirm || strings.TrimSpace(body.Reason) == "") {
@@ -333,11 +333,11 @@ func (a *App) setSchoolActive(w http.ResponseWriter, r *http.Request, active boo
 	}
 	res, err := a.DB.Exec(`UPDATE schools SET is_active=$1, updated_at=now() WHERE id=$2 AND deleted_at IS NULL`, active, id)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to update school status")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memperbarui status unit")
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "school not found")
+		common.WriteError(w, http.StatusNotFound, "Unit tidak ditemukan")
 		return
 	}
 	action := "school_activated"
@@ -373,13 +373,13 @@ func (a *App) AssignAdmin(w http.ResponseWriter, r *http.Request) {
 	schoolID := chi.URLParam(r, "id")
 	var req assignAdminRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.UserID == "" {
-		common.WriteError(w, http.StatusBadRequest, "user_id is required")
+		common.WriteError(w, http.StatusBadRequest, "Pengguna (user_id) wajib diisi")
 		return
 	}
 	_, err := a.DB.Exec(`INSERT INTO user_school_roles (user_id, school_id, role) VALUES ($1, $2, 'admin')
 		ON CONFLICT (user_id, school_id, role) DO NOTHING`, req.UserID, schoolID)
 	if err != nil {
-		common.WriteDBError(w, err, "failed to assign admin")
+		common.WriteDBError(w, err, "Gagal menetapkan admin")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"school_id": schoolID, "user_id": req.UserID, "role": "admin"}, nil)
@@ -406,13 +406,13 @@ func (a *App) ListDeletedSchools(w http.ResponseWriter, r *http.Request) {
 
 	var total int
 	if err := a.DB.QueryRow(`SELECT count(*) FROM schools WHERE deleted_at IS NOT NULL`).Scan(&total); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to list deleted schools")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat riwayat penghapusan unit")
 		return
 	}
 	rows, err := a.DB.Query(`SELECT id, name, code, deleted_at FROM schools WHERE deleted_at IS NOT NULL
 		ORDER BY deleted_at DESC LIMIT $1 OFFSET $2`, perPage, (page-1)*perPage)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to list deleted schools")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat riwayat penghapusan unit")
 		return
 	}
 	defer rows.Close()
@@ -420,7 +420,7 @@ func (a *App) ListDeletedSchools(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var d deletedSchool
 		if err := rows.Scan(&d.ID, &d.Name, &d.Code, &d.DeletedAt); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to list deleted schools")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal memuat riwayat penghapusan unit")
 			return
 		}
 		out = append(out, d)
@@ -439,16 +439,16 @@ func (a *App) Impersonate(w http.ResponseWriter, r *http.Request) {
 	var adminUserID string
 	err := a.DB.QueryRow(`SELECT user_id FROM user_school_roles WHERE school_id=$1 AND role='admin' ORDER BY created_at LIMIT 1`, schoolID).Scan(&adminUserID)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "school has no assigned admin to impersonate")
+		common.WriteError(w, http.StatusNotFound, "Unit ini belum memiliki admin untuk diakses")
 		return
 	} else if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "impersonation failed")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal masuk sebagai admin unit")
 		return
 	}
 
 	token, _, err := a.issueToken(r, adminUserID, schoolID, common.RoleAdmin, []string{common.RoleAdmin}, "", false)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to issue token")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal membuat sesi. Coba lagi")
 		return
 	}
 	c := common.FromCtx(r)

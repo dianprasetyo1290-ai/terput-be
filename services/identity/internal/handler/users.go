@@ -16,6 +16,7 @@ import (
 	"skci/identity/internal/rules"
 	"skci/identity/internal/security"
 	"skci/identity/internal/store"
+	"skci/identity/internal/userimport"
 )
 
 // Data Pengguna: superadmin-scoped user directory (list/filter by role and
@@ -73,18 +74,20 @@ func (a *App) ListUsers(w http.ResponseWriter, r *http.Request) {
 	privileged := common.IsInternal(r) || (claims != nil && (claims.ActiveRole == common.RoleAdmin || claims.ActiveRole == common.RoleSuperadmin))
 	if !privileged {
 		if claims == nil {
-			common.WriteError(w, http.StatusUnauthorized, "missing token")
+			common.WriteError(w, http.StatusUnauthorized, "Sesi tidak ditemukan. Silakan masuk kembali")
 			return
 		}
 		// kepala_sekolah joins walikelas here: the principal's school dashboard
 		// and roster views resolve names off this same siswa directory.
-		directoryAllowed := role == common.RoleGuru || (role == common.RoleSiswa && (claims.ActiveRole == common.RoleWalikelas || claims.ActiveRole == common.RoleKepalaSekolah))
+		// QA-BILL: finance/oversight roles read the siswa directory of their
+		// unit as well (isStudentOversightRole includes kepala_sekolah).
+		directoryAllowed := role == common.RoleGuru || (role == common.RoleSiswa && (claims.ActiveRole == common.RoleWalikelas || isStudentOversightRole(claims.ActiveRole)))
 		if !directoryAllowed {
-			common.WriteError(w, http.StatusForbidden, "forbidden: requires role admin")
+			common.WriteError(w, http.StatusForbidden, "Akses ditolak: hanya untuk admin")
 			return
 		}
 	}
-	a.listUsersByRole(w, r, role, !privileged)
+	a.listUsersByRole(w, r, role, !privileged, !privileged && role == common.RoleSiswa && isStudentOversightRole(claims.ActiveRole))
 }
 
 // ListStudents backs Data Siswa (admin/superadmin, full fields) and also
@@ -95,14 +98,19 @@ func (a *App) ListUsers(w http.ResponseWriter, r *http.Request) {
 // can't supply since it only returns bare student_user_id).
 func (a *App) ListStudents(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
-	privileged := claims != nil && (claims.ActiveRole == common.RoleAdmin || claims.ActiveRole == common.RoleSuperadmin)
+	// A trusted X-Internal-Key caller (no claims) reads like an admin; it
+	// used to fall into the 403 branch below.
+	privileged := (claims == nil && common.IsInternal(r)) || (claims != nil && (claims.ActiveRole == common.RoleAdmin || claims.ActiveRole == common.RoleSuperadmin))
 	// walikelas (Presensi Siswa) needs the same directory-only list as guru,
 	// and kepala_sekolah's school-wide dashboard/presensi summary does too.
-	if !privileged && (claims == nil || (claims.ActiveRole != common.RoleGuru && claims.ActiveRole != common.RoleWalikelas && claims.ActiveRole != common.RoleKepalaSekolah)) {
-		common.WriteError(w, http.StatusForbidden, "forbidden: requires role admin")
+	// QA-BILL: finance_manager, kepala_yayasan and auditor read students of
+	// their own unit too (refund names, scholarship picker, student detail),
+	// with NISN kept so a student can be told apart.
+	if !privileged && (claims == nil || (claims.ActiveRole != common.RoleGuru && claims.ActiveRole != common.RoleWalikelas && !isStudentOversightRole(claims.ActiveRole))) {
+		common.WriteError(w, http.StatusForbidden, "Akses ditolak: data siswa hanya untuk admin, guru, kepala sekolah/yayasan, keuangan dan auditor")
 		return
 	}
-	a.listUsersByRole(w, r, common.RoleSiswa, !privileged)
+	a.listUsersByRole(w, r, common.RoleSiswa, !privileged, !privileged && isStudentOversightRole(claims.ActiveRole))
 }
 
 // ListTeachers mirrors ListStudents' admin-or-guru pattern (Bug Report
@@ -119,16 +127,18 @@ func (a *App) ListTeachers(w http.ResponseWriter, r *http.Request) {
 	privileged := claims != nil && (claims.ActiveRole == common.RoleAdmin || claims.ActiveRole == common.RoleSuperadmin)
 	// kepala_sekolah reads the teacher directory for the Presensi Guru view.
 	if !privileged && (claims == nil || (claims.ActiveRole != common.RoleGuru && claims.ActiveRole != common.RoleKepalaSekolah)) {
-		common.WriteError(w, http.StatusForbidden, "forbidden: requires role admin")
+		common.WriteError(w, http.StatusForbidden, "Akses ditolak: hanya untuk admin")
 		return
 	}
-	a.listUsersByRole(w, r, common.RoleGuru, !privileged)
+	a.listUsersByRole(w, r, common.RoleGuru, !privileged, false)
 }
 
 // listUsersByRole executes the shared Data Pengguna/Siswa/Guru query.
 // directoryOnly strips account/security fields from the response — see
 // ListUsers' doc comment for when that's set.
-func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role string, directoryOnly bool) {
+// keepNISN (oversight roles) keeps NISN and the student's roles/status in a
+// directory-only response.
+func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role string, directoryOnly, keepNISN bool) {
 	schoolID, filtered := resolveSchoolScope(r)
 	status := r.URL.Query().Get("status") // aktif/nonaktif filter for guru, optional
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
@@ -200,7 +210,7 @@ func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role strin
 
 	var total int
 	if err := a.DB.QueryRow(`SELECT count(*) FROM users u WHERE `+where, args...).Scan(&total); err != nil {
-		common.WriteDBError(w, err, "failed to list users")
+		common.WriteDBError(w, err, "Gagal memuat daftar pengguna")
 		return
 	}
 
@@ -218,7 +228,7 @@ func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role strin
 
 	rows, err := a.DB.Query(query, args2...)
 	if err != nil {
-		common.WriteDBError(w, err, "failed to list users")
+		common.WriteDBError(w, err, "Gagal memuat daftar pengguna")
 		return
 	}
 	defer rows.Close()
@@ -229,7 +239,7 @@ func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role strin
 	for rows.Next() {
 		u, err := scanUser(rows)
 		if err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to list users")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal memuat daftar pengguna")
 			return
 		}
 		uwr := model.UserWithRoles{User: u, Roles: []model.UserSchoolRole{}}
@@ -263,10 +273,12 @@ func (a *App) listUsersByRole(w http.ResponseWriter, r *http.Request, role strin
 			out[i].BirthDate = nil
 			out[i].BirthPlace = nil
 			out[i].Religion = nil
-			out[i].NISN = nil
 			out[i].NIK = nil
 			out[i].Photo = nil
-			out[i].Roles = []model.UserSchoolRole{}
+			if !keepNISN {
+				out[i].NISN = nil
+				out[i].Roles = []model.UserSchoolRole{}
+			}
 		}
 	}
 
@@ -302,7 +314,7 @@ func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	var req createUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" || req.Email == "" || req.Role == "" {
-		common.WriteError(w, http.StatusBadRequest, "name, email, and role are required")
+		common.WriteError(w, http.StatusBadRequest, "Nama, email, dan peran wajib diisi")
 		return
 	}
 	req.Email = strings.TrimSpace(req.Email)
@@ -317,7 +329,7 @@ func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !common.IsValidRole(req.Role) {
-		common.WriteError(w, http.StatusBadRequest, "invalid role")
+		common.WriteError(w, http.StatusBadRequest, "Peran tidak valid")
 		return
 	}
 	// Privilege-escalation guard: an admin (as opposed to superadmin) may only
@@ -326,7 +338,7 @@ func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 	// picker when active_role=admin, but that's UI-only; enforce it
 	// server-side too since this is a real escalation path otherwise.
 	if claims.ActiveRole == common.RoleAdmin && !adminAssignable(req.Role) {
-		common.WriteError(w, http.StatusForbidden, "admin may only create guru, siswa, orang_tua or pengawas accounts")
+		common.WriteError(w, http.StatusForbidden, "Admin unit hanya dapat membuat akun guru, siswa, orang tua, atau pengawas")
 		return
 	}
 	schoolID := claims.SchoolID
@@ -334,7 +346,7 @@ func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 		schoolID = req.SchoolID
 	}
 	if req.Role != common.RoleSuperadmin && schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required for non-superadmin roles")
+		common.WriteError(w, http.StatusBadRequest, "Unit wajib dipilih untuk peran selain superadmin")
 		return
 	}
 
@@ -344,13 +356,13 @@ func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	hash, err := common.HashPassword(plainPassword)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to create user")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal membuat pengguna")
 		return
 	}
 
 	tx, err := a.DB.Begin()
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to create user")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal membuat pengguna")
 		return
 	}
 	defer tx.Rollback()
@@ -361,7 +373,7 @@ func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 		req.Name, req.Email, req.Phone, hash, req.Role == common.RoleSuperadmin)
 	u, err = scanUser(row)
 	if err != nil {
-		common.WriteDBError(w, err, "failed to create user (email may already be in use)")
+		common.WriteDBError(w, err, "Gagal membuat pengguna (email mungkin sudah dipakai)")
 		return
 	}
 	var schoolIDArg interface{}
@@ -370,11 +382,11 @@ func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := tx.Exec(`INSERT INTO user_school_roles (user_id, school_id, role, student_status)
 		VALUES ($1,$2,$3, CASE WHEN $3 = 'siswa' THEN 'aktif' END)`, u.ID, schoolIDArg, req.Role); err != nil {
-		common.WriteDBError(w, err, "failed to assign role")
+		common.WriteDBError(w, err, "Gagal menetapkan peran")
 		return
 	}
 	if err := tx.Commit(); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to create user")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal membuat pengguna")
 		return
 	}
 	u.DefaultPassword = &plainPassword // response-only; never persisted
@@ -382,6 +394,10 @@ func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) GetUser(w http.ResponseWriter, r *http.Request) {
+	if c := common.FromCtx(r); c != nil && isStudentOversightRole(c.ActiveRole) {
+		a.getUserForOversight(w, r, c)
+		return
+	}
 	if !requireRole(w, r, common.RoleAdmin) {
 		return
 	}
@@ -389,10 +405,10 @@ func (a *App) GetUser(w http.ResponseWriter, r *http.Request) {
 	row := a.DB.QueryRow(`SELECT `+userCols+` FROM users u WHERE u.id=$1 AND u.deleted_at IS NULL`, id)
 	u, err := scanUser(row)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "user not found")
+		common.WriteError(w, http.StatusNotFound, "Pengguna tidak ditemukan")
 		return
 	} else if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to get user")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat pengguna")
 		return
 	}
 	roles, _ := aRolesFor(a, id)
@@ -455,23 +471,23 @@ func (a *App) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	var req updateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-		common.WriteError(w, http.StatusBadRequest, "name is required")
+		common.WriteError(w, http.StatusBadRequest, "Nama wajib diisi")
 		return
 	}
 	// AC-83-02: while HRIS is on for one of the user's schools, the name of an
 	// HR-managed account is owned by the hr service, not Data Guru/Pengguna.
 	var hrLocked bool
-	var currentName, curNISN, curNIK, curPhone string
+	var currentName, curNISN, curNIK, curPhone, curReligion string
 	err := a.DB.QueryRow(`SELECT u.managed_by_hr AND EXISTS (
 			SELECT 1 FROM user_school_roles usr
 			JOIN school_features sf ON sf.school_id = usr.school_id AND sf.feature_key = 'hris' AND sf.enabled
-			WHERE usr.user_id = u.id), u.name, COALESCE(u.nisn,''), COALESCE(u.nik,''), COALESCE(u.phone,'')
-		FROM users u WHERE u.id = $1 AND u.deleted_at IS NULL`, id).Scan(&hrLocked, &currentName, &curNISN, &curNIK, &curPhone)
+			WHERE usr.user_id = u.id), u.name, COALESCE(u.nisn,''), COALESCE(u.nik,''), COALESCE(u.phone,''), COALESCE(u.religion,'')
+		FROM users u WHERE u.id = $1 AND u.deleted_at IS NULL`, id).Scan(&hrLocked, &currentName, &curNISN, &curNIK, &curPhone, &curReligion)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "user not found")
+		common.WriteError(w, http.StatusNotFound, "Pengguna tidak ditemukan")
 		return
 	} else if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to update user")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memperbarui pengguna")
 		return
 	}
 	if hrLocked && strings.TrimSpace(req.Name) != currentName {
@@ -486,6 +502,20 @@ func (a *App) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		}
 		common.WriteValidationError(w, http.StatusBadRequest, msg, errs)
 		return
+	}
+	// BUG-073: a changed religion must come from the Data Referensi list
+	// (stored as its label, which academic matches to Agama subjects).
+	if rel := strings.TrimSpace(deref(req.Religion)); rel != "" && rel != curReligion {
+		label, ok, err := a.referenceLabel(r.Context(), "agama", rel, common.FromCtx(r).SchoolID)
+		if err != nil {
+			common.WriteDBError(w, err, "Gagal memeriksa data referensi")
+			return
+		}
+		if !ok {
+			common.WriteValidationError(w, http.StatusBadRequest, "Agama tidak ada di Data Referensi", map[string]string{"religion": "Pilih agama dari daftar"})
+			return
+		}
+		req.Religion = &label
 	}
 	// Only values that change are checked, so editing an unrelated field of
 	// an existing record never trips over a known shared number.
@@ -512,10 +542,10 @@ func (a *App) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		req.Name, req.Phone, req.Photo, req.BirthDate, req.BirthPlace, req.Address, req.Religion, req.NISN, id, req.NIK)
 	u, err := scanUser(row)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "user not found")
+		common.WriteError(w, http.StatusNotFound, "Pengguna tidak ditemukan")
 		return
 	} else if err != nil {
-		common.WriteDBError(w, err, "failed to update user")
+		common.WriteDBError(w, err, "Gagal memperbarui pengguna")
 		return
 	}
 	if req.ConfirmDuplicate {
@@ -555,11 +585,11 @@ func (a *App) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := a.DB.Exec(`UPDATE users SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to delete user")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menghapus pengguna")
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "user not found")
+		common.WriteError(w, http.StatusNotFound, "Pengguna tidak ditemukan")
 		return
 	}
 	for _, schoolID := range siswaSchoolIDs {
@@ -583,7 +613,7 @@ func (a *App) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	newPassword := common.GenDefaultPassword()
 	hash, err := common.HashPassword(newPassword)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to reset password")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal mengatur ulang kata sandi")
 		return
 	}
 	// A non-superadmin admin may only reset passwords for users who hold a role at their own
@@ -597,11 +627,11 @@ func (a *App) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := a.DB.Exec(query, args...)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to reset password")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal mengatur ulang kata sandi")
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "user not found")
+		common.WriteError(w, http.StatusNotFound, "Pengguna tidak ditemukan")
 		return
 	}
 	a.revokeAll(r, id, "password_reset_by_admin", "")
@@ -612,6 +642,12 @@ func (a *App) ResetPassword(w http.ResponseWriter, r *http.Request) {
 type assignRoleRequest struct {
 	Role     string `json:"role"`
 	SchoolID string `json:"school_id"`
+	// ExceptionReason (BUG-023): when the role forms a forbidden combination,
+	// a reason turns the request into an SoD exception that goes to the
+	// Approval Center instead of being refused. ValidUntil (YYYY-MM-DD) is
+	// optional; the exception lapses after that date.
+	ExceptionReason string `json:"exception_reason"`
+	ValidUntil      string `json:"valid_until"`
 }
 
 // AssignUserRole: "Admin can assign additional roles/jabatan to a user here."
@@ -623,13 +659,13 @@ func (a *App) AssignUserRole(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var req assignRoleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !common.IsValidRole(req.Role) {
-		common.WriteError(w, http.StatusBadRequest, "valid role is required")
+		common.WriteError(w, http.StatusBadRequest, "Peran tidak valid")
 		return
 	}
 	// Same privilege-escalation guard as CreateUser: an admin can't grant
 	// themselves/anyone the admin or superadmin role via this endpoint either.
 	if claims.ActiveRole == common.RoleAdmin && !adminAssignable(req.Role) {
-		common.WriteError(w, http.StatusForbidden, "admin may only assign guru, siswa, orang_tua or pengawas roles")
+		common.WriteError(w, http.StatusForbidden, "Admin unit hanya dapat menetapkan peran guru, siswa, orang tua, atau pengawas")
 		return
 	}
 	schoolID := claims.SchoolID
@@ -649,17 +685,28 @@ func (a *App) AssignUserRole(w http.ResponseWriter, r *http.Request) {
 		_ = a.DB.QueryRow(`SELECT school_id FROM user_school_roles WHERE user_id=$1 AND school_id IS NOT NULL ORDER BY created_at LIMIT 1`, id).Scan(&schoolID)
 	}
 	if schoolID == "" && req.Role != common.RoleSuperadmin {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required for non-superadmin roles")
+		common.WriteError(w, http.StatusBadRequest, "Unit wajib dipilih untuk peran selain superadmin")
 		return
 	}
 	if claims.ActiveRole != common.RoleSuperadmin {
 		if ok, err := a.userInScope(r, id); err != nil || !ok {
-			common.WriteError(w, http.StatusNotFound, "user not found")
+			common.WriteError(w, http.StatusNotFound, "Pengguna tidak ditemukan")
 			return
 		}
 	}
-	// BUG-023 / AC-RBAC-08: refuse a forbidden role combination.
-	if !a.checkRoleConflicts(w, r, id, req.Role) {
+	// BUG-023 / AC-RBAC-08: refuse a forbidden role combination, or route it
+	// to the Approval Center as an exception when a reason is given.
+	found, err := a.findRoleConflicts(r.Context(), id, req.Role)
+	if err != nil {
+		common.WriteDBError(w, err, "gagal memeriksa kombinasi peran")
+		return
+	}
+	if len(found) > 0 {
+		if strings.TrimSpace(req.ExceptionReason) == "" {
+			writeRoleConflict(w, found)
+			return
+		}
+		a.requestRoleConflictException(w, r, schoolID, id, req, found)
 		return
 	}
 	var schoolIDArg interface{}
@@ -698,11 +745,11 @@ func (a *App) RemoveUserRole(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := a.DB.Exec(query, args...)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to remove role")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal mencabut peran")
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "role assignment not found")
+		common.WriteError(w, http.StatusNotFound, "Penetapan peran tidak ditemukan")
 		return
 	}
 
@@ -731,11 +778,11 @@ func (a *App) setTeacherStatus(w http.ResponseWriter, r *http.Request, status st
 	// "guru aktif" lists by checking this status via GET /teachers.
 	res, err := a.DB.Exec(query, args...)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to update teacher status")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memperbarui status guru")
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		common.WriteError(w, http.StatusNotFound, "guru role assignment not found for user")
+		common.WriteError(w, http.StatusNotFound, "Pengguna ini tidak memiliki peran guru")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"id": id, "status": status}, nil)
@@ -789,7 +836,7 @@ func (a *App) ExportUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := a.DB.Query(`SELECT `+userCols+` FROM users u WHERE `+where+` ORDER BY u.name`, args...)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to export users")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal mengekspor pengguna")
 		return
 	}
 	defer rows.Close()
@@ -886,6 +933,15 @@ func (a stringArray) Value() (driver.Value, error) {
 // DownloadUsersTemplate: "Download Template" button for bulk user import
 func (a *App) DownloadUsersTemplate(w http.ResponseWriter, r *http.Request) {
 	if !requireRole(w, r, common.RoleAdmin) {
+		return
+	}
+	switch kind := r.URL.Query().Get("kind"); kind {
+	case "", userimport.KindUsers:
+	case userimport.KindOrangTua, userimport.KindKelas:
+		writeKindTemplate(w, kind)
+		return
+	default:
+		common.WriteValidationError(w, http.StatusBadRequest, "Jenis template tidak dikenal", map[string]string{"kind": "Pilih: users, orang_tua, atau kelas"})
 		return
 	}
 	f := excelize.NewFile()

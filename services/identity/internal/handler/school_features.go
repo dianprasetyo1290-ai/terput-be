@@ -30,15 +30,15 @@ func (a *App) ListSchoolFeatures(w http.ResponseWriter, r *http.Request) {
 		// Panggilan antar-service (mis. Laravel /sso memeriksa apakah
 		// accounting menyala untuk sekolah itu) — lihat internal_auth.go.
 	case claims == nil:
-		common.WriteError(w, http.StatusUnauthorized, "missing token")
+		common.WriteError(w, http.StatusUnauthorized, "Sesi tidak ditemukan. Silakan masuk kembali")
 		return
 	case claims.ActiveRole != common.RoleSuperadmin && claims.SchoolID != schoolID:
-		common.WriteError(w, http.StatusForbidden, "forbidden")
+		common.WriteError(w, http.StatusForbidden, "Akses ditolak")
 		return
 	}
 	existing, err := store.SchoolFeatureMap(a.DB, schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to load school features")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat fitur unit")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, store.FeatureStatuses(existing), nil)
@@ -53,20 +53,20 @@ func (a *App) SetSchoolFeature(w http.ResponseWriter, r *http.Request) {
 	schoolID := chi.URLParam(r, "id")
 	key := chi.URLParam(r, "key")
 	if !store.IsKnownFeature(key) {
-		common.WriteError(w, http.StatusBadRequest, "unknown feature key: "+key)
+		common.WriteError(w, http.StatusBadRequest, "Kunci fitur tidak dikenal: "+key)
 		return
 	}
 	var req struct {
 		Enabled bool `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		common.WriteError(w, http.StatusBadRequest, "enabled is required")
+		common.WriteError(w, http.StatusBadRequest, "Status aktif (enabled) wajib diisi")
 		return
 	}
 	if req.Enabled {
 		existing, err := store.SchoolFeatureMap(a.DB, schoolID)
 		if err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to load school features")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal memuat fitur unit")
 			return
 		}
 		if len(store.MissingRequirements(key, existing)) > 0 {
@@ -79,7 +79,7 @@ func (a *App) SetSchoolFeature(w http.ResponseWriter, r *http.Request) {
 		updatedBy = c.UserID
 	}
 	if err := store.SetSchoolFeature(a.DB, schoolID, key, req.Enabled, updatedBy); err != nil {
-		common.WriteDBError(w, err, "failed to save school feature")
+		common.WriteDBError(w, err, "Gagal menyimpan fitur unit")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, store.FeatureStatus{FeatureKey: key, Enabled: req.Enabled}, nil)
@@ -98,7 +98,7 @@ func (a *App) MyFeatures(w http.ResponseWriter, r *http.Request) {
 	}
 	existing, err := store.SchoolFeatureMap(a.DB, schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to load features")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat fitur")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, store.EnabledFeatureKeys(existing), nil)
@@ -112,7 +112,7 @@ func (a *App) ListAllFeatures(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := store.AllSchoolFeatures(a.DB)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to list features")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat daftar fitur")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, out, nil)

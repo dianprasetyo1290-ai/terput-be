@@ -46,7 +46,7 @@ func (a *App) Dashboard(w http.ResponseWriter, r *http.Request) {
 		GROUP BY s.id, s.name
 		ORDER BY s.name`, scope)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to load dashboard")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat dasbor")
 		return
 	}
 	defer rows.Close()
@@ -54,7 +54,7 @@ func (a *App) Dashboard(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c schoolStudentCount
 		if err := rows.Scan(&c.SchoolID, &c.SchoolName, &c.Students, &c.Teachers); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to load dashboard")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal memuat dasbor")
 			return
 		}
 		resp.PerSchool = append(resp.PerSchool, c)

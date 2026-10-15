@@ -94,7 +94,7 @@ func (a *App) ListAcademicYears(w http.ResponseWriter, r *http.Request) {
 	query += ` ORDER BY label DESC`
 	rows, err := a.DB.Query(query, args...)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to list academic years")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat daftar tahun ajaran")
 		return
 	}
 	defer rows.Close()
@@ -102,7 +102,7 @@ func (a *App) ListAcademicYears(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		ay, err := scanAY(rows)
 		if err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to list academic years")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal memuat daftar tahun ajaran")
 			return
 		}
 		out = append(out, ay)
@@ -121,21 +121,21 @@ func (a *App) GetAcademicYear(w http.ResponseWriter, r *http.Request) {
 	}
 	ay, err := scanAY(a.DB.QueryRow(`SELECT `+ayCols+` FROM academic_years WHERE id=$1 AND deleted_at IS NULL`, chi.URLParam(r, "id")))
 	if errors.Is(err, sql.ErrNoRows) {
-		common.WriteError(w, http.StatusNotFound, "academic year not found")
+		common.WriteError(w, http.StatusNotFound, "Tahun ajaran tidak ditemukan")
 		return
 	} else if err != nil {
-		common.WriteDBError(w, err, "failed to get academic year")
+		common.WriteDBError(w, err, "Gagal memuat tahun ajaran")
 		return
 	}
 	if c != nil && c.ActiveRole != common.RoleSuperadmin && c.SchoolID != ay.SchoolID {
-		common.WriteError(w, http.StatusNotFound, "academic year not found")
+		common.WriteError(w, http.StatusNotFound, "Tahun ajaran tidak ditemukan")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, ay, nil)
 }
 
 func (a *App) CreateAcademicYear(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	if !a.permit(w, r, "academic_years", "create") {
 		return
 	}
 	claims := common.FromCtx(r)
@@ -160,7 +160,7 @@ func (a *App) CreateAcademicYear(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+		common.WriteError(w, http.StatusBadRequest, "Unit (school_id) wajib diisi")
 		return
 	}
 	start, end, errs := yearDates(req.Label, req.StartDate, req.EndDate, true)
@@ -175,7 +175,7 @@ func (a *App) CreateAcademicYear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		common.WriteDBError(w, err, "failed to create academic year")
+		common.WriteDBError(w, err, "Gagal membuat tahun ajaran")
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, ay, nil)
@@ -195,14 +195,14 @@ func (a *App) loadYearForWrite(w http.ResponseWriter, r *http.Request, id string
 	claims := common.FromCtx(r)
 	ay, err := scanAY(a.DB.QueryRow(`SELECT `+ayCols+` FROM academic_years WHERE id=$1 AND deleted_at IS NULL`, id))
 	if errors.Is(err, sql.ErrNoRows) {
-		common.WriteError(w, http.StatusNotFound, "academic year not found")
+		common.WriteError(w, http.StatusNotFound, "Tahun ajaran tidak ditemukan")
 		return ay, false
 	} else if err != nil {
-		common.WriteDBError(w, err, "failed to load academic year")
+		common.WriteDBError(w, err, "Gagal memuat tahun ajaran")
 		return ay, false
 	}
 	if claims.ActiveRole != common.RoleSuperadmin && claims.SchoolID != ay.SchoolID {
-		common.WriteError(w, http.StatusForbidden, "forbidden")
+		common.WriteError(w, http.StatusForbidden, "Akses ditolak")
 		return ay, false
 	}
 	return ay, true
@@ -212,7 +212,7 @@ func (a *App) loadYearForWrite(w http.ResponseWriter, r *http.Request, id string
 // Omitted dates keep the stored ones. is_current is managed exclusively via
 // SetCurrentAcademicYear. Locked years are read-only.
 func (a *App) UpdateAcademicYear(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	if !a.permit(w, r, "academic_years", "edit") {
 		return
 	}
 	id := chi.URLParam(r, "id")
@@ -257,7 +257,7 @@ func (a *App) UpdateAcademicYear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		common.WriteDBError(w, err, "failed to update academic year")
+		common.WriteDBError(w, err, "Gagal memperbarui tahun ajaran")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, ay, nil)
@@ -267,7 +267,7 @@ func (a *App) UpdateAcademicYear(w http.ResponseWriter, r *http.Request) {
 // migration 0004). Refuses the school's current year (pick another current
 // year first) and locked years.
 func (a *App) DeleteAcademicYear(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	if !a.permit(w, r, "academic_years", "delete") {
 		return
 	}
 	id := chi.URLParam(r, "id")
@@ -284,7 +284,7 @@ func (a *App) DeleteAcademicYear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := a.DB.Exec(`UPDATE academic_years SET deleted_at = now() WHERE id = $1 AND locked_at IS NULL`, id); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to delete academic year")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menghapus tahun ajaran")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"id": id}, nil)
@@ -295,7 +295,7 @@ func (a *App) DeleteAcademicYear(w http.ResponseWriter, r *http.Request) {
 // schools.current_academic_year_id at it and locks earlier years that ended
 // before this one starts (BR-GEN-02).
 func (a *App) SetCurrentAcademicYear(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	if !a.permit(w, r, "academic_years", "edit") {
 		return
 	}
 	claims := common.FromCtx(r)
@@ -312,20 +312,20 @@ func (a *App) SetCurrentAcademicYear(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := a.DB.Begin()
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to set current academic year")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menetapkan tahun ajaran berjalan")
 		return
 	}
 	defer tx.Rollback()
 	if _, err := tx.Exec(`UPDATE academic_years SET is_current=false WHERE school_id=$1`, schoolID); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to set current academic year")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menetapkan tahun ajaran berjalan")
 		return
 	}
 	if _, err := tx.Exec(`UPDATE academic_years SET is_current=true, updated_at=now() WHERE id=$1`, id); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to set current academic year")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menetapkan tahun ajaran berjalan")
 		return
 	}
 	if _, err := tx.Exec(`UPDATE schools SET current_academic_year_id=$1, updated_at=now() WHERE id=$2`, id, schoolID); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to set current academic year")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menetapkan tahun ajaran berjalan")
 		return
 	}
 	var locked []string
@@ -334,7 +334,7 @@ func (a *App) SetCurrentAcademicYear(w http.ResponseWriter, r *http.Request) {
 			WHERE school_id=$1 AND id<>$2 AND deleted_at IS NULL AND locked_at IS NULL AND end_date IS NOT NULL AND end_date < $4::date
 			RETURNING id`, schoolID, id, nullUUID(claims.UserID), *ay.StartDate)
 		if err != nil {
-			common.WriteDBError(w, err, "failed to set current academic year")
+			common.WriteDBError(w, err, "Gagal menetapkan tahun ajaran berjalan")
 			return
 		}
 		for rows.Next() {
@@ -346,7 +346,7 @@ func (a *App) SetCurrentAcademicYear(w http.ResponseWriter, r *http.Request) {
 		rows.Close()
 	}
 	if err := tx.Commit(); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to set current academic year")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menetapkan tahun ajaran berjalan")
 		return
 	}
 	if len(locked) > 0 {
@@ -369,7 +369,7 @@ func nullUUID(s string) interface{} {
 // LockAcademicYear: POST /academic-years/{id}/lock {reason} — admin of the
 // unit or superadmin.
 func (a *App) LockAcademicYear(w http.ResponseWriter, r *http.Request) {
-	if !requireRole(w, r, common.RoleAdmin) {
+	if !a.permit(w, r, "academic_years", "edit") {
 		return
 	}
 	claims := common.FromCtx(r)
@@ -397,7 +397,7 @@ func (a *App) LockAcademicYear(w http.ResponseWriter, r *http.Request) {
 	ay, err := scanAY(a.DB.QueryRow(`UPDATE academic_years SET locked_at=now(), locked_by=$2, lock_reason=$3, updated_at=now()
 		WHERE id=$1 AND locked_at IS NULL RETURNING `+ayCols, id, nullUUID(claims.UserID), reason))
 	if err != nil {
-		common.WriteDBError(w, err, "failed to lock academic year")
+		common.WriteDBError(w, err, "Gagal mengunci tahun ajaran")
 		return
 	}
 	a.RecordSecurityAudit(&ay.SchoolID, "academic_year_locked", id, &claims.UserID, &claims.ActiveRole, nil, map[string]any{"label": ay.Label}, reason, r.Header.Get("X-Correlation-ID"))
@@ -433,7 +433,7 @@ func (a *App) UnlockAcademicYear(w http.ResponseWriter, r *http.Request) {
 	ay, err := scanAY(a.DB.QueryRow(`UPDATE academic_years SET locked_at=NULL, locked_by=NULL, lock_reason=NULL, updated_at=now()
 		WHERE id=$1 RETURNING `+ayCols, id))
 	if err != nil {
-		common.WriteDBError(w, err, "failed to unlock academic year")
+		common.WriteDBError(w, err, "Gagal membuka kunci tahun ajaran")
 		return
 	}
 	a.RecordSecurityAudit(&ay.SchoolID, "academic_year_unlocked", id, &claims.UserID, &claims.ActiveRole, before, map[string]any{"label": ay.Label}, body.Reason, r.Header.Get("X-Correlation-ID"))

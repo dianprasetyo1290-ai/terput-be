@@ -194,6 +194,24 @@ func ConflictsFor(heldRoles []string, newRole string, conflicts []RoleConflict) 
 	return out
 }
 
+// WithoutExcepted drops the conflicts whose pair is in excepted (keys from
+// PairKey), i.e. covered by an approved SoD exception.
+func WithoutExcepted(found []RoleConflict, excepted map[string]bool) []RoleConflict {
+	var out []RoleConflict
+	for _, c := range found {
+		if !excepted[PairKey(c.RoleA, c.RoleB)] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// PairKey is the order-independent key of a role pair.
+func PairKey(roleA, roleB string) string {
+	a, b := NormalizePair(roleA, roleB)
+	return a + "|" + b
+}
+
 // NewOpaqueToken returns a 256-bit URL-safe random token and its SHA-256 hex
 // digest; only the digest is persisted.
 func NewOpaqueToken() (token, hash string, err error) {

@@ -31,25 +31,25 @@ type internalEmployeeRequest struct {
 func (a *App) InternalCreateOrLinkEmployee(w http.ResponseWriter, r *http.Request) {
 	var req internalEmployeeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		common.WriteError(w, http.StatusBadRequest, "invalid request body")
+		common.WriteError(w, http.StatusBadRequest, "Format data tidak valid")
 		return
 	}
 	req.SchoolID = strings.TrimSpace(req.SchoolID)
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	req.FullName = strings.TrimSpace(req.FullName)
 	if req.SchoolID == "" || req.Email == "" || req.FullName == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id, email, and full_name are required")
+		common.WriteError(w, http.StatusBadRequest, "school_id, email, dan nama lengkap wajib diisi")
 		return
 	}
 	if req.Role != common.RoleGuru && req.Role != rolePegawai {
-		common.WriteError(w, http.StatusBadRequest, "role must be guru or pegawai")
+		common.WriteError(w, http.StatusBadRequest, "Peran harus guru atau pegawai")
 		return
 	}
 
 	ctx := r.Context()
 	tx, err := a.DB.BeginTx(ctx, nil)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to start transaction")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memulai penyimpanan. Coba lagi")
 		return
 	}
 	defer tx.Rollback()
@@ -61,21 +61,21 @@ func (a *App) InternalCreateOrLinkEmployee(w http.ResponseWriter, r *http.Reques
 		pass := common.GenDefaultPassword()
 		hash, herr := common.HashPassword(pass)
 		if herr != nil {
-			common.WriteError(w, http.StatusInternalServerError, "password hashing failed")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal memproses kata sandi")
 			return
 		}
 		err = tx.QueryRowContext(ctx, `INSERT INTO users (name, email, password_hash, password_changed, default_password, managed_by_hr)
 			VALUES ($1, $2, $3, false, $4, true) RETURNING id`, req.FullName, req.Email, hash, pass).Scan(&userID)
 		if err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to create user")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal membuat pengguna")
 			return
 		}
 	case err != nil:
-		common.WriteError(w, http.StatusInternalServerError, "database error")
+		common.WriteError(w, http.StatusInternalServerError, "Terjadi kesalahan pada basis data. Coba lagi")
 		return
 	default:
 		if _, err = tx.ExecContext(ctx, `UPDATE users SET name = $2, managed_by_hr = true, deactivate_at = NULL, updated_at = now() WHERE id = $1`, userID, req.FullName); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to update user")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal memperbarui pengguna")
 			return
 		}
 	}
@@ -84,11 +84,11 @@ func (a *App) InternalCreateOrLinkEmployee(w http.ResponseWriter, r *http.Reques
 		VALUES ($1, $2, $3, 'active')
 		ON CONFLICT (user_id, school_id, role) DO UPDATE SET status = 'active'`,
 		userID, req.SchoolID, req.Role); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to assign role")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menetapkan peran")
 		return
 	}
 	if err := tx.Commit(); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to commit transaction")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menyimpan perubahan. Coba lagi")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]string{"user_id": userID}, nil)
@@ -107,20 +107,20 @@ func (a *App) InternalDeactivateUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var req internalDeactivateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		common.WriteError(w, http.StatusBadRequest, "invalid request body")
+		common.WriteError(w, http.StatusBadRequest, "Format data tidak valid")
 		return
 	}
 	req.SchoolID = strings.TrimSpace(req.SchoolID)
 	req.Reason = strings.TrimSpace(req.Reason)
 	if id == "" || req.SchoolID == "" || (req.EffectiveAt == nil && req.Reason == "") {
-		common.WriteError(w, http.StatusBadRequest, "id, school_id and effective_at (or reason) are required")
+		common.WriteError(w, http.StatusBadRequest, "id, school_id, dan tanggal berlaku (atau alasan) wajib diisi")
 		return
 	}
 
 	ctx := r.Context()
 	tx, err := a.DB.BeginTx(ctx, nil)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to start transaction")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memulai penyimpanan. Coba lagi")
 		return
 	}
 	defer tx.Rollback()
@@ -129,11 +129,11 @@ func (a *App) InternalDeactivateUser(w http.ResponseWriter, r *http.Request) {
 	var exists bool
 	err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM user_school_roles WHERE user_id = $1 AND school_id = $2)`, id, req.SchoolID).Scan(&exists)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to check user in school")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memeriksa pengguna di unit")
 		return
 	}
 	if !exists {
-		common.WriteError(w, http.StatusNotFound, "user not found in school")
+		common.WriteError(w, http.StatusNotFound, "Pengguna tidak ditemukan di unit ini")
 		return
 	}
 
@@ -142,7 +142,7 @@ func (a *App) InternalDeactivateUser(w http.ResponseWriter, r *http.Request) {
 			WHERE id = $2 AND deleted_at IS NULL`,
 			*req.EffectiveAt, id)
 		if err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to set deactivation date")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal menetapkan tanggal nonaktif")
 			return
 		}
 	}
@@ -155,7 +155,7 @@ func (a *App) InternalDeactivateUser(w http.ResponseWriter, r *http.Request) {
 			WHERE user_id = $1 AND school_id = $2 AND status = 'active'
 		`, id, req.SchoolID)
 		if err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to deactivate user roles")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal menonaktifkan peran pengguna")
 			return
 		}
 
@@ -166,13 +166,13 @@ func (a *App) InternalDeactivateUser(w http.ResponseWriter, r *http.Request) {
 			WHERE student_user_id = $1 AND school_id = $2 AND status = 'active'
 		`, id, req.SchoolID)
 		if err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to deactivate guardian links")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal menonaktifkan relasi orang tua")
 			return
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to commit transaction")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menyimpan perubahan. Coba lagi")
 		return
 	}
 	if req.EffectiveAt == nil || !req.EffectiveAt.After(time.Now()) {

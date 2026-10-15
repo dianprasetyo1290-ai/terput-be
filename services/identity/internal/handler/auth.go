@@ -68,12 +68,12 @@ func lockedMessage(until time.Time) string {
 func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		common.WriteError(w, http.StatusBadRequest, "invalid request body")
+		common.WriteError(w, http.StatusBadRequest, "Format data tidak valid")
 		return
 	}
 	req.Email = strings.TrimSpace(req.Email)
 	if req.Email == "" || req.Password == "" {
-		common.WriteError(w, http.StatusBadRequest, "email and password are required")
+		common.WriteError(w, http.StatusBadRequest, "Email dan kata sandi wajib diisi")
 		return
 	}
 	ctx := r.Context()
@@ -87,13 +87,13 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusUnauthorized, msgBadLogin)
 		return
 	} else if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "login failed")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal masuk. Coba lagi")
 		return
 	}
 	uid := user.ID
 	st, err := store.GetLoginState(ctx, a.DB, user.ID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "login failed")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal masuk. Coba lagi")
 		return
 	}
 	p := a.policy(r)
@@ -122,18 +122,18 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 
 	if user.DeactivateAt != nil && !user.DeactivateAt.After(now) {
 		_ = store.RecordLoginEvent(ctx, a.DB, &uid, req.Email, false, "deactivated", ip, ua, nil)
-		common.WriteError(w, http.StatusUnauthorized, "account is deactivated")
+		common.WriteError(w, http.StatusUnauthorized, "Akun dinonaktifkan. Hubungi admin unit")
 		return
 	}
 	roles, err := store.UserRoles(a.DB, user.ID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "login failed")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal masuk. Coba lagi")
 		return
 	}
 	activeRole, schoolID, allRoles, ok := store.PickActiveRole(activeRoleRows(roles))
 	if !ok {
 		_ = store.RecordLoginEvent(ctx, a.DB, &uid, req.Email, false, "no_active_role", ip, ua, nil)
-		common.WriteError(w, http.StatusForbidden, "account has no assigned role")
+		common.WriteError(w, http.StatusForbidden, "Akun belum memiliki peran. Hubungi admin unit")
 		return
 	}
 	if err := store.ClearLoginFailures(ctx, a.DB, user.ID); err != nil {
@@ -152,7 +152,7 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 func (a *App) completeLogin(w http.ResponseWriter, r *http.Request, user model.User, activeRole, schoolID string, allRoles []string, mfa bool) {
 	token, sid, err := a.issueToken(r, user.ID, schoolID, activeRole, allRoles, "", mfa)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to issue token")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal membuat sesi. Coba lagi")
 		return
 	}
 	uid := user.ID
@@ -171,13 +171,13 @@ func (a *App) completeLogin(w http.ResponseWriter, r *http.Request, user model.U
 func (a *App) startMFA(w http.ResponseWriter, r *http.Request, user model.User, enrolled bool) {
 	token, hash, err := security.NewOpaqueToken()
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "login failed")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal masuk. Coba lagi")
 		return
 	}
 	resp := mfaChallengeResponse{MFARequired: true, MFAToken: token}
 	if enrolled {
 		if err := store.CreateMFAChallenge(r.Context(), a.DB, user.ID, hash, "verify", nil, mfaVerifyTTL); err != nil {
-			common.WriteDBError(w, err, "login failed")
+			common.WriteDBError(w, err, "Gagal masuk. Coba lagi")
 			return
 		}
 		resp.ExpiresIn = int(mfaVerifyTTL.Seconds())
@@ -186,16 +186,16 @@ func (a *App) startMFA(w http.ResponseWriter, r *http.Request, user model.User, 
 	}
 	secret, err := security.NewTOTPSecret()
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "login failed")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal masuk. Coba lagi")
 		return
 	}
 	enc, err := security.Encrypt(a.MFAKey, secret)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "login failed")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal masuk. Coba lagi")
 		return
 	}
 	if err := store.CreateMFAChallenge(r.Context(), a.DB, user.ID, hash, "enroll", &enc, mfaEnrollTTL); err != nil {
-		common.WriteDBError(w, err, "login failed")
+		common.WriteDBError(w, err, "Gagal masuk. Coba lagi")
 		return
 	}
 	resp.MFAEnroll = true
@@ -215,7 +215,7 @@ type mfaVerifyRequest struct {
 func (a *App) VerifyMFA(w http.ResponseWriter, r *http.Request) {
 	var req mfaVerifyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MFAToken == "" || req.Code == "" {
-		common.WriteError(w, http.StatusBadRequest, "mfa_token dan kode wajib diisi")
+		common.WriteError(w, http.StatusBadRequest, "Token MFA dan kode wajib diisi")
 		return
 	}
 	ctx := r.Context()
@@ -225,7 +225,7 @@ func (a *App) VerifyMFA(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusUnauthorized, expired)
 		return
 	} else if err != nil {
-		common.WriteDBError(w, err, "verifikasi gagal")
+		common.WriteDBError(w, err, "Verifikasi gagal")
 		return
 	}
 	user, err := store.FindUserByID(a.DB, ch.UserID)
@@ -235,7 +235,7 @@ func (a *App) VerifyMFA(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := store.GetLoginState(ctx, a.DB, user.ID)
 	if err != nil {
-		common.WriteDBError(w, err, "verifikasi gagal")
+		common.WriteDBError(w, err, "Verifikasi gagal")
 		return
 	}
 	if security.IsLocked(st.LockedUntil, time.Now()) {
@@ -255,7 +255,7 @@ func (a *App) VerifyMFA(w http.ResponseWriter, r *http.Request) {
 	secret, err := security.Decrypt(a.MFAKey, *secretEnc)
 	if err != nil {
 		common.CaptureError(err)
-		common.WriteError(w, http.StatusInternalServerError, "verifikasi gagal")
+		common.WriteError(w, http.StatusInternalServerError, "Verifikasi gagal")
 		return
 	}
 	uid := user.ID
@@ -278,7 +278,7 @@ func (a *App) VerifyMFA(w http.ResponseWriter, r *http.Request) {
 	}
 	if ch.Purpose == "enroll" {
 		if err := store.EnableMFA(ctx, a.DB, user.ID, *secretEnc); err != nil {
-			common.WriteDBError(w, err, "verifikasi gagal")
+			common.WriteDBError(w, err, "Verifikasi gagal")
 			return
 		}
 		a.RecordSecurityAudit(nil, "mfa_enrolled", user.ID, &uid, nil, nil, nil, "MFA TOTP enrolled", r.Header.Get("X-Correlation-ID"))
@@ -286,12 +286,12 @@ func (a *App) VerifyMFA(w http.ResponseWriter, r *http.Request) {
 	_ = store.ClearLoginFailures(ctx, a.DB, user.ID)
 	roles, err := store.UserRoles(a.DB, user.ID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "login failed")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal masuk. Coba lagi")
 		return
 	}
 	activeRole, schoolID, allRoles, ok := store.PickActiveRole(activeRoleRows(roles))
 	if !ok {
-		common.WriteError(w, http.StatusForbidden, "account has no assigned role")
+		common.WriteError(w, http.StatusForbidden, "Akun belum memiliki peran. Hubungi admin unit")
 		return
 	}
 	a.completeLogin(w, r, user, activeRole, schoolID, allRoles, true)
@@ -310,7 +310,7 @@ func (a *App) ResetUserMFA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		common.WriteError(w, http.StatusNotFound, "user not found")
+		common.WriteError(w, http.StatusNotFound, "Pengguna tidak ditemukan")
 		return
 	}
 	a.revokeAll(r, id, "mfa_reset", "")
@@ -331,23 +331,23 @@ func (a *App) SwitchRole(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	var req switchRoleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		common.WriteError(w, http.StatusBadRequest, "invalid request body")
+		common.WriteError(w, http.StatusBadRequest, "Format data tidak valid")
 		return
 	}
 	if req.Role == "" {
-		common.WriteError(w, http.StatusBadRequest, "role is required")
+		common.WriteError(w, http.StatusBadRequest, "Peran wajib diisi")
 		return
 	}
 
 	// A deactivated (offboarded) account must not mint fresh tokens either.
 	if user, err := store.FindUserByID(a.DB, claims.UserID); err != nil || (user.DeactivateAt != nil && !user.DeactivateAt.After(time.Now())) {
-		common.WriteError(w, http.StatusUnauthorized, "account is deactivated")
+		common.WriteError(w, http.StatusUnauthorized, "Akun dinonaktifkan. Hubungi admin unit")
 		return
 	}
 
 	roles, err := store.UserRoles(a.DB, claims.UserID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "switch role failed")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal berpindah peran")
 		return
 	}
 	roles = activeRoleRows(roles)
@@ -363,7 +363,7 @@ func (a *App) SwitchRole(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !found {
-		common.WriteError(w, http.StatusForbidden, "account does not hold role "+req.Role)
+		common.WriteError(w, http.StatusForbidden, "Akun Anda tidak memiliki peran "+req.Role)
 		return
 	}
 
@@ -374,7 +374,7 @@ func (a *App) SwitchRole(w http.ResponseWriter, r *http.Request) {
 
 	token, _, err := a.issueToken(r, claims.UserID, schoolID, req.Role, allRoles, claims.SessionID, false)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to issue token")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal membuat sesi. Coba lagi")
 		return
 	}
 
@@ -393,7 +393,7 @@ func (a *App) Me(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	user, err := store.FindUserByID(a.DB, claims.UserID)
 	if err != nil {
-		common.WriteError(w, http.StatusNotFound, "user not found")
+		common.WriteError(w, http.StatusNotFound, "Pengguna tidak ditemukan")
 		return
 	}
 	roles, _ := store.UserRoles(a.DB, claims.UserID)
@@ -419,7 +419,7 @@ func (a *App) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	claims := common.FromCtx(r)
 	var req changePasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.CurrentPassword == "" || req.NewPassword == "" {
-		common.WriteError(w, http.StatusBadRequest, "current_password and new_password are required")
+		common.WriteError(w, http.StatusBadRequest, "Kata sandi lama dan baru wajib diisi")
 		return
 	}
 	if msg := security.ValidPassword(req.NewPassword); msg != "" {
@@ -429,17 +429,17 @@ func (a *App) ChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	var hash string
 	if err := a.DB.QueryRow(`SELECT password_hash FROM users WHERE id=$1 AND deleted_at IS NULL`, claims.UserID).Scan(&hash); err != nil {
-		common.WriteError(w, http.StatusNotFound, "user not found")
+		common.WriteError(w, http.StatusNotFound, "Pengguna tidak ditemukan")
 		return
 	}
 	if !common.CheckPassword(hash, req.CurrentPassword) {
-		common.WriteError(w, http.StatusUnauthorized, "current password is incorrect")
+		common.WriteError(w, http.StatusUnauthorized, "Kata sandi lama salah")
 		return
 	}
 
 	newHash, err := common.HashPassword(req.NewPassword)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to change password")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal mengubah kata sandi")
 		return
 	}
 	// Same post-change bookkeeping as ResetPassword: default_password no
@@ -447,7 +447,7 @@ func (a *App) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	// so the UI stops showing a plaintext default password anywhere.
 	if _, err := a.DB.Exec(`UPDATE users SET password_hash=$1, password_changed=true, default_password=NULL, updated_at=now() WHERE id=$2`,
 		newHash, claims.UserID); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to change password")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal mengubah kata sandi")
 		return
 	}
 	// Other devices may be using the old password: end them, keep this one.

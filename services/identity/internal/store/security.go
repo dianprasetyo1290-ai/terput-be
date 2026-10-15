@@ -427,6 +427,29 @@ func HeldRoleNames(ctx context.Context, db *sql.DB, userID string) ([]string, er
 	return out, rows.Err()
 }
 
+// ExceptedRolePairs returns the role pairs (security.PairKey) of userID that
+// an approved, unexpired SoD exception allows.
+func ExceptedRolePairs(ctx context.Context, db *sql.DB, userID string) (map[string]bool, error) {
+	rows, err := db.QueryContext(ctx, `SELECT role, conflicting_roles::text[] FROM role_conflict_exceptions
+		WHERE user_id::text=$1 AND status='approved' AND (valid_until IS NULL OR valid_until >= CURRENT_DATE)`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var role string
+		var others pq.StringArray
+		if err := rows.Scan(&role, &others); err != nil {
+			return nil, err
+		}
+		for _, o := range others {
+			out[security.PairKey(role, o)] = true
+		}
+	}
+	return out, rows.Err()
+}
+
 // RoleConflictViolation is an existing account that already breaks a rule
 // (accounts created before SoD existed); listed for clean-up, not auto-fixed.
 type RoleConflictViolation struct {
@@ -445,7 +468,13 @@ func ListRoleConflictViolations(ctx context.Context, db *sql.DB, schoolID string
 		JOIN user_school_roles ra ON ra.role = c.role_a
 		JOIN user_school_roles rb ON rb.role = c.role_b AND rb.user_id = ra.user_id
 		JOIN users u ON u.id = ra.user_id AND u.deleted_at IS NULL
-		WHERE $1 = '' OR ra.school_id::text = $1 OR rb.school_id::text = $1
+		WHERE ($1 = '' OR ra.school_id::text = $1 OR rb.school_id::text = $1)
+		  AND NOT EXISTS (
+		      SELECT 1 FROM role_conflict_exceptions e
+		      WHERE e.user_id = ra.user_id AND e.status = 'approved'
+		        AND (e.valid_until IS NULL OR e.valid_until >= CURRENT_DATE)
+		        AND ((e.role = c.role_a AND c.role_b = ANY(e.conflicting_roles))
+		          OR (e.role = c.role_b AND c.role_a = ANY(e.conflicting_roles))))
 		ORDER BY u.name, c.role_a, c.role_b`, schoolID)
 	if err != nil {
 		return nil, err

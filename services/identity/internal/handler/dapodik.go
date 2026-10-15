@@ -23,7 +23,7 @@ type DapodikStudent struct {
 func (a *App) InternalDapodikStudents(w http.ResponseWriter, r *http.Request) {
 	schoolID := strings.TrimSpace(r.URL.Query().Get("school_id"))
 	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id parameter is required")
+		common.WriteError(w, http.StatusBadRequest, "Parameter unit (school_id) wajib diisi")
 		return
 	}
 
@@ -38,7 +38,7 @@ func (a *App) InternalDapodikStudents(w http.ResponseWriter, r *http.Request) {
 	`
 	rows, err := a.DB.QueryContext(r.Context(), query, schoolID)
 	if err != nil {
-		common.WriteDBError(w, err, "failed to query students")
+		common.WriteDBError(w, err, "Gagal memuat data siswa")
 		return
 	}
 	defer rows.Close()
@@ -48,7 +48,7 @@ func (a *App) InternalDapodikStudents(w http.ResponseWriter, r *http.Request) {
 		var s DapodikStudent
 		var nisn, bDate, bPlace, rel sql.NullString
 		if err := rows.Scan(&s.UserID, &s.Name, &nisn, &bDate, &bPlace, &rel); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to scan student row")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal membaca data siswa")
 			return
 		}
 		if nisn.Valid {

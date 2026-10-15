@@ -24,7 +24,7 @@ func (a *App) ExportOrganizationExcel(w http.ResponseWriter, r *http.Request) {
 	}
 	schoolID, filtered := resolveSchoolScope(r)
 	if !filtered {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+		common.WriteError(w, http.StatusBadRequest, "Unit (school_id) wajib diisi")
 		return
 	}
 	rows, err := a.DB.Query(`
@@ -35,7 +35,7 @@ func (a *App) ExportOrganizationExcel(w http.ResponseWriter, r *http.Request) {
 		WHERE pa.school_id = $1
 		ORDER BY p.priority, p.name, u.name`, schoolID)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to export organization")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal mengekspor struktur organisasi")
 		return
 	}
 	defer rows.Close()
@@ -49,7 +49,7 @@ func (a *App) ExportOrganizationExcel(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var position, name string
 		if err := rows.Scan(&position, &name); err != nil {
-			common.WriteError(w, http.StatusInternalServerError, "failed to export organization")
+			common.WriteError(w, http.StatusInternalServerError, "Gagal mengekspor struktur organisasi")
 			return
 		}
 		f.SetSheetRow(orgSheetName, fmt.Sprintf("A%d", rowIdx), &[]string{position, name})
@@ -107,23 +107,23 @@ func (a *App) ImportOrganization(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+		common.WriteError(w, http.StatusBadRequest, "Unit (school_id) wajib diisi")
 		return
 	}
 
 	if err := r.ParseMultipartForm(20 << 20); err != nil {
-		common.WriteError(w, http.StatusBadRequest, "failed to parse multipart form")
+		common.WriteError(w, http.StatusBadRequest, "Unggahan gagal dibaca")
 		return
 	}
 	file, _, err := r.FormFile("file")
 	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "file is required (multipart field 'file')")
+		common.WriteError(w, http.StatusBadRequest, "File wajib diunggah")
 		return
 	}
 	defer file.Close()
 	f, err := excelize.OpenReader(file)
 	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, "invalid .xlsx file")
+		common.WriteError(w, http.StatusBadRequest, "File bukan .xlsx yang valid")
 		return
 	}
 	defer f.Close()
@@ -134,7 +134,7 @@ func (a *App) ImportOrganization(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := f.GetRows(sheetName)
 	if err != nil || len(rows) < 2 {
-		common.WriteError(w, http.StatusBadRequest, "sheet is empty or unreadable")
+		common.WriteError(w, http.StatusBadRequest, "Lembar kerja kosong atau tidak dapat dibaca")
 		return
 	}
 

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -270,7 +271,7 @@ func (a *App) requireUserInScope(w http.ResponseWriter, r *http.Request, userID 
 		return false
 	}
 	if !ok {
-		common.WriteError(w, http.StatusNotFound, "user not found")
+		common.WriteError(w, http.StatusNotFound, "Pengguna tidak ditemukan")
 		return false
 	}
 	return true
@@ -344,7 +345,7 @@ func (a *App) UpdateSecurityPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	var p security.Policy
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		common.WriteError(w, http.StatusBadRequest, "invalid request body")
+		common.WriteError(w, http.StatusBadRequest, "Format data tidak valid")
 		return
 	}
 	if errs := security.ValidatePolicy(p, common.IsValidRole); len(errs) > 0 {
@@ -383,7 +384,7 @@ func (a *App) UpsertRoleConflict(w http.ResponseWriter, r *http.Request) {
 	}
 	var c security.RoleConflict
 	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
-		common.WriteError(w, http.StatusBadRequest, "invalid request body")
+		common.WriteError(w, http.StatusBadRequest, "Format data tidak valid")
 		return
 	}
 	errs := map[string]string{}
@@ -450,27 +451,45 @@ func (a *App) ListRoleConflictViolations(w http.ResponseWriter, r *http.Request)
 // checkRoleConflicts writes 409 and returns false when granting role to
 // userID would create a forbidden combination (BUG-023, AC-RBAC-08).
 func (a *App) checkRoleConflicts(w http.ResponseWriter, r *http.Request, userID, role string) bool {
-	held, err := store.HeldRoleNames(r.Context(), a.DB, userID)
+	found, err := a.findRoleConflicts(r.Context(), userID, role)
 	if err != nil {
 		common.WriteDBError(w, err, "gagal memeriksa kombinasi peran")
 		return false
 	}
-	rules, err := store.ListRoleConflicts(r.Context(), a.DB)
-	if err != nil {
-		common.WriteDBError(w, err, "gagal memeriksa kombinasi peran")
-		return false
-	}
-	found := security.ConflictsFor(held, role, rules)
 	if len(found) == 0 {
 		return true
 	}
+	writeRoleConflict(w, found)
+	return false
+}
+
+// writeRoleConflict is the 409 for a forbidden combination. The UI offers
+// "Ajukan pengecualian" (exception_allowed) which goes to the Approval Center.
+func writeRoleConflict(w http.ResponseWriter, found []security.RoleConflict) {
 	msgs := make([]string, 0, len(found))
 	for _, f := range found {
 		msgs = append(msgs, f.RoleA+" + "+f.RoleB+": "+f.Reason)
 	}
 	msg := "Kombinasi peran tidak diizinkan (" + strings.Join(msgs, "; ") + ")"
-	common.WriteValidationError(w, http.StatusConflict, msg, map[string]any{"role": msg, "conflicts": found})
-	return false
+	common.WriteValidationError(w, http.StatusConflict, msg, map[string]any{"role": msg, "conflicts": found, "exception_allowed": true})
+}
+
+// findRoleConflicts lists the forbidden pairs granting role to userID would
+// create, minus the pairs covered by an approved, unexpired exception.
+func (a *App) findRoleConflicts(ctx context.Context, userID, role string) ([]security.RoleConflict, error) {
+	held, err := store.HeldRoleNames(ctx, a.DB, userID)
+	if err != nil {
+		return nil, err
+	}
+	rules, err := store.ListRoleConflicts(ctx, a.DB)
+	if err != nil {
+		return nil, err
+	}
+	excepted, err := store.ExceptedRolePairs(ctx, a.DB, userID)
+	if err != nil {
+		return nil, err
+	}
+	return security.WithoutExcepted(security.ConflictsFor(held, role, rules), excepted), nil
 }
 
 func clientIP(r *http.Request) string {

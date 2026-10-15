@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -78,6 +79,21 @@ func main() {
 		app.MFAKey = security.DeriveKey(k)
 	}
 	app.MFAIssuer = getenv("MFA_ISSUER", "SEKOCI")
+	// Base URL core uses for approval callbacks into identity.
+	app.SelfURL = getenv("IDENTITY_INTERNAL_URL", "http://identity:8081")
+	// Break-glass grants end on their own (QA-IDN BUG-120).
+	go func() {
+		t := time.NewTicker(time.Minute)
+		defer t.Stop()
+		for range t.C {
+			if n := app.RunBreakGlassExpiry(context.Background()); n > 0 {
+				log.Printf("break-glass: %d akses darurat berakhir otomatis", n)
+			}
+			if n := app.RunRoleConflictExceptionExpiry(context.Background()); n > 0 {
+				log.Printf("sod: %d pengecualian kombinasi peran kedaluwarsa", n)
+			}
+		}
+	}()
 	wlStore := whitelabel.NewStore(db)
 	wlHandler := whitelabel.NewHandler(wlStore, app.CoreURL, app.InternalKey)
 
@@ -98,7 +114,18 @@ func main() {
 		// yang basi, dan Laravel /sso tidak boleh menerima jawaban "menyala"
 		// untuk sekolah yang baru dimatikan. Volumenya kecil (sekali per
 		// login untuk SPA), jadi tak ada yang hilang.
-		return strings.Contains(r.URL.Path, "/features")
+		if strings.Contains(r.URL.Path, "/features") {
+			return true
+		}
+		// QA-IDN putaran 2: tata kelola (pengecualian SoD, break-glass,
+		// permintaan data pribadi, referensi, matriks hak akses) dan
+		// pengumuman (jadwal terbit) harus langsung terlihat setelah diubah.
+		for _, p := range []string{"/security/", "/privacy/", "/references", "/me/permissions", "/announcements", "/migration-runs", "/archive", "/users/import-batches"} {
+			if strings.HasPrefix(r.URL.Path, p) {
+				return true
+			}
+		}
+		return false
 	}
 
 	r := chi.NewRouter()
@@ -148,6 +175,47 @@ func main() {
 		pr.Get("/security/role-conflicts/violations", app.ListRoleConflictViolations)
 		pr.Post("/security/role-conflicts", app.UpsertRoleConflict)
 		pr.Delete("/security/role-conflicts/{roleA}/{roleB}", app.DeleteRoleConflict)
+		pr.Get("/security/role-conflicts/cleanup-log", app.ListSoDCleanupLog)
+		pr.Post("/security/role-conflicts/violations/resolve", app.ResolveRoleConflictViolations)
+		// SoD exceptions approved in core (BUG-023), break-glass (BUG-120),
+		// permission matrix (BUG-082).
+		pr.Get("/security/role-conflict-exceptions", app.ListRoleConflictExceptions)
+		pr.Post("/security/role-conflict-exceptions/{id}/revoke", app.RevokeRoleConflictException)
+		pr.Get("/security/break-glass", app.ListBreakGlass)
+		pr.Post("/security/break-glass", app.CreateBreakGlass)
+		pr.Post("/security/break-glass/{id}/revoke", app.RevokeBreakGlass)
+		pr.Post("/security/break-glass/{id}/resend-summary", app.ResendBreakGlassSummary)
+		pr.Get("/security/permissions", app.GetPermissionMatrix)
+		pr.Put("/security/permissions", app.UpdatePermissionMatrix)
+		pr.Get("/me/permissions", app.MyPermissions)
+
+		// Hak subjek data UU PDP (BUG-119).
+		pr.Get("/privacy/requests", app.ListDataSubjectRequests)
+		pr.Post("/privacy/requests", app.CreateDataSubjectRequest)
+		pr.Get("/privacy/requests/mine", app.MyDataSubjectRequests)
+		pr.Post("/privacy/requests/{id}/start", app.StartDataSubjectRequest)
+		pr.Post("/privacy/requests/{id}/complete", app.CompleteDataSubjectRequest)
+		pr.Post("/privacy/requests/{id}/reject", app.RejectDataSubjectRequest)
+		pr.Get("/privacy/requests/{id}/export", app.DataSubjectRequestExport)
+
+		// Data referensi (BUG-073).
+		pr.Get("/references", app.ListReferences)
+		pr.Post("/references", app.CreateReference)
+		pr.Put("/references/{id}", app.UpdateReference)
+
+		// Migrasi data sistem lama: control total + sign-off, percobaan,
+		// arsip historis read-only (BUG-019/078/079).
+		pr.Get("/migration-runs", app.ListMigrationRuns)
+		pr.Post("/migration-runs", app.CreateMigrationRun)
+		pr.Get("/migration-runs/{id}", app.GetMigrationRun)
+		pr.Put("/migration-runs/{id}/totals", app.UpsertMigrationTotals)
+		pr.Post("/migration-runs/{id}/recompute", app.RecomputeMigrationRun)
+		pr.Post("/migration-runs/{id}/sign-off", app.SignOffMigrationRun)
+		pr.Post("/migration-runs/{id}/discard", app.DiscardMigrationRun)
+		pr.Post("/archive/import", app.ImportArchive)
+		pr.Get("/archive/categories", app.ListArchiveCategories)
+		pr.Get("/archive", app.SearchArchive)
+		pr.Get("/archive/{id}", app.GetArchiveRecord)
 
 		pr.Post("/auth/switch-role", app.SwitchRole)
 		pr.Get("/auth/me", app.Me)
@@ -319,6 +387,9 @@ func main() {
 		in.Post("/internal/role-accounts/create-or-link", app.InternalCreateOrLinkRoleAccount)
 		in.Post("/internal/users/{id}/deactivate", app.InternalDeactivateUser)
 		in.Get("/internal/dapodik/students", app.InternalDapodikStudents)
+		in.Post("/internal/role-conflict-exceptions/approval-callback", app.RoleConflictExceptionCallback)
+		in.Get("/internal/permissions", app.InternalPermissions)
+		in.Get("/internal/users", app.InternalUsersByRole)
 
 		// T24: Insight Read Model & Metric Facts
 		in.Get("/internal/metric-facts", app.InternalMetricFacts)

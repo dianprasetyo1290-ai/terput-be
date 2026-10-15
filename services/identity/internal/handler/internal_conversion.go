@@ -93,26 +93,26 @@ func upsertExternalUser(tx *sql.Tx, req internalUserRequest, entityType, role st
 func (a *App) internalUpsertUser(w http.ResponseWriter, r *http.Request, entityType, role string) {
 	var req internalUserRequest
 	if json.NewDecoder(r.Body).Decode(&req) != nil || !normalizeInternalUser(&req) {
-		common.WriteError(w, http.StatusBadRequest, "school_id, external_ref, name and email are required")
+		common.WriteError(w, http.StatusBadRequest, "school_id, external_ref, nama, dan email wajib diisi")
 		return
 	}
 	if entityType == "student" && strings.TrimSpace(req.NISN) == "" {
-		common.WriteError(w, http.StatusBadRequest, "nisn is required")
+		common.WriteError(w, http.StatusBadRequest, "NISN wajib diisi")
 		return
 	}
 	tx, err := a.DB.Begin()
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to upsert user")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menyimpan pengguna")
 		return
 	}
 	defer tx.Rollback()
 	u, err := upsertExternalUser(tx, req, entityType, role)
 	if err != nil {
-		common.WriteDBError(w, err, "failed to upsert user")
+		common.WriteDBError(w, err, "Gagal menyimpan pengguna")
 		return
 	}
 	if err := tx.Commit(); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to upsert user")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menyimpan pengguna")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, u, nil)
@@ -139,7 +139,7 @@ type internalLinkRequest struct {
 func (a *App) InternalCreateGuardianLink(w http.ResponseWriter, r *http.Request) {
 	var req internalLinkRequest
 	if json.NewDecoder(r.Body).Decode(&req) != nil || req.SchoolID == "" || req.ConversionRef == "" || req.GuardianUserID == "" || req.StudentUserID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id, conversion_ref, guardian_user_id and student_user_id are required")
+		common.WriteError(w, http.StatusBadRequest, "school_id, conversion_ref, orang tua, dan siswa wajib diisi")
 		return
 	}
 	if req.Source == "" {
@@ -150,7 +150,7 @@ func (a *App) InternalCreateGuardianLink(w http.ResponseWriter, r *http.Request)
 	}
 	tx, err := a.DB.Begin()
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to create guardian link")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menghubungkan orang tua dengan siswa")
 		return
 	}
 	defer tx.Rollback()
@@ -158,25 +158,25 @@ func (a *App) InternalCreateGuardianLink(w http.ResponseWriter, r *http.Request)
 	if err := tx.QueryRow(`SELECT
 		EXISTS(SELECT 1 FROM user_school_roles WHERE user_id=$2 AND school_id=$1 AND role='orang_tua' AND status='active') AND
 		EXISTS(SELECT 1 FROM user_school_roles WHERE user_id=$3 AND school_id=$1 AND role='siswa' AND status='active')`, req.SchoolID, req.GuardianUserID, req.StudentUserID).Scan(&valid); err != nil || !valid {
-		common.WriteError(w, http.StatusBadRequest, "guardian and student must belong to school")
+		common.WriteError(w, http.StatusBadRequest, "Orang tua dan siswa harus terdaftar di unit ini")
 		return
 	}
 	link, err := store.ScanGuardianLink(tx.QueryRow(`INSERT INTO guardian_links (school_id,guardian_user_id,student_user_id,relationship,is_primary,status,verified_at)
 		VALUES ($1,$2,$3,$4,$5,'active',now()) ON CONFLICT (school_id,guardian_user_id,student_user_id) DO UPDATE SET relationship=EXCLUDED.relationship,is_primary=EXCLUDED.is_primary,status='active',updated_at=now()
 		RETURNING `+store.GuardianLinkColumns, req.SchoolID, req.GuardianUserID, req.StudentUserID, req.Relationship, req.IsPrimary))
 	if err != nil {
-		common.WriteError(w, http.StatusConflict, "failed to create guardian link")
+		common.WriteError(w, http.StatusConflict, "Gagal menghubungkan orang tua dengan siswa")
 		return
 	}
 	_, err = tx.Exec(`INSERT INTO admission_conversion_mappings (school_id,source,conversion_ref,guardian_user_id,student_user_id,guardian_link_id)
 		VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (school_id,source,conversion_ref) DO UPDATE SET guardian_user_id=EXCLUDED.guardian_user_id,student_user_id=EXCLUDED.student_user_id,guardian_link_id=EXCLUDED.guardian_link_id,updated_at=now()`,
 		req.SchoolID, req.Source, req.ConversionRef, req.GuardianUserID, req.StudentUserID, link.ID)
 	if err != nil {
-		common.WriteError(w, http.StatusConflict, "conversion reference already maps to different identities")
+		common.WriteError(w, http.StatusConflict, "Referensi konversi sudah terhubung ke identitas lain")
 		return
 	}
 	if err := tx.Commit(); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to create guardian link")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menghubungkan orang tua dengan siswa")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, link, nil)
@@ -189,18 +189,18 @@ func (a *App) InternalConversionMapping(w http.ResponseWriter, r *http.Request) 
 		source = "admission"
 	}
 	if schoolID == "" {
-		common.WriteError(w, http.StatusBadRequest, "school_id is required")
+		common.WriteError(w, http.StatusBadRequest, "Unit (school_id) wajib diisi")
 		return
 	}
 	var m model.ConversionMapping
 	err := a.DB.QueryRow(`SELECT school_id,source,conversion_ref,guardian_user_id,student_user_id,guardian_link_id FROM admission_conversion_mappings WHERE school_id=$1 AND source=$2 AND conversion_ref=$3`, schoolID, source, chi.URLParam(r, "conversionRef")).
 		Scan(&m.SchoolID, &m.Source, &m.ConversionRef, &m.GuardianID, &m.StudentID, &m.GuardianLinkID)
 	if err == sql.ErrNoRows {
-		common.WriteError(w, http.StatusNotFound, "conversion mapping not found")
+		common.WriteError(w, http.StatusNotFound, "Pemetaan konversi tidak ditemukan")
 		return
 	}
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "failed to get conversion mapping")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat pemetaan konversi")
 		return
 	}
 	common.WriteJSON(w, http.StatusOK, m, nil)
