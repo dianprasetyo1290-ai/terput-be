@@ -71,6 +71,7 @@ services:
       NOTIFICATION_URL: http://notification:${NOTIFICATION_PORT:-8089}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:5173}
       MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:-}
+      DEMO_ACCESS_DOMAINS: ${DEMO_ACCESS_DOMAINS:-}
     ports: ["${IDENTITY_PORT}:${IDENTITY_PORT}"]
 
   # ---------- academic ----------
@@ -310,6 +311,10 @@ services:
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
       IDENTITY_URL: http://identity:${IDENTITY_PORT}
       CORE_URL: http://core:${CORE_PORT:-8091}
+      # Campaign segments resolve parents per grade (academic) and PPDB
+      # applicants (admission); without these the segment preview answers 502.
+      ACADEMIC_URL: http://academic:${ACADEMIC_PORT}
+      ADMISSION_URL: http://admission:${ADMISSION_PORT:-8088}
       NOTIFICATION_INTERNAL_URL: http://notification:${NOTIFICATION_PORT}
       NOTIFICATION_EMAIL_PROVIDER: ${NOTIFICATION_EMAIL_PROVIDER:-}
       SMTP_HOST: ${SMTP_HOST:-}

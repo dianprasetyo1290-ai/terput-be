@@ -63,6 +63,8 @@ seed teratai_notification 22_notification_features.sql
 seed teratai_admission    23_admission_features.sql
 seed teratai_insight      24_insight_features.sql
 seed teratai_quality      25_quality_features.sql
+seed teratai_identity     26_identity_demo_accounts.sql
+seed teratai_identity     27_identity_units.sql
 seed teratai_billing      40_billing_features.sql
 seed teratai_academic     30_academic_features.sql
 seed teratai_attendance   31_attendance_features.sql

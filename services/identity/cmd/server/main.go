@@ -83,6 +83,9 @@ func main() {
 	app.SelfURL = getenv("IDENTITY_INTERNAL_URL", "http://identity:8081")
 	// Failed imports land in core's exception queue (kind import).
 	app.Exceptions = common.NewExceptionReporter(app.CoreURL, app.InternalKey, "identity")
+	// Demo access page (SPA /demo): only on a demo instance, never on a
+	// school's live system -- leave DEMO_ACCESS_DOMAINS unset there.
+	app.DemoDomains = handler.ParseDemoDomains(getenv("DEMO_ACCESS_DOMAINS", ""))
 	// Break-glass grants end on their own (QA-IDN BUG-120).
 	go func() {
 		t := time.NewTicker(time.Minute)
@@ -160,6 +163,7 @@ func main() {
 	r.Get("/public/manifest.webmanifest", wlHandler.PublicManifest)
 	r.Get("/public/branding/{schoolId}/{kind}.png", wlHandler.PublicIcon)
 	r.Get("/public/assetlinks.json", wlHandler.PublicAssetLinks)
+	r.Get("/public/demo-access", app.DemoAccess)
 
 	// Everything else requires a valid JWT.
 	r.Group(func(pr chi.Router) {
@@ -224,6 +228,9 @@ func main() {
 		pr.Get("/archive/{id}", app.GetArchiveRecord)
 
 		pr.Post("/auth/switch-role", app.SwitchRole)
+		pr.Get("/auth/units", app.MyUnits)
+		pr.Get("/users/names", app.UserNames)
+		pr.Post("/auth/switch-unit", app.SwitchUnit)
 		pr.Get("/auth/me", app.Me)
 		pr.Post("/auth/change-password", app.ChangePassword) // Admin's self-service "Ubah Password"
 		pr.Get("/me/children", app.MyChildren)

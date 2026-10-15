@@ -21,6 +21,10 @@ var studentOversightRoles = map[string]bool{
 	common.RoleKepalaYayasan:  true,
 	common.RoleKepalaSekolah:  true,
 	common.RoleAuditor:        true,
+	// They pick students too: wallets for the canteen admin, PKL placements
+	// for the PKL coordinator.
+	common.RoleCanteenAdmin:   true,
+	common.RoleKoordinatorPKL: true,
 }
 
 func isStudentOversightRole(role string) bool { return studentOversightRoles[role] }

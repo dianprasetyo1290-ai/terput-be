@@ -38,6 +38,9 @@ type App struct {
 	// Exceptions reports failed imports to core's exception queue (nil ->
 	// not reported).
 	Exceptions *common.ExceptionReporter
+	// DemoDomains are the e-mail domains of the demo accounts listed on the
+	// SPA's /demo page (DEMO_ACCESS_DOMAINS). Empty -> no demo access.
+	DemoDomains []string
 
 	policyCache policyCache
 }
