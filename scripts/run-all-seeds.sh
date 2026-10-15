@@ -56,6 +56,8 @@ docker exec -i shared-postgres psql -U postgres -d teratai_report < "$DIR/seed/1
 # 13. HR
 echo "--> Seeding teratai_hr (departments, employees, attendance, leave, training, jobs)..."
 docker exec -i shared-postgres psql -U postgres -d teratai_hr < "$DIR/seed/14_hr.sql"
+echo "--> Seeding teratai_hr features (payroll, ATS, pelatihan, cuti, lembur, mutasi, onboarding)..."
+docker exec -i shared-postgres psql -U postgres -d teratai_hr -v ON_ERROR_STOP=1 < "$DIR/seed/50_hr_features.sql"
 
 # 14. Notification & Chat
 echo "--> Seeding teratai_notification (in-app notifs, chat threads, messages)..."
