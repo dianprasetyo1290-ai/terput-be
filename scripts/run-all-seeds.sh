@@ -55,7 +55,14 @@ seed teratai_notification 15_notification.sql        legacy
 seed teratai_core         16_core.sql                legacy
 seed teratai_insight      17_insight_extra.sql       legacy
 
-# Feature seeds (additive, idempotent).
+# Feature seeds (additive, idempotent). identity first: core/admission/
+# quality rows reference identity users and core approval ids.
+seed teratai_identity     20_identity_features.sql
+seed teratai_core         21_core_features.sql
+seed teratai_notification 22_notification_features.sql
+seed teratai_admission    23_admission_features.sql
+seed teratai_insight      24_insight_features.sql
+seed teratai_quality      25_quality_features.sql
 seed teratai_academic     30_academic_features.sql
 seed teratai_attendance   31_attendance_features.sql
 seed teratai_exam         32_exam_features.sql
