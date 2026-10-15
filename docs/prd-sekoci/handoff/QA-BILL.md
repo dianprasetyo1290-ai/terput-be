@@ -51,6 +51,8 @@ Area di luar billing ditulis sebagai kontrak (bagian "Kontrak ke area lain").
 | BUG-175 tren aging bulanan | FIXED | handler/finance_reports.go | TestFinanceReports |
 | Tambahan koordinator: status settlement_batches | FIXED | gateway_reconciliation.go (`matched`/`mismatch`) | TestSettlementBatchStatus |
 | Tambahan koordinator: job kedaluwarsa transaksi gateway | FIXED | jobs_settlement.go (`gateway_expiry`) | TestGatewayExpiryAndSettlementJobs |
+| Putaran 3: refund mutasi/keluar dipisah deposit vs kelebihan bayar | FIXED | handler/student_refund.go, transfer_billing.go, refunds.go, model/refund.go | TestStudentRefundDepositSplit, TestSplitStudentRefund, TestRefundJournal |
+| Putaran 3: pengajuan refund ditolak core → Exception Queue | FIXED | handler/student_refund.go (reportRefundApprovalFailure) | TestInternalStudentRefund_Idempotency |
 
 ## Migrasi
 
@@ -60,6 +62,7 @@ Hanya `services/billing/migrations/0009_billing_controls.{up,down}.sql` (0010 mi
 - `bill_refunds` (approval, transfer_ref), `reconciliation_exceptions` (approval), `gateway_settings.receipt_resend_cooldown_minutes`
 - `bill_installments`, `bill_adjustments` kind `cancel`, `bill_change_requests`
 - `bill_discounts` (status, valid_from/valid_to, approval, idempotency_key), `bill_payments.source` ditambah `import`, `payment_imports`
+- Putaran 3: `bill_refunds.deposit_idr` (CHECK 0 ≤ deposit_idr ≤ amount_idr) dan tabel `bill_refund_parts` (refund_id, student_bill_id, amount_idr; UNIQUE per refund+tagihan)
 
 Siklus up → down 1 → up lulus (versi 9, tidak dirty).
 
@@ -209,3 +212,39 @@ TestParentCheckoutFlow kadang gagal (intermittent). Semua tes QA-BILL lulus.
   - Metode Pembayaran, Settlement dan Pengaturan Tagihan hanya untuk admin. Backend juga mengizinkan admin.
   - Auditor tidak punya menu billing.
   - Satu-satunya 403 yang tersisa berasal dari identity `/students` (kontrak QA-IDN di atas), dan UI sudah menampilkan pesan yang terbaca.
+
+## Putaran 3
+
+Merge `feat/QA-PAY` ke `feat/QA-BILL` bersih (tanpa konflik).
+
+- **Refund mutasi/keluar (Menu 78, `POST /internal/students/{id}/refund`)**:
+  - Refund tidak lagi ditempel ke tagihan terakhir. Nominal dipecah oleh `model.SplitStudentRefund`:
+    1. porsi **deposit** lebih dulu, sebesar saldo `student_deposits` dikurangi porsi deposit refund lain yang masih pending;
+    2. sisanya dari **saldo terbayar tagihan**, tagihan terbaru lebih dulu, dikurangi refund pending.
+  - Hasilnya disimpan di `bill_refunds.deposit_idr` dan `bill_refund_parts` (`student_bill_id` = NULL).
+  - Nominal yang melebihi deposit + saldo terbayar dijawab 422 tanpa menyimpan baris.
+  - Respons 201, ringkasan approval dan audit memuat `deposit_idr` dan `bill_parts`.
+- **Proses refund (`POST /admin/refunds/{id}/process`)**:
+  - Porsi deposit mengurangi `student_deposits` (dikunci `FOR UPDATE`) dan menulis `deposit_movements` (−nominal, ref `refund:<id>`), sehingga muncul di kartu piutang.
+  - Porsi deposit diaudit `deposit_refunded` dengan saldo before/after dan **tidak membalik pembayaran tagihan**.
+  - Porsi tagihan membalik pembayaran tagihan masing-masing (terbaru lebih dulu), lalu status tagihan dihitung ulang.
+  - Bila deposit sudah terpakai saat pembayaran keluar: 422, refund tetap `approved`, saldo tidak berubah.
+  - Refund Menu 25 lama (`student_bill_id` terisi) tetap berjalan seperti sebelumnya.
+  - Refund saldo dompet (`wallet_id`) kini ditolak 422 di menu ini. Sebelumnya endpoint ini error 500 karena `student_bill_id` NULL; penyelesaian refund dompet tetap di area wallet.
+- **Jurnal refund harian**: Dr akun refund (porsi tagihan) + Dr akun deposit siswa (porsi deposit) / Cr kas (total). Refund siswa tanpa `student_bill_id` kini ikut dijurnal. Bila ada porsi deposit, akun `deposit_acc` wajib dipetakan.
+- **Refund pending** (bagian `bill_refund_parts`) ikut dihitung di `refundableQ` (Menu 25) dan `refundable_idr` financial summary.
+- **Pengajuan ditolak/gagal di core** (alur `refund` belum dikonfigurasi, core tidak terjangkau): selain log dan penghapusan baris, billing mengirim item ke Integration Exception Queue core:
+  - kind `callback`: kegagalan serah-terima antar layanan; daftar kind core adalah webhook/journal_posting/notification/dead_letter/import/callback.
+  - severity `critical`: core hanya menerima `normal`/`critical`, jadi "high" dipetakan ke `critical`.
+  - idempotency `refund-approval:<idempotency_key>`, payload berisi siswa, nominal, alasan dan request_type.
+  - Bila core sama sekali tidak dikonfigurasi, hanya log yang ditulis.
+
+Verifikasi putaran 3 (2026-10-15):
+
+```
+migrate down 1 / up / down 1 / up → versi 9, tidak dirty
+go vet ./... → OK
+go test ./... (tanpa DB) → semua paket ok
+TEST_PG_DSN=…skci_qa_bill_billing go test -count=1 ./... → semua paket ok (termasuk handler; TestPurposeChargeAndHook dan TestAdhocBillCheckout kini lulus setelah merge QA-PAY)
+web: tidak ada perubahan di putaran 3
+```
