@@ -38,7 +38,7 @@ type Policy struct {
 // the seeded row so a DB hiccup never weakens the rules.
 func DefaultPolicy() Policy {
 	return Policy{MaxFailedLogins: 5, LockoutMinutes: 15, IdleTimeoutMinutes: 30, SessionMaxHours: 24, ResetTokenTTLMinutes: 30,
-		MFARoles: []string{"superadmin", "finance_manager", "payroll_officer", "hr_manager"}}
+		MFARoles: []string{}}
 }
 
 // ValidatePolicy returns field -> message for an invalid policy edit. The

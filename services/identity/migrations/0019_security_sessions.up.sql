@@ -18,8 +18,10 @@ CREATE TABLE security_policy (
     updated_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_by                UUID REFERENCES users(id) ON DELETE SET NULL
 );
+-- MFA starts off (operator decision 2026-10-15); a superadmin enables it per
+-- role on /keamanan once users have enrolled an authenticator.
 INSERT INTO security_policy (id, mfa_roles)
-VALUES (1, ARRAY['superadmin','finance_manager','payroll_officer','hr_manager']);
+VALUES (1, '{}');
 
 ALTER TABLE users
     ADD COLUMN failed_login_count  INT NOT NULL DEFAULT 0,

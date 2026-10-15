@@ -301,8 +301,23 @@ func TestSessionCheckPassThrough(t *testing.T) {
 }
 
 // BUG-047: an MFA role must enroll TOTP at first login and verify afterwards.
+// requireMFAFor turns on mandatory MFA for roles (migration 0019 seeds it
+// off) and restores the policy when the test ends.
+func requireMFAFor(t *testing.T, db *sql.DB, roles string) {
+	t.Helper()
+	var prev string
+	if err := db.QueryRow(`SELECT mfa_roles::text FROM security_policy WHERE id = 1`).Scan(&prev); err != nil {
+		t.Fatalf("read policy: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE security_policy SET mfa_roles = $1::text[] WHERE id = 1`, roles); err != nil {
+		t.Fatalf("set mfa_roles: %v", err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec(`UPDATE security_policy SET mfa_roles = $1::text[] WHERE id = 1`, prev) })
+}
+
 func TestMFAEnrollAndVerify(t *testing.T) {
 	db := openTestDB(t)
+	requireMFAFor(t, db, "{superadmin,finance_manager}")
 	app := newTestApp(db)
 	h := securityRouter(app)
 	u := seedUser(t, db, common.RoleFinanceManager)
@@ -348,6 +363,7 @@ func TestMFAEnrollAndVerify(t *testing.T) {
 // BUG-023: a forbidden role combination is refused with 409.
 func TestAssignRoleRejectsForbiddenCombination(t *testing.T) {
 	db := openTestDB(t)
+	requireMFAFor(t, db, "{superadmin,finance_manager}")
 	app := newTestApp(db)
 	h := securityRouter(app)
 	sa := seedUser(t, db, common.RoleSuperadmin)
