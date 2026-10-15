@@ -273,3 +273,67 @@ Route `/keuangan/pengaturan-gateway` untuk finance_manager, admin, dan superadmi
 - **Core:** flow approval `refund` wajib ada per sekolah. Tanpa flow ini, refund dari withdrawal ditolak dan hanya tercatat di log academic. Sebaiknya galat ini juga masuk Integration Exception Queue; bisa ditambahkan kemudian.
 - **QA-BILL (refund deposit):** refund internal ditautkan ke tagihan terakhir siswa (`student_bill_id`), atau NULL bila tidak ada tagihan. `ProcessRefund` membuat reversal pembayaran pada tagihan tersebut. Untuk refund yang sumbernya deposit, yang seharusnya didebit adalah `student_deposits` (melalui `deposit_movements`). Ini perlu keputusan QA-BILL dan tidak diubah di sini.
 - Test DB baru `skci_qa_pay_billing_fresh` dibuat lokal (docker psql ke Postgres toolchain). Boleh dihapus.
+
+## Putaran 4
+
+`feat/QA-BILL` (putaran 4, final) sudah ada di `feat/QA-PAY` (`git merge-base --is-ancestor feat/QA-BILL HEAD` → ya). Test DB billing dimigrasi ulang (down 1 → up) karena 0009 dari QA-BILL berubah (`bill_refunds.deposit_idr`).
+
+| Item | Status | Commit | File | Test |
+|---|---|---|---|---|
+| (1) Route T12 (dompet, kantin, kartu, POS, internal callback, tagihan ad-hoc) tidak di-mount | FIXED | eacb54e | billing cmd/server/routes.go | TestRouterBuilds, TestEveryHandlerMounted (gagal bila ada handler ekspor yang tidak di-mount) |
+| (2) Role dompet admin sesuai PRD menu 125 | FIXED | 54e15f4 | billing handler/wallet_admin.go | TestWalletAdminRoles, TestWalletRefundFlow |
+| (3) Service API dompet + kantin (web) | DONE | b978048 | web services/wallet, services/canteen | vue-tsc |
+| (4) UI dompet: admin (daftar/detail/kartu/tutup), kas dompet, rekonsiliasi, orang tua, siswa | DONE | c3901c3 | web views/wallet/*, parent/ParentWalletView, student/StudentWalletView | vue-tsc, build |
+| (5) UI kantin: tenant, skema, operator, menu, POS (offline), rekap, penyelesaian | DONE | d2d070f | web views/canteen/* | vue-tsc, build |
+| (6) Router + navRoles + feature flag | DONE | 8a5f291 | web router/domains/canteen.routes.ts, router/index.ts | audit-endpoints billing 0 missing |
+| (7) Endpoint internal untuk accounting + `source_refs` | DONE | f4e0341 | billing handler/journal_sources.go, journal_outbox.go, client/integrations.go, routes.go | TestInternalJournalSources, TestInternalReceivablesSummary, TestJournalRequestCarriesSourceRefs |
+
+### Route dan role (web)
+| Path | Role (backend = navRoles) | Feature | Menu |
+|---|---|---|---|
+| /kantin/tenant, /kantin/tenant/:id | canteen_admin, admin, superadmin | canteen | Kantin › Tenant Kantin (123) |
+| /kantin/pos | canteen_operator | canteen | Kantin › POS Kantin (124) |
+| /kantin/laporan | canteen_admin, admin, superadmin, finance_manager, canteen_operator | canteen | Kantin › Rekap Penjualan |
+| /kantin/penyelesaian, /:id | sama dengan rekap | canteen | Kantin › Penyelesaian Tenant (126) |
+| /keuangan/dompet | admin, superadmin, canteen_admin, finance_manager (tutup dompet: admin saja) | wallet | Keuangan › Dompet Siswa (125) |
+| /keuangan/dompet/kas | admin, superadmin, finance_manager | wallet | Keuangan › Kas Dompet |
+| /keuangan/dompet/rekonsiliasi | finance_manager, admin, superadmin | wallet | Keuangan › Rekonsiliasi Dompet |
+| /orang-tua/dompet | orang_tua | wallet | Portal › Dompet Anak |
+| /siswa/dompet | siswa | wallet | Portal Siswa › Dompet Saya |
+
+Tutup dompet dengan disposisi `refund` mengikuti alur QA-BILL: pengajuan masuk Approval Center core, lalu pembayaran keluar diproses dari menu Refund (25). UI menampilkan catatan alur ini, tidak memproses refund sendiri.
+
+### Endpoint accounting (kontrak QA-ACC)
+- `GET /internal/journal-sources?school_id=&reference=` (X-Internal-Key) → `{data:{reference, items:[{type,id,number,student_name,nis,unit,amount_idr,date,status}]}}`.
+  - Membaca `gateway_journal_postings.source_refs` untuk reference itu. Reference yang tidak dikenal (atau milik sekolah lain) → 404 (accounting membacanya sebagai "tidak ada sumber"). Reference tanpa dokumen → 200 dengan `items: []`.
+  - Tipe: student_bills→`bill`, bill_payments→`payment`, cashier_payments→`cashier_payment`, bill_refunds→`refund`, wallet_movements→`wallet_movement`, canteen_settlements→`canteen_settlement`, gateway_transactions→`gateway_transaction`, reconciliation_exceptions→`recon_exception`.
+  - `number`: tagihan = `source_ref` atau `YYYY-MM`; pembayaran = no. kuitansi atau referensi transfer; kasir = no. kuitansi; gateway = `tx_no`; dompet = no. kuitansi top-up atau jenis mutasi; settlement = nama tenant; exception = `ref`; fallback id.
+  - `student_name`/`nis` dari identity `/users/{id}` (`nisn`), di-cache per request; fallback id siswa / kosong bila identity mati. `unit` = `unit_div_code` pengaturan jurnal, fallback nama sekolah.
+- `GET /internal/receivables/summary?school_id=&as_of=YYYY-MM-DD` → `{data:{outstanding_idr, students, as_of}}`. Tagihan bukan void yang terbit s.d. akhir hari `as_of` (zona sekolah), dikurangi alokasi pembayaran verified s.d. tanggal itu, ditambah reversal s.d. tanggal itu. `students` = jumlah siswa dengan sisa > 0. `as_of` kosong = hari ini; format salah → 422.
+- POST jurnal ke accounting kini membawa `source_refs` (`omitempty`) dengan nama tipe di atas. Outbox tetap menyimpan kunci nama tabel; pemetaan terjadi saat kirim.
+
+### Keputusan (default konservatif)
+- PRD "Finance Admin" = `finance_manager`: identity hanya menerbitkan finance_manager (tidak ada finance_admin/kasir). finance_manager boleh baca dompet, tidak boleh tutup.
+- Kas Dompet (top-up tunai + tabungan) dibuat halaman sendiri, bukan tab di Kasir, karena Kasir di-gate feature `payment_gateway`, sedangkan dompet di-gate `wallet`.
+- Setoran tabungan wajib bukti; penarikan menunggu persetujuan orang tua; "Serahkan Uang" wajib file bukti (sesuai backend).
+- POS: penjualan tunai saat offline diantre di localStorage (`skci.pos.queue`) dan dikirim via `/pos/sales/sync`; bayar dompet hanya online (scan kartu).
+- Fitur backend yang tidak ada di PRD tidak diberi menu.
+- `DashboardRedirectView` tidak diubah karena QA-WEB menulis ulang file ini menjadi peta role→path. **Setelah merge QA-WEB**: tambahkan `canteen_operator: '/kantin/pos'` dan `canteen_admin: '/kantin/tenant'`.
+- Skrip audit QA-WEB (`web/scripts/audit-endpoints.mjs`, `audit-roles.mjs`, `role-matrix.json`) disalin **untracked**, tidak di-commit. Package.json QA-PAY tidak punya `audit:endpoints`. **Setelah merge QA-WEB**: jalankan ulang `npm run audit:roles` agar role-matrix memuat route kantin/dompet (hasil lokal: 353 route, 958 entri).
+
+### Verifikasi putaran 4
+```
+# billing  go vet ./... bersih; go test ./... -count=1 → semua ok di skci_qa_pay_billing dan skci_qa_pay_billing_fresh
+# web      npx vue-tsc -b → tanpa galat; npm run build → ✓ built
+# audit    audit-endpoints --service billing → 149 calls, 0 missing, 0 wrong method, 1 dynamic
+#          audit-endpoints (semua) → 23 missing, semuanya di service lain (quality 19, core approvals 2, studentlife 1, ops 1), sudah ada sebelum putaran ini
+# merge    git merge-tree HEAD dengan QA-BILL/CORE/IDN/ACC/PPDB → bersih
+#          QA-WEB → konflik di web/src/views/parent/ServiceRequestDetailView.vue (35af3a3 putaran 2 vs b401398 QA-WEB); keduanya memperbaiki tombol unduh hasil, pilih salah satu saat merge
+```
+
+### Untuk review
+- **QA-IDN:** identity `GET /students` menolak finance_manager dan canteen_admin (403). UI dompet/kas memakai input ID siswa manual sebagai fallback. Sebaiknya kedua role diberi akses baca daftar siswa.
+- **QA-ACC:** tipe `source_refs` di luar contoh (`cashier_payment`, `wallet_movement`, `canteen_settlement`, `gateway_transaction`, `recon_exception`) perlu dikenali accounting atau cukup ditampilkan apa adanya.
+- **Receivables:** angka adalah piutang tagihan (net − alokasi verified + reversal). Deposit siswa tidak mengurangi piutang. Cocokkan dengan definisi kontrol menu 059.
+- `ParentTransactionView` sekarang juga dibuka untuk transaksi top-up dompet (tanpa tagihan); periksa tampilannya saat daftar tagihan kosong.
+- POS offline: antrean per perangkat di localStorage; bila browser dibersihkan sebelum sinkron, penjualan tunai yang belum terkirim hilang.
