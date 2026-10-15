@@ -49,6 +49,10 @@ const (
 	ReqTypeQASelfEvalFinalize     = "qa_self_eval_finalize"
 	ReqTypeQASelfEvalReopen       = "qa_self_eval_reopen"
 	ReqTypeRegulatoryReport       = "regulatory_report"
+	// ReqTypeRoleConflictException: identity asks to grant a role that
+	// conflicts with one the user already holds (SoD exception). Core calls
+	// identity back at /internal/role-conflict-exceptions/approval-callback.
+	ReqTypeRoleConflictException = "role_conflict_exception"
 )
 
 // RequestTypeLabels maps request_type to its human-readable Indonesian title.
@@ -92,6 +96,7 @@ var RequestTypeLabels = map[string]string{
 	ReqTypeQASelfEvalFinalize:     "Finalisasi Evaluasi Diri",
 	ReqTypeQASelfEvalReopen:       "Pembukaan Kembali Evaluasi Diri",
 	ReqTypeRegulatoryReport:       "Persetujuan Laporan Regulasi",
+	ReqTypeRoleConflictException:  "Pengecualian Konflik Peran (SoD)",
 }
 
 // KnownRequestTypes lists all supported request types.
@@ -135,6 +140,20 @@ var KnownRequestTypes = []string{
 	ReqTypeQASelfEvalFinalize,
 	ReqTypeQASelfEvalReopen,
 	ReqTypeRegulatoryReport,
+	ReqTypeRoleConflictException,
+}
+
+// RequestTypeSources pins request types that grant privileges to the only
+// service allowed to submit them. A role_conflict_exception approval makes
+// identity grant a conflicting role, so no other service may raise one.
+var RequestTypeSources = map[string]string{
+	ReqTypeRoleConflictException: "identity",
+}
+
+// SourceAllowed reports whether sourceService may submit requestType.
+func SourceAllowed(requestType, sourceService string) bool {
+	want, pinned := RequestTypeSources[requestType]
+	return !pinned || want == sourceService
 }
 
 // Request statuses

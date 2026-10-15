@@ -60,6 +60,8 @@ func (in internalCreateApprovalRequest) validate() string {
 		return fmt.Sprintf("request_type %q tidak dikenal", in.RequestType)
 	case strings.TrimSpace(in.SourceService) == "" || strings.TrimSpace(in.SourceID) == "":
 		return "source_service dan source_id wajib diisi"
+	case !model.SourceAllowed(in.RequestType, in.SourceService):
+		return fmt.Sprintf("request_type %s hanya dapat diajukan oleh layanan %s", in.RequestType, model.RequestTypeSources[in.RequestType])
 	case strings.TrimSpace(in.Title) == "":
 		return "title wajib diisi"
 	case in.Summary == nil:
