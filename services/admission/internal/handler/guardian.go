@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"log"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -227,18 +228,63 @@ func (a *App) CreateApplicant(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	var id string
-	err = a.DB.QueryRowContext(r.Context(),
-		`INSERT INTO applicants(school_id,guardian_id,full_name,nickname,nisn,nik,birth_date,birth_place,gender,previous_school,address,guardian_relationship,source,custom_fields)
-		 VALUES($1,$2,$3,NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,'')::date,NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),NULLIF($11,''),NULLIF($12,''),'guardian',$13)
-		 RETURNING id`,
-		c.SchoolID, c.GuardianID, in.FullName, in.Nickname, in.NISN, in.NIK, in.BirthDate, in.BirthPlace,
-		in.Gender, in.PreviousSchool, in.Address, in.GuardianRelationship, jsonRaw(custom)).Scan(&id)
+	tx, err := a.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "data calon siswa gagal disimpan")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	// Idempotent per guardian: a retry (e.g. after the application step failed)
+	// with the same NISN or NIK reuses the existing applicant instead of
+	// creating a duplicate. The advisory lock serialises concurrent submits.
+	if _, err = tx.ExecContext(r.Context(), `SELECT pg_advisory_xact_lock(hashtext('applicant:'||$1))`, c.GuardianID); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, "data calon siswa gagal disimpan")
+		return
+	}
+	var id, applicationID, appStatus string
+	err = tx.QueryRowContext(r.Context(),
+		`SELECT ap.id,COALESCE(a.id::text,''),COALESCE(a.status,'')
+		 FROM applicants ap
+		 LEFT JOIN LATERAL (SELECT id,status FROM applications WHERE applicant_id=ap.id AND school_id=ap.school_id ORDER BY created_at DESC LIMIT 1) a ON true
+		 WHERE ap.school_id=$1 AND ap.guardian_id=$2 AND ap.deleted_at IS NULL
+		   AND (($3<>'' AND ap.nisn=$3) OR ($4<>'' AND ap.nik=$4))
+		 ORDER BY ap.created_at LIMIT 1`,
+		c.SchoolID, c.GuardianID, in.NISN, in.NIK).Scan(&id, &applicationID, &appStatus)
+	status := http.StatusCreated
+	switch {
+	case err == sql.ErrNoRows:
+		err = tx.QueryRowContext(r.Context(),
+			`INSERT INTO applicants(school_id,guardian_id,full_name,nickname,nisn,nik,birth_date,birth_place,gender,previous_school,address,guardian_relationship,source,custom_fields)
+			 VALUES($1,$2,$3,NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,'')::date,NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),NULLIF($11,''),NULLIF($12,''),'guardian',$13)
+			 RETURNING id`,
+			c.SchoolID, c.GuardianID, in.FullName, in.Nickname, in.NISN, in.NIK, in.BirthDate, in.BirthPlace,
+			in.Gender, in.PreviousSchool, in.Address, in.GuardianRelationship, jsonRaw(custom)).Scan(&id)
+	case err == nil:
+		status = http.StatusOK
+		// Biodata behind a submitted application stays as submitted.
+		if applicationID == "" || appStatus == "draft" {
+			_, err = tx.ExecContext(r.Context(),
+				`UPDATE applicants SET full_name=$1,nickname=NULLIF($2,''),nisn=NULLIF($3,''),nik=NULLIF($4,''),
+				        birth_date=NULLIF($5,'')::date,birth_place=NULLIF($6,''),gender=NULLIF($7,''),
+				        previous_school=NULLIF($8,''),address=NULLIF($9,''),guardian_relationship=NULLIF($10,''),
+				        custom_fields=$12,updated_at=now()
+				 WHERE id=$11`,
+				in.FullName, in.Nickname, in.NISN, in.NIK, in.BirthDate, in.BirthPlace, in.Gender,
+				in.PreviousSchool, in.Address, in.GuardianRelationship, id, jsonRaw(custom))
+		}
+	}
+	if err == nil {
+		err = tx.Commit()
+	}
 	if err != nil {
 		common.WriteError(w, http.StatusBadRequest, "data calon siswa gagal disimpan")
 		return
 	}
-	common.WriteJSON(w, http.StatusCreated, map[string]any{"id": id}, nil)
+	resp := map[string]any{"id": id}
+	if applicationID != "" {
+		resp["application_id"] = applicationID
+	}
+	common.WriteJSON(w, status, resp, nil)
 }
 
 // UpdateApplicant is PUT /guardian/applicants/{id}.
@@ -313,6 +359,15 @@ func (a *App) DeleteApplicant(w http.ResponseWriter, r *http.Request) {
 	if n, _ := res.RowsAffected(); n == 0 {
 		common.WriteError(w, http.StatusNotFound, "calon siswa tidak ditemukan")
 		return
+	}
+	// Soft delete leaves no trace in the admin audit log otherwise.
+	if _, err := a.DB.ExecContext(r.Context(),
+		`INSERT INTO audit_events(school_id,aggregate_type,aggregate_id,action,actor_type,actor_id,actor_name,before_data)
+		 SELECT ap.school_id,'applicant',ap.id::text,'applicant_deleted','guardian',$2,COALESCE(g.name,''),
+		        jsonb_build_object('full_name',ap.full_name,'nisn',ap.nisn,'source',ap.source)
+		 FROM applicants ap LEFT JOIN guardians g ON g.id=ap.guardian_id WHERE ap.id=$1`,
+		id, c.GuardianID); err != nil {
+		log.Printf("audit applicant_deleted %s: %v", id, err)
 	}
 	common.WriteJSON(w, http.StatusOK, map[string]any{"id": id, "deleted": true}, nil)
 }
