@@ -33,6 +33,7 @@ func WriteSuccess(w http.ResponseWriter, data, meta any) {
 
 // WriteError writes an error envelope.
 func WriteError(w http.ResponseWriter, status int, msg string) {
+	msg = SafeMessage(status, msg)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(Envelope{Data: nil, Message: msg, Errors: map[string]string{"message": msg}})

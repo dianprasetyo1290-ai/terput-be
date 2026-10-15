@@ -30,6 +30,7 @@ func WriteJSON(w http.ResponseWriter, status int, data interface{}, meta ...inte
 }
 
 func WriteError(w http.ResponseWriter, status int, message string, details ...interface{}) {
+	message = SafeMessage(status, message)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 

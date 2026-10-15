@@ -10,23 +10,24 @@ import (
 )
 
 type Config struct {
-	AppEnv                string
-	Port                  string
-	DatabaseURL           string
-	JWTSecret             string
-	InternalKey           string
-	CORSOrigins           []string
-	HREncKey              []byte
-	HRBlindKey            string
-	CoreURL               string
-	IdentityURL           string
-	NotificationURL       string
-	HRPublicInternalURL   string
-	StorageRoot           string
-	MaxUploadBytes        int64
-	JobInterval           time.Duration
-	SentryDSN             string
-	SentryEnvironment     string
+	AppEnv              string
+	Port                string
+	DatabaseURL         string
+	JWTSecret           string
+	InternalKey         string
+	CORSOrigins         []string
+	HREncKey            []byte
+	HRBlindKey          string
+	CoreURL             string
+	AccountingURL       string // empty: payroll journals stay pending ("belum dikonfigurasi")
+	IdentityURL         string
+	NotificationURL     string
+	HRPublicInternalURL string
+	StorageRoot         string
+	MaxUploadBytes      int64
+	JobInterval         time.Duration
+	SentryDSN           string
+	SentryEnvironment   string
 }
 
 func Load() (Config, error) {
@@ -59,6 +60,7 @@ func Load() (Config, error) {
 		HREncKey:            encKey,
 		HRBlindKey:          blindKey,
 		CoreURL:             strings.TrimRight(env("CORE_URL", "http://localhost:8091"), "/"),
+		AccountingURL:       strings.TrimRight(os.Getenv("ACCOUNTING_URL"), "/"),
 		IdentityURL:         strings.TrimRight(env("IDENTITY_URL", "http://localhost:8081"), "/"),
 		NotificationURL:     strings.TrimRight(env("NOTIFICATION_URL", "http://localhost:8089"), "/"),
 		HRPublicInternalURL: strings.TrimRight(env("HR_PUBLIC_INTERNAL_URL", "http://localhost:8092"), "/"),

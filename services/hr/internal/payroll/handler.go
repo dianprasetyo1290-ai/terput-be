@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"skci/hr/internal/client"
 	"skci/hr/internal/common"
+	"skci/hr/internal/payroll/calc"
 )
 
 type Handler struct {
@@ -44,13 +47,70 @@ func (h *Handler) CreateComponent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.SchoolID = schoolID
+	c.Code = strings.ToUpper(strings.TrimSpace(c.Code))
+	c.Name = strings.TrimSpace(c.Name)
+	if c.Code == "" || c.Name == "" {
+		common.WriteError(w, http.StatusBadRequest, "kode dan nama komponen wajib diisi")
+		return
+	}
+	if c.Kind != "earning" && c.Kind != "deduction" {
+		common.WriteError(w, http.StatusBadRequest, "jenis komponen harus earning atau deduction")
+		return
+	}
+	if c.Nature == "" {
+		c.Nature = "fixed"
+	}
+	if c.Nature != "fixed" && c.Nature != "variable" {
+		common.WriteError(w, http.StatusBadRequest, "sifat komponen harus fixed atau variable")
+		return
+	}
+	switch c.Calc {
+	case "fixed_amount", "per_hour", "from_structure", "from_input", "overtime":
+	default:
+		common.WriteError(w, http.StatusBadRequest, "metode hitung komponen tidak dikenal")
+		return
+	}
+	if (c.Calc == "per_hour" || c.Calc == "overtime") && (c.RatePerUnitIDR == nil || *c.RatePerUnitIDR <= 0) {
+		common.WriteError(w, http.StatusBadRequest, "tarif per satuan wajib diisi untuk komponen per jam/lembur")
+		return
+	}
+	if c.AccCode == nil || strings.TrimSpace(*c.AccCode) == "" {
+		common.WriteError(w, http.StatusUnprocessableEntity, "akun beban/kewajiban komponen wajib diisi (BR-PRL-04)")
+		return
+	}
 
 	created, err := h.Store.CreateComponent(r.Context(), c)
+	if errors.Is(err, ErrConflict) {
+		common.WriteError(w, http.StatusConflict, "kode komponen sudah dipakai")
+		return
+	}
 	if err != nil {
 		common.InternalError(w, "gagal membuat komponen", err)
 		return
 	}
 	common.WriteJSON(w, http.StatusCreated, created, nil)
+}
+
+// SetComponentAccounts: PUT /payroll/components/{id}/accounts.
+func (h *Handler) SetComponentAccounts(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		AccCode          string  `json:"acc_code"`
+		LiabilityAccCode *string `json:"liability_acc_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.AccCode) == "" {
+		common.WriteError(w, http.StatusBadRequest, "acc_code wajib diisi")
+		return
+	}
+	err := h.Store.SetComponentAccounts(r.Context(), common.EffectiveSchoolID(r), chi.URLParam(r, "id"), strings.TrimSpace(body.AccCode), body.LiabilityAccCode)
+	if errors.Is(err, ErrNotFound) {
+		common.WriteError(w, http.StatusNotFound, "komponen gaji tidak ditemukan")
+		return
+	}
+	if err != nil {
+		common.InternalError(w, "gagal menyimpan mapping akun", err)
+		return
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "mapping akun disimpan"}, nil)
 }
 
 func (h *Handler) SubmitComponentApproval(w http.ResponseWriter, r *http.Request) {
@@ -192,18 +252,34 @@ func (h *Handler) PullAttendance(w http.ResponseWriter, r *http.Request) {
 	schoolID := common.EffectiveSchoolID(r)
 	period := r.URL.Query().Get("period")
 	if period == "" {
-		common.WriteError(w, http.StatusBadRequest, "parameter period wajib diisi")
+		var body struct {
+			Period string `json:"period"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		period = body.Period
+	}
+	if !ValidPeriod(period) {
+		common.WriteError(w, http.StatusBadRequest, "periode wajib diisi dengan format YYYY-MM")
 		return
 	}
 
-	count, err := h.Store.PullAttendance(r.Context(), schoolID, period)
+	res, err := h.Store.PullAttendance(r.Context(), schoolID, period)
+	if errors.Is(err, ErrAttendanceNotSent) {
+		common.WriteError(w, http.StatusConflict, err.Error())
+		return
+	}
 	if err != nil {
 		common.InternalError(w, "gagal menarik data absensi", err)
 		return
 	}
+	msg := fmt.Sprintf("Absensi ditarik: %d input lembur, %d input potongan alpa", res.Overtime, res.Absence)
+	if len(res.Missing) > 0 {
+		msg += ". Belum dikonfigurasi: " + strings.Join(res.Missing, ", ")
+	}
 	common.WriteJSON(w, http.StatusOK, map[string]any{
-		"message": fmt.Sprintf("Berhasil menarik data absensi untuk %d entri", count),
-		"count":   count,
+		"message":        msg,
+		"inserted_count": res.InsertedCount,
+		"result":         res,
 	}, nil)
 }
 
@@ -241,9 +317,38 @@ func (h *Handler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	run.SchoolID = schoolID
+	if !ValidPeriod(run.Period) {
+		common.WriteError(w, http.StatusBadRequest, "periode wajib diisi dengan format YYYY-MM")
+		return
+	}
+	if run.Kind == "" {
+		run.Kind = "regular"
+	}
+	if run.Kind != "regular" && run.Kind != "supplementary" {
+		common.WriteError(w, http.StatusBadRequest, "jenis run harus regular atau supplementary")
+		return
+	}
 
 	created, err := h.Store.CreateRun(r.Context(), run)
-	if err != nil {
+	var unmapped *UnmappedComponentsError
+	switch {
+	case errors.As(err, &unmapped):
+		common.WriteEnvelope(w, http.StatusUnprocessableEntity, common.Envelope{
+			Message: unmapped.Error(),
+			Errors:  map[string]string{"message": unmapped.Error()},
+			Data:    map[string]any{"components": unmapped.Codes},
+		})
+		return
+	case errors.Is(err, ErrDuplicateRegular):
+		common.WriteError(w, http.StatusConflict, err.Error())
+		return
+	case errors.Is(err, ErrConflict):
+		common.WriteError(w, http.StatusConflict, "payroll run dengan kunci yang sama sudah ada")
+		return
+	case err != nil && strings.HasPrefix(err.Error(), "run susulan"):
+		common.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	case err != nil:
 		common.InternalError(w, "gagal membuat payroll run", err)
 		return
 	}
@@ -254,11 +359,27 @@ func (h *Handler) CalculateRun(w http.ResponseWriter, r *http.Request) {
 	schoolID := common.EffectiveSchoolID(r)
 	id := chi.URLParam(r, "id")
 
-	if err := h.Store.CalculateRun(r.Context(), schoolID, id); err != nil {
+	totals, err := h.Store.CalculateRun(r.Context(), schoolID, id)
+	var missing *calc.MissingParamError
+	switch {
+	case errors.Is(err, ErrNotFound):
+		common.WriteError(w, http.StatusNotFound, "payroll run tidak ditemukan")
+		return
+	case errors.Is(err, ErrRunNotEditable):
+		common.WriteError(w, http.StatusConflict, err.Error())
+		return
+	case errors.As(err, &missing):
+		common.WriteError(w, http.StatusUnprocessableEntity, "Parameter statutori belum lengkap: "+missing.What+" belum dikonfigurasi")
+		return
+	case err != nil:
 		common.InternalError(w, "gagal menghitung payroll", err)
 		return
 	}
-	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "payroll berhasil dihitung"}, nil)
+	msg := fmt.Sprintf("payroll berhasil dihitung untuk %d pegawai", totals.Lines)
+	if len(totals.Skipped) > 0 {
+		msg += fmt.Sprintf("; %d pegawai dilewati (lihat rincian)", len(totals.Skipped))
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]any{"message": msg, "totals": totals}, nil)
 }
 
 // SubmitRun opens core approval payroll_run (amount = total net) and only
@@ -322,15 +443,36 @@ func (h *Handler) FinalizeRun(w http.ResponseWriter, r *http.Request) {
 		userID = claims.UserID
 	}
 
-	if err := h.Store.FinalizeRun(r.Context(), schoolID, id, userID); err != nil {
-		if errors.Is(err, ErrConflict) {
-			common.WriteError(w, http.StatusConflict, "payroll belum disetujui di Approval Center")
-			return
-		}
+	journal, err := h.Store.FinalizeRun(r.Context(), schoolID, id, userID)
+	var unmapped *UnmappedComponentsError
+	switch {
+	case errors.Is(err, ErrConflict):
+		common.WriteError(w, http.StatusConflict, "payroll belum disetujui di Approval Center")
+		return
+	case errors.As(err, &unmapped):
+		common.WriteError(w, http.StatusUnprocessableEntity, strings.Join(unmapped.Codes, "; "))
+		return
+	case err != nil:
 		common.InternalError(w, "gagal finalisasi payroll", err)
 		return
 	}
-	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "payroll telah difinalisasi, slip dibuat dan jurnal dibukukan"}, nil)
+	msg := "payroll final, slip gaji diterbitkan"
+	switch journal.Status {
+	case "posted":
+		msg += " dan jurnal dibukukan (" + derefStr(journal.TransNo) + ")"
+	case "failed":
+		msg += "; jurnal gagal dikirim ke akuntansi: " + derefStr(journal.Error) + ". Coba lagi dari menu Jurnal Payroll"
+	default:
+		msg += "; jurnal menunggu: " + derefStr(journal.Error)
+	}
+	common.WriteJSON(w, http.StatusOK, map[string]any{"message": msg, "journal": journal}, nil)
+}
+
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // -----------------------------------------------------------------------------
@@ -357,8 +499,17 @@ func (h *Handler) MyPayslips(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	schoolID := common.EffectiveSchoolID(r)
-
-	list, err := h.Store.ListPayslips(r.Context(), schoolID, claims.UserID)
+	empID, err := h.Store.EmployeeIDByUser(r.Context(), schoolID, claims.UserID)
+	if errors.Is(err, ErrNotFound) {
+		common.WriteJSON(w, http.StatusOK, []Payslip{}, nil)
+		return
+	}
+	if err != nil {
+		common.InternalError(w, "gagal memuat slip gaji", err)
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	list, err := h.Store.ListPayslips(r.Context(), schoolID, empID, "", limit)
 	if err != nil {
 		common.InternalError(w, "gagal memuat slip gaji", err)
 		return
@@ -368,9 +519,9 @@ func (h *Handler) MyPayslips(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListPayslips(w http.ResponseWriter, r *http.Request) {
 	schoolID := common.EffectiveSchoolID(r)
-	empID := r.URL.Query().Get("employee_id")
-
-	list, err := h.Store.ListPayslips(r.Context(), schoolID, empID)
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	list, err := h.Store.ListPayslips(r.Context(), schoolID, q.Get("employee_id"), q.Get("run_id"), limit)
 	if err != nil {
 		common.InternalError(w, "gagal memuat slip gaji", err)
 		return
@@ -380,10 +531,10 @@ func (h *Handler) ListPayslips(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListJournals(w http.ResponseWriter, r *http.Request) {
 	schoolID := common.EffectiveSchoolID(r)
-	list, err := h.Store.ListJournals(r.Context(), schoolID)
+	list, err := h.Store.ListJournals(r.Context(), schoolID, r.URL.Query().Get("period"))
 	if err != nil {
 		common.InternalError(w, "gagal memuat jurnal payroll", err)
 		return
 	}
-	common.WriteJSON(w, http.StatusOK, list, nil)
+	common.WriteJSON(w, http.StatusOK, map[string]any{"items": list, "accounting_configured": h.Store.Accounting.Configured()}, nil)
 }

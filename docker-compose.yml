@@ -417,6 +417,7 @@ services:
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
       IDENTITY_URL: http://identity:${IDENTITY_PORT}
       CORE_URL: http://core:${CORE_PORT:-8091}
+      ACCOUNTING_URL: http://accounting:80
       NOTIFICATION_URL: http://notification:${NOTIFICATION_PORT}
       STORAGE_ROOT: /data/private
       HR_PUBLIC_INTERNAL_URL: http://hr:${HR_PORT}

@@ -13,13 +13,13 @@ import (
 )
 
 type App struct {
-	Config    *config.Config
-	QAStore   *qa.Store
-	GovStore  *govreport.Store
-	QAHandler *qa.Handler
+	Config     *config.Config
+	QAStore    *qa.Store
+	GovStore   *govreport.Store
+	QAHandler  *qa.Handler
 	GovHandler *govreport.Handler
-	Clients   *client.Clients
-	Storage   *storage.LocalStorage
+	Clients    *client.Clients
+	Storage    *storage.LocalStorage
 }
 
 func NewApp(cfg *config.Config, qaStore *qa.Store, govStore *govreport.Store, qaHandler *qa.Handler, govHandler *govreport.Handler, clients *client.Clients, st *storage.LocalStorage) *App {
@@ -56,14 +56,14 @@ func (a *App) InternalApprovalCallback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if payload.RequestType == "regulatory_report" {
-		status := "approved"
-		if payload.Decision == "rejected" {
-			status = "rejected"
+		id, schoolID, err := a.GovStore.ApplyApprovalDecision(r.Context(), payload.ApprovalID, payload.Decision)
+		if err != nil {
+			common.WriteError(w, http.StatusInternalServerError, "failed to process approval callback")
+			return
 		}
-		query := `UPDATE regulatory_reports SET status = $2, updated_at = now() WHERE approval_id = $1::uuid`
-		_ = a.QAStore.RecordAudit(r.Context(), "", "regulatory_report", payload.SourceID, "approval_"+payload.Decision, payload.DecidedBy, "", nil, map[string]string{"decision": payload.Decision}, payload.Comment)
-		_ = status
-		_ = query
+		if id != "" {
+			_ = a.QAStore.RecordAudit(r.Context(), schoolID, "regulatory_report", id, "approval_"+payload.Decision, payload.DecidedBy, "", nil, map[string]string{"decision": payload.Decision}, payload.Comment)
+		}
 	}
 
 	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "callback processed successfully"})

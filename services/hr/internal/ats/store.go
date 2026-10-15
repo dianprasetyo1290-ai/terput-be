@@ -20,6 +20,35 @@ var (
 
 type Store struct {
 	DB *sql.DB
+	// Offer salaries are encrypted like employment_assignments.base_salary_enc
+	// (crypto.Service, aad = school id). Nil only in unit tests.
+	EncryptAmount func(amount int64, aad string) ([]byte, error)
+	DecryptAmount func(raw []byte, aad string) (int64, error)
+}
+
+func (s *Store) sealSalary(amount int64, schoolID string) ([]byte, error) {
+	if s.EncryptAmount == nil {
+		return nil, errors.New("ats store has no salary encryptor")
+	}
+	return s.EncryptAmount(amount, schoolID)
+}
+
+// openSalary decrypts an offer salary. Rows written before encryption held
+// the decimal text; they are still read so existing offers keep working.
+func (s *Store) openSalary(raw []byte, schoolID string) int64 {
+	if len(raw) == 0 {
+		return 0
+	}
+	if s.DecryptAmount != nil {
+		if v, err := s.DecryptAmount(raw, schoolID); err == nil {
+			return v
+		}
+	}
+	var v int64
+	if _, err := fmt.Sscanf(string(raw), "%d", &v); err == nil {
+		return v
+	}
+	return 0
 }
 
 func NewStore(db *sql.DB) *Store {
@@ -662,15 +691,19 @@ func (s *Store) CreateOffer(ctx context.Context, off Offer) (*Offer, error) {
 	off.OutOfRange = calc.SalaryOutOfRange(off.BaseSalaryIDR, minSalary, maxSalary)
 	off.Status = "draft"
 
+	salaryEnc, err := s.sealSalary(off.BaseSalaryIDR, off.SchoolID)
+	if err != nil {
+		return nil, err
+	}
 	var id string
-	err := s.DB.QueryRowContext(ctx, `
+	err = s.DB.QueryRowContext(ctx, `
 		INSERT INTO offers (
 			school_id, application_id, position_id, start_date, employment_type,
 			base_salary_enc, out_of_range, status
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id, created_at, updated_at
 	`, off.SchoolID, off.ApplicationID, off.PositionID, off.StartDate,
-		off.EmploymentType, []byte(fmt.Sprintf("%d", off.BaseSalaryIDR)),
+		off.EmploymentType, salaryEnc,
 		off.OutOfRange, off.Status).Scan(&id, &off.CreatedAt, &off.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -709,9 +742,7 @@ func (s *Store) GetOffer(ctx context.Context, schoolID, id string) (*Offer, erro
 		return nil, err
 	}
 	off.StartDate = startDate.Format("2006-01-02")
-	var salary int64
-	_, _ = fmt.Sscanf(string(salaryEnc), "%d", &salary)
-	off.BaseSalaryIDR = salary
+	off.BaseSalaryIDR = s.openSalary(salaryEnc, off.SchoolID)
 	return &off, nil
 }
 
@@ -755,9 +786,7 @@ func (s *Store) ListOffers(ctx context.Context, schoolID string, applicationID s
 			return nil, err
 		}
 		off.StartDate = startDate.Format("2006-01-02")
-		var salary int64
-		_, _ = fmt.Sscanf(string(salaryEnc), "%d", &salary)
-		off.BaseSalaryIDR = salary
+		off.BaseSalaryIDR = s.openSalary(salaryEnc, off.SchoolID)
 		list = append(list, off)
 	}
 	return list, rows.Err()

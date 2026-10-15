@@ -851,7 +851,7 @@ func TestHandlerE2E(t *testing.T) {
 
 		// 13a. Component approval submission
 		compCode := fmt.Sprintf("TJ_%d", time.Now().UnixNano()%100000)
-		compBody := fmt.Sprintf(`{"code":"%s","name":"Tunjangan Uji","kind":"earning","nature":"fixed","taxable":true,"bpjs_base":false,"calc":"fixed_amount","sort":10}`, compCode)
+		compBody := fmt.Sprintf(`{"code":"%s","name":"Tunjangan Uji","kind":"earning","nature":"fixed","taxable":true,"bpjs_base":false,"calc":"fixed_amount","sort":10,"acc_code":"5103"}`, compCode)
 		rr := call("POST", "/payroll/components", compBody, false)
 		if rr.Code != http.StatusCreated {
 			t.Fatalf("create component failed (%d): %s", rr.Code, rr.Body.String())
