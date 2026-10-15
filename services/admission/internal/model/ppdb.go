@@ -528,12 +528,18 @@ func ValidateNIK(nik string) error {
 	return nil
 }
 
-// MaskNIK keeps only the last four digits visible.
+// MaskNIK hides the personal digits of a NIK: a full number keeps its
+// 4-digit region code and the last four digits (3201********0001); a short
+// value keeps at most the last four digits.
 func MaskNIK(nik string) string {
-	if len(nik) <= 4 {
-		return strings.Repeat("*", len(nik))
+	switch n := len(nik); {
+	case n <= 4:
+		return strings.Repeat("*", n)
+	case n < 12:
+		return strings.Repeat("*", n-4) + nik[n-4:]
+	default:
+		return nik[:4] + strings.Repeat("*", n-8) + nik[n-4:]
 	}
-	return strings.Repeat("*", len(nik)-4) + nik[len(nik)-4:]
 }
 
 // ---------------------------------------------------------------------------

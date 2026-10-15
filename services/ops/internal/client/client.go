@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"skci/ops/internal/common"
 )
 
 // HTTPError is a non-2xx downstream response.
@@ -65,7 +67,7 @@ func New(identityURL, coreURL, notifURL, internalKey string, featureTTL time.Dur
 		NotifURL:    strings.TrimRight(notifURL, "/"),
 		InternalKey: internalKey,
 		FeatureTTL:  featureTTL,
-		HTTP:        &http.Client{Timeout: 8 * time.Second},
+		HTTP:        &http.Client{Timeout: 8 * time.Second, Transport: common.CorrelationTransport{}},
 		featCache:   map[string]cachedFeatures{},
 	}
 }

@@ -47,9 +47,11 @@ func (a *App) Router() http.Handler {
 		payStore.DecryptAmount = a.Crypto.DecryptAmount
 	}
 	payStore.Accounting = payroll.NewAccountingClient(a.Config.AccountingURL, a.Config.InternalKey)
+	payStore.Reporter = common.NewExceptionReporter(a.Config.CoreURL, a.Config.InternalKey, "hr")
 	payHandler := payroll.NewHandler(payStore, a.Client)
 
 	r.Use(middleware.RequestID)
+	r.Use(common.CorrelationMiddleware)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -351,7 +353,8 @@ func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 					w.Header().Set("Access-Control-Allow-Origin", origin)
 					w.Header().Set("Access-Control-Allow-Credentials", "true")
 					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-					w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-Internal-Key, Idempotency-Key")
+					w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-Internal-Key, Idempotency-Key, "+common.CorrelationHeader)
+					w.Header().Set("Access-Control-Expose-Headers", common.CorrelationHeader)
 				}
 			}
 			if r.Method == http.MethodOptions {

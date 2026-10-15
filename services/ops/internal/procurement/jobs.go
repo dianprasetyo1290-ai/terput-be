@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"skci/ops/internal/client"
+	"skci/ops/internal/common"
 )
 
 type SyncJob struct {
@@ -20,7 +21,17 @@ type SyncJob struct {
 	accountingURL string
 	internalKey   string
 	httpClient    *http.Client
+	// Reporter queues vendors that exhausted their retries in core's
+	// exception queue (kind dead_letter). Nil -> the failure is only logged.
+	Reporter *common.ExceptionReporter
 }
+
+// vendorSyncMaxAttempts: deliveries before a vendor sync is dead-lettered.
+const vendorSyncMaxAttempts = 5
+
+// vendorSyncTopic names the queue in dead-letter reports and their keys
+// (dead_letter:ops:vendor_accounting_sync:<vendor_id>).
+const vendorSyncTopic = "vendor_accounting_sync"
 
 func NewSyncJob(db *sql.DB, c *client.Client, accountingURL, internalKey string) *SyncJob {
 	return &SyncJob{
@@ -28,7 +39,7 @@ func NewSyncJob(db *sql.DB, c *client.Client, accountingURL, internalKey string)
 		client:        c,
 		accountingURL: accountingURL,
 		internalKey:   internalKey,
-		httpClient:    &http.Client{Timeout: 8 * time.Second},
+		httpClient:    &http.Client{Timeout: 8 * time.Second, Transport: common.CorrelationTransport{}},
 	}
 }
 
@@ -40,9 +51,9 @@ func (j *SyncJob) RunSyncVendors(ctx context.Context) error {
 		       v.code, v.name, v.status, v.npwp_enc
 		FROM vendor_accounting_sync s
 		JOIN vendors v ON v.id = s.vendor_id
-		WHERE s.status = 'pending' AND s.attempts < 5
+		WHERE s.status = 'pending' AND s.attempts < $1
 		LIMIT 50
-	`)
+	`, vendorSyncMaxAttempts)
 	if err != nil {
 		return err
 	}
@@ -98,12 +109,10 @@ func (j *SyncJob) RunSyncVendors(ctx context.Context) error {
 
 		resp, err := j.httpClient.Do(req)
 		if err != nil {
-			// Network error
-			_, _ = j.db.ExecContext(ctx, `
-				UPDATE vendor_accounting_sync
-				SET attempts = attempts + 1, last_error = $1, updated_at = now()
-				WHERE vendor_id = $2
-			`, err.Error(), it.vendorID)
+			// A network error counts as a failed delivery too, so an
+			// unreachable accounting service ends in the dead-letter queue
+			// instead of leaving the row pending forever.
+			j.recordFailure(ctx, it.vendorID, it.schoolID, it.attempts, "jaringan: "+err.Error())
 			continue
 		}
 		respBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -124,32 +133,38 @@ func (j *SyncJob) RunSyncVendors(ctx context.Context) error {
 				WHERE vendor_id = $1
 			`, it.vendorID)
 		} else {
-			// Other error
-			errMsg := fmt.Sprintf("status %d: %s", resp.StatusCode, string(respBytes))
-			newAttempts := it.attempts + 1
-			newStatus := "pending"
-			if newAttempts >= 5 {
-				newStatus = "failed"
-				// Report dead letter exception to core
-				if j.client != nil {
-					_ = j.client.PostException(ctx, client.Exception{
-						SchoolID:       it.schoolID,
-						SourceService:  "ops",
-						Kind:           "dead_letter",
-						Severity:       "warning",
-						ErrorMessage:   "Gagal sinkronisasi vendor ke Accounting Engine: " + errMsg,
-						CorrelationID:  it.vendorID,
-						MaxAttempts:    5,
-						IdempotencyKey: fmt.Sprintf("vendor_sync_ex:%s", it.vendorID),
-					})
-				}
-			}
-			_, _ = j.db.ExecContext(ctx, `
-				UPDATE vendor_accounting_sync
-				SET status = $1, attempts = $2, last_error = $3, updated_at = now()
-				WHERE vendor_id = $4
-			`, newStatus, newAttempts, errMsg, it.vendorID)
+			j.recordFailure(ctx, it.vendorID, it.schoolID, it.attempts, fmt.Sprintf("status %d: %s", resp.StatusCode, string(respBytes)))
 		}
 	}
 	return nil
+}
+
+// recordFailure counts one failed delivery; at vendorSyncMaxAttempts the row
+// is marked failed and reported to core as a dead letter.
+func (j *SyncJob) recordFailure(ctx context.Context, vendorID, schoolID string, attempts int, errMsg string) {
+	newAttempts := attempts + 1
+	newStatus := "pending"
+	if newAttempts >= vendorSyncMaxAttempts {
+		newStatus = "failed"
+		j.reportDeadLetter(ctx, vendorID, schoolID, newAttempts, errMsg)
+	}
+	if _, err := j.db.ExecContext(ctx, `
+		UPDATE vendor_accounting_sync
+		SET status = $1, attempts = $2, last_error = $3, updated_at = now()
+		WHERE vendor_id = $4
+	`, newStatus, newAttempts, errMsg, vendorID); err != nil {
+		log.Printf("vendor sync %s: record failure: %v", vendorID, err)
+	}
+}
+
+func (j *SyncJob) reportDeadLetter(ctx context.Context, vendorID, schoolID string, attempts int, errMsg string) {
+	if j.Reporter == nil {
+		log.Printf("vendor sync %s: dead letter not reported (no reporter): %s", vendorID, errMsg)
+		return
+	}
+	if err := j.Reporter.ReportDeadLetter(ctx, schoolID, vendorSyncTopic, vendorID,
+		"Gagal sinkronisasi vendor ke Accounting Engine: "+errMsg, attempts,
+		map[string]any{"vendor_id": vendorID}); err != nil {
+		log.Printf("vendor sync %s: report dead letter: %v", vendorID, err)
+	}
 }

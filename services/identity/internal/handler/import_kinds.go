@@ -340,6 +340,8 @@ func (a *App) importGuardians(w http.ResponseWriter, r *http.Request, in kindImp
 			common.WriteError(w, http.StatusConflict, "Sebagian data baru saja diubah oleh proses lain. Ulangi pratinjau")
 			return
 		}
+		a.reportImportFailure(r, in.kind, in.schoolID, in.fileName, "Impor orang tua gagal disimpan: "+err.Error(),
+			map[string]any{"rows": len(valid)})
 		common.WriteDBError(w, err, "Gagal menyimpan data impor")
 		return
 	}
@@ -618,6 +620,9 @@ func (a *App) importClasses(w http.ResponseWriter, r *http.Request, in kindImpor
 			}
 			if cid, err = a.Academic.FindOrCreateClassroom(in.schoolID, yearID, c.ClassName, grade, wali); err != nil {
 				common.CaptureError(err)
+				a.reportImportFailure(r, in.kind, in.schoolID, in.fileName,
+					fmt.Sprintf("Impor kelas berhenti di baris %d: layanan akademik gagal membuat kelas %q: %v", c.Number, c.ClassName, err),
+					map[string]any{"enrolled": enrolled, "failed_row": c.Number})
 				common.WriteJSONMsg(w, http.StatusBadGateway, map[string]any{"enrolled": enrolled, "failed_row": c.Number}, nil,
 					fmt.Sprintf("Layanan akademik tidak dapat membuat kelas %q (baris %d). %d siswa sudah ditempatkan; ulangi impor file yang sama dengan aman — siswa yang sudah masuk tidak digandakan", c.ClassName, c.Number, enrolled))
 				return
@@ -626,6 +631,9 @@ func (a *App) importClasses(w http.ResponseWriter, r *http.Request, in kindImpor
 		}
 		if err := a.Academic.EnrollStudent(in.schoolID, cid, c.StudentUserID); err != nil {
 			common.CaptureError(err)
+			a.reportImportFailure(r, in.kind, in.schoolID, in.fileName,
+				fmt.Sprintf("Impor kelas berhenti di baris %d: layanan akademik gagal menempatkan siswa: %v", c.Number, err),
+				map[string]any{"enrolled": enrolled, "failed_row": c.Number})
 			common.WriteJSONMsg(w, http.StatusBadGateway, map[string]any{"enrolled": enrolled, "failed_row": c.Number}, nil,
 				fmt.Sprintf("Layanan akademik gagal menempatkan siswa baris %d. %d siswa sudah ditempatkan; ulangi impor file yang sama dengan aman — siswa yang sudah masuk tidak digandakan", c.Number, enrolled))
 			return
@@ -651,6 +659,8 @@ func (a *App) importClasses(w http.ResponseWriter, r *http.Request, in kindImpor
 		err = tx.Commit()
 	}
 	if err != nil {
+		a.reportImportFailure(r, in.kind, in.schoolID, in.fileName, "Kelas tersimpan tetapi riwayat impor gagal dicatat: "+err.Error(),
+			map[string]any{"enrolled": enrolled})
 		common.WriteDBError(w, err, "Kelas tersimpan tetapi riwayat impor gagal dicatat")
 		return
 	}

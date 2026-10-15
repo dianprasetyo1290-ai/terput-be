@@ -161,21 +161,25 @@ func (a *App) httpClient() *http.Client {
 	if a.HTTPClient != nil {
 		return a.HTTPClient
 	}
-	return &http.Client{Timeout: 8 * time.Second}
+	return &http.Client{Timeout: 8 * time.Second, Transport: common.CorrelationTransport{}}
 }
 
 type ctxKeyCorrelation struct{}
 
 func withCorrelation(ctx context.Context, r *http.Request) context.Context {
-	if cid := r.Header.Get("X-Correlation-ID"); cid != "" {
+	if cid := r.Header.Get(common.CorrelationHeader); cid != "" {
 		return context.WithValue(ctx, ctxKeyCorrelation{}, cid)
 	}
 	return ctx
 }
 
+// correlationFromCtx: the id withCorrelation stored, else the one
+// common.CorrelationMiddleware put on the request context.
 func correlationFromCtx(ctx context.Context) string {
-	v, _ := ctx.Value(ctxKeyCorrelation{}).(string)
-	return v
+	if v, _ := ctx.Value(ctxKeyCorrelation{}).(string); v != "" {
+		return v
+	}
+	return common.CorrelationID(ctx)
 }
 
 // upstreamMessage turns an integration error into a readable sentence.

@@ -75,6 +75,9 @@ func setupTestDB(t *testing.T) (*sql.DB, *crypto.Service, func()) {
 			DROP TABLE IF EXISTS item_categories CASCADE;
 			DROP TABLE IF EXISTS doc_sequences CASCADE;
 			DROP TABLE IF EXISTS audit_events CASCADE;
+			DROP TABLE IF EXISTS work_order_costs, work_order_events, work_order_photos, work_orders,
+				maintenance_schedules, room_bookings, room_fixed_schedules, room_facilities,
+				rooms, floors, buildings CASCADE;
 		`)
 		db.Close()
 	}

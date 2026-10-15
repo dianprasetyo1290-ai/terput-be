@@ -21,6 +21,7 @@ import (
 func (a *App) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
+	r.Use(common.CorrelationMiddleware)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(common.SentryMiddleware())
@@ -562,7 +563,8 @@ func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 						w.Header().Set("Access-Control-Allow-Origin", origin)
 						w.Header().Set("Access-Control-Allow-Credentials", "true")
 						w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-						w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-Internal-Key, Idempotency-Key")
+						w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-Internal-Key, Idempotency-Key, "+common.CorrelationHeader)
+						w.Header().Set("Access-Control-Expose-Headers", common.CorrelationHeader)
 						break
 					}
 				}

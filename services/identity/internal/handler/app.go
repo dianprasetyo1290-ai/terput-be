@@ -35,6 +35,9 @@ type App struct {
 	SelfURL string
 	// HTTPClient for calls to core/notification (nil -> 8 s default).
 	HTTPClient *http.Client
+	// Exceptions reports failed imports to core's exception queue (nil ->
+	// not reported).
+	Exceptions *common.ExceptionReporter
 
 	policyCache policyCache
 }

@@ -8,10 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
+
+	"skci/hr/internal/common"
 )
 
 // AccountingClient posts payroll journals to the accounting service
@@ -27,7 +30,7 @@ func NewAccountingClient(baseURL, internalKey string) *AccountingClient {
 	return &AccountingClient{
 		BaseURL:     strings.TrimRight(strings.TrimSpace(baseURL), "/"),
 		InternalKey: internalKey,
-		HTTP:        &http.Client{Timeout: 15 * time.Second},
+		HTTP:        &http.Client{Timeout: 15 * time.Second, Transport: common.CorrelationTransport{}},
 	}
 }
 
@@ -258,6 +261,7 @@ func (s *Store) PostJournal(ctx context.Context, schoolID, journalID string) (*P
 	case perr != nil:
 		_, err = s.DB.ExecContext(ctx, `UPDATE payroll_journals SET status = 'failed', error = $2, attempts = attempts + 1, updated_at = now() WHERE id = $1`,
 			journalID, perr.Error())
+		s.reportJournalFailure(ctx, schoolID, journalID, reference, period, perr)
 	default:
 		_, err = s.DB.ExecContext(ctx, `UPDATE payroll_journals SET status = 'posted', trans_no = $2, error = NULL, attempts = attempts + 1, updated_at = now() WHERE id = $1`,
 			journalID, transNo)
@@ -277,4 +281,27 @@ func (s *Store) getJournal(ctx context.Context, schoolID, id string) (*PayrollJo
 		return nil, ErrNotFound
 	}
 	return &list[0], nil
+}
+
+// JournalPostingKey is the idempotency key of a payroll journal's failure in
+// core's exception queue: every failed retry bumps the same item.
+func JournalPostingKey(journalID string) string { return "journal_posting:hr:" + journalID }
+
+// reportJournalFailure queues a failed posting for Accounting and payroll
+// (core role x kind matrix: journal_posting). Best effort: the journal row
+// already records the failure and the retry button stays on Jurnal Payroll.
+func (s *Store) reportJournalFailure(ctx context.Context, schoolID, journalID, reference, period string, perr error) {
+	if s.Reporter == nil {
+		return
+	}
+	if err := s.Reporter.Report(ctx, common.ExceptionReport{
+		SchoolID:       schoolID,
+		Kind:           common.ExceptionKindJournalPosting,
+		Severity:       common.ExceptionSeverityCritical,
+		ErrorMessage:   "Jurnal payroll gagal dikirim ke akuntansi: " + perr.Error(),
+		PayloadSummary: map[string]any{"journal_id": journalID, "reference": reference, "period": period},
+		IdempotencyKey: JournalPostingKey(journalID),
+	}); err != nil {
+		log.Printf("payroll journal %s: report exception: %v", journalID, err)
+	}
 }
