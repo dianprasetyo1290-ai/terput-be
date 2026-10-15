@@ -419,11 +419,14 @@ func TestPurposeChargeAndHook(t *testing.T) {
 	m := f.method("va_topup", gateway.CapVA, "BNIN")
 	ctx := context.Background()
 	topupID := genUUID()
+	// Every key is unique to this run so leftovers from earlier runs or
+	// other tests can never answer with "sedang diproses".
+	badKey := "k1-" + topupID
 
-	if _, err := f.app.CreatePurposeCharge(ctx, f.schoolID, f.guardianID, f.studentID, m, PurposeWalletTopup, "", "k1", 200000); err == nil {
+	if _, err := f.app.CreatePurposeCharge(ctx, f.schoolID, f.guardianID, f.studentID, m, PurposeWalletTopup, "", badKey, 200000); err == nil {
 		t.Fatal("purpose_ref is required")
 	}
-	if _, err := f.app.CreatePurposeCharge(ctx, f.schoolID, f.guardianID, f.studentID, m, PurposeBills, topupID, "k1", 200000); err == nil {
+	if _, err := f.app.CreatePurposeCharge(ctx, f.schoolID, f.guardianID, f.studentID, m, PurposeBills, topupID, badKey, 200000); err == nil {
 		t.Fatal("bills purpose must be refused")
 	}
 	txID, err := f.app.CreatePurposeCharge(ctx, f.schoolID, f.guardianID, f.studentID, m, PurposeWalletTopup, topupID, "wallet-topup:"+topupID, 200000)
