@@ -94,7 +94,7 @@ BEGIN
   IF v_class_7a IS NOT NULL THEN
     INSERT INTO class_enrollments (school_id, academic_year_id, classroom_id, student_user_id, status)
     VALUES (v_school_id, v_ay_id, v_class_7a, v_siswa, 'active')
-    ON CONFLICT (academic_year_id, student_user_id) DO UPDATE SET classroom_id = v_class_7a, status = 'active';
+    ON CONFLICT (academic_year_id, student_user_id) DO NOTHING;
   END IF;
 
 END $$;

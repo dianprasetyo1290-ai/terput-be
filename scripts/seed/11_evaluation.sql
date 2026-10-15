@@ -35,9 +35,7 @@ BEGIN
             'kegiatan_penutup', 'Refleksi dan kesimpulan bersama siswa'
         ),
         'published'
-    ) ON CONFLICT (id) DO UPDATE SET
-        title = EXCLUDED.title,
-        status = EXCLUDED.status;
+    ) ON CONFLICT (id) DO NOTHING;
 
     -- 2. Prota (Program Tahunan)
     INSERT INTO prota (
@@ -77,8 +75,6 @@ BEGIN
         v_eval_id, v_school_id, v_academic_year_id, 'Supervisi Akademik & Kinerja Guru TP 2026/2027 Ganjil',
         'Semester 1', CURRENT_DATE - INTERVAL '10 days', CURRENT_DATE + INTERVAL '60 days', true,
         v_kepsek_id, jsonb_build_array(v_guru_id), jsonb_build_array('c1000000-0000-0000-0000-000000000001'), 'Dr. H. Ahmad Dahlan, M.Pd'
-    ) ON CONFLICT (id) DO UPDATE SET
-        published = true,
-        publish_end_date = CURRENT_DATE + INTERVAL '60 days';
+    ) ON CONFLICT (id) DO NOTHING;
 
 END $$;

@@ -20,8 +20,7 @@ BEGIN
     -- 1. HR Settings
     INSERT INTO hr_settings (school_id, contract_reminder_days, document_reminder_days, geolocation_enabled, timezone)
     VALUES (v_school_id, 30, 30, false, 'Asia/Jakarta')
-    ON CONFLICT (school_id) DO UPDATE SET
-        timezone = 'Asia/Jakarta';
+    ON CONFLICT (school_id) DO NOTHING;
 
     -- 2. Departments
     INSERT INTO departments (id, school_id, code, name, active)
@@ -48,9 +47,7 @@ BEGIN
     ) VALUES
         (v_emp_guru, v_school_id, v_guru_user_id, 'EMP-2026-001', 'Guru Teratai', 'guru@teratai.sch.id', 'K/1', '2024-07-01', 'active'),
         (v_emp_pegawai, v_school_id, v_pegawai_user_id, 'EMP-2026-002', 'Staf Pegawai Teratai', 'pegawai@teratai.sch.id', 'TK/0', '2025-01-10', 'active')
-    ON CONFLICT (school_id, employee_no) DO UPDATE SET
-        status = 'active',
-        full_name = EXCLUDED.full_name;
+    ON CONFLICT (school_id, employee_no) DO NOTHING;
 
     -- 6. Employment Assignments
     INSERT INTO employment_assignments (
@@ -82,8 +79,7 @@ BEGIN
         ('94200000-0000-0000-0000-000000000002', v_school_id, v_emp_guru, CURRENT_DATE, 'hadir', CURRENT_DATE + TIME '06:58:00', NULL, 'ess', 'Check-in pagi hari'),
         ('94200000-0000-0000-0000-000000000003', v_school_id, v_emp_pegawai, CURRENT_DATE - INTERVAL '1 day', 'hadir', (CURRENT_DATE - INTERVAL '1 day') + TIME '07:10:00', (CURRENT_DATE - INTERVAL '1 day') + TIME '16:00:00', 'ess', 'Hadir tepat waktu'),
         ('94200000-0000-0000-0000-000000000004', v_school_id, v_emp_pegawai, CURRENT_DATE, 'hadir', CURRENT_DATE + TIME '07:05:00', NULL, 'ess', 'Check-in kantor')
-    ON CONFLICT (employee_id, work_date) DO UPDATE SET
-        status = EXCLUDED.status;
+    ON CONFLICT (employee_id, work_date) DO NOTHING;
 
     -- 10. Training Categories & Courses
     INSERT INTO training_categories (id, school_id, name)
@@ -110,8 +106,6 @@ BEGIN
         '96100000-0000-0000-0000-000000000001', v_school_id, v_req_id, 'guru-matematika-smp-2026',
         'Lowongan Guru Matematika SMP Teratai Putih', 'Dibutuhkan pendidik berdedikasi tinggi untuk mengajar matematika di tingkat SMP.',
         'S1 Pendidikan Matematika dari PTN/PTS terakreditasi A, mampu berbahasa Inggris aktif.', 'full_time', CURRENT_DATE + INTERVAL '45 days', 'open', now()
-    ) ON CONFLICT (school_id, slug) DO UPDATE SET
-        status = 'open',
-        closes_on = CURRENT_DATE + INTERVAL '45 days';
+    ) ON CONFLICT (school_id, slug) DO NOTHING;
 
 END $$;

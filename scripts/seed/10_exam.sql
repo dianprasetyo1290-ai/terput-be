@@ -68,9 +68,7 @@ BEGIN
         (v_exam_id, v_school_id, v_academic_year_id, v_term_id, v_exam_type_id, 'Penilaian Tengah Semester: Matematika 7A',
          'Ujian STS Matematika materi Bilangan Bulat dan Aljabar Dasar.',
          v_classroom_id, v_subject_id, v_guru_id, now() - interval '1 hour', now() + interval '30 days', false, true, now(), v_guru_id, v_folder_id, 'academic')
-    ON CONFLICT (id) DO UPDATE SET
-        is_published = true,
-        end_at = now() + interval '30 days';
+    ON CONFLICT (id) DO NOTHING;
 
     -- 6. Exam Classrooms
     INSERT INTO exam_classrooms (exam_id, classroom_id)
@@ -89,8 +87,6 @@ BEGIN
         id, school_id, academic_year_id, user_id, code, valid_from, valid_until, created_by
     ) VALUES
         ('b7000000-0000-0000-0000-000000000001', v_school_id, v_academic_year_id, v_student_id, 'TPGS26', CURRENT_DATE, CURRENT_DATE + interval '30 days', v_admin_id)
-    ON CONFLICT (school_id, user_id) DO UPDATE SET
-        code = EXCLUDED.code,
-        valid_until = EXCLUDED.valid_until;
+    ON CONFLICT (school_id, user_id) DO NOTHING;
 
 END $$;

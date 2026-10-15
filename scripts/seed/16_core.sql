@@ -50,8 +50,7 @@ BEGIN
         id, school_id, category_id, requester_user_id, student_user_id, subject, description, status, assignee_user_id
     ) VALUES
         (v_sr_id, v_school_id, v_cat_sr, v_wali_id, v_student_id, 'Surat Keterangan Aktif untuk Tunjangan Kantor', 'Mohon diterbitkan surat keterangan aktif belajar untuk keperluan verifikasi instansi.', 'in_progress', v_admin_id)
-    ON CONFLICT (id) DO UPDATE SET
-        status = 'in_progress';
+    ON CONFLICT (id) DO NOTHING;
 
     -- 5. Service Desk Tickets
     INSERT INTO sd_tickets (
@@ -92,8 +91,7 @@ BEGIN
         4500000, v_admin_id, 'pending', 1, 'http://ops:8093/internal/approvals/callback',
         'corr-po-2026-001', 'idemp-po-2026-001',
         jsonb_build_object('flow_id', v_flow_proc, 'flow_name', 'Alur Persetujuan Pengadaan Barang Sekolah')
-    ) ON CONFLICT (id) DO UPDATE SET
-        status = 'pending';
+    ) ON CONFLICT (id) DO NOTHING;
 
     INSERT INTO approval_steps (id, school_id, request_id, seq, approver_kind, approver_role, status)
     SELECT '78000000-0000-0000-0000-000000000001', v_school_id, '77000000-0000-0000-0000-000000000001', 1, 'role', 'admin', 'pending'

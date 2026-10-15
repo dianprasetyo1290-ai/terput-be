@@ -32,9 +32,7 @@ BEGIN
         'draft', 'semester', '', 'Ananda Budi memiliki pemahaman yang sangat baik dalam logika matematika dan nalar kritis. Pertahankan prestasinya!',
         58, 2, 1, 0,
         'Budi Santoso', '0087654321', 'Kelas VII A', 'Semester 1 (Ganjil)'
-    ) ON CONFLICT (student_id, classroom_id, term_id, report_type, period_label) DO UPDATE SET
-        class_teacher_note = EXCLUDED.class_teacher_note,
-        attendance_hadir = EXCLUDED.attendance_hadir;
+    ) ON CONFLICT (student_id, classroom_id, term_id, report_type, period_label) DO NOTHING;
 
     -- 3. Report Card Subjects (Nilai Rapor per Mapel)
     INSERT INTO report_card_subjects (
@@ -45,17 +43,13 @@ BEGIN
          88.50, 89.00, 'A', 'Sangat mahir dalam pemecahan masalah aljabar dan bilangan bulat.', 88.00, 90.00, 87.50, 92.00),
         ('f2000000-0000-0000-0000-000000000002', v_report_id, v_school_id, v_sub_indo, 'Bahasa Indonesia', 'BIN-7',
          85.00, 85.00, 'B+', 'Mampu menyusun teks deskriptif dengan ejaan dan tanda baca yang tepat.', 84.00, 86.00, 85.00, 88.00)
-    ON CONFLICT (report_card_id, subject_id) DO UPDATE SET
-        computed_score = EXCLUDED.computed_score,
-        grade_label = EXCLUDED.grade_label,
-        notes = EXCLUDED.notes;
+    ON CONFLICT (report_card_id, subject_id) DO NOTHING;
 
     -- 4. Formative Grades
     INSERT INTO formative_grades (
         id, school_id, term_id, classroom_subject_id, student_id, assessment_type_id, score, created_by
     ) VALUES
         ('f3000000-0000-0000-0000-000000000001', v_school_id, v_term_id, v_cs_mtk, v_student_id, v_asst_type_id, 92.00, '77777777-7777-7777-7777-777777777777')
-    ON CONFLICT (term_id, classroom_subject_id, student_id, assessment_type_id) DO UPDATE SET
-        score = EXCLUDED.score;
+    ON CONFLICT (term_id, classroom_subject_id, student_id, assessment_type_id) DO NOTHING;
 
 END $$;

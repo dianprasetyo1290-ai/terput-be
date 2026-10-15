@@ -104,12 +104,12 @@ BEGIN
       IF v_item_kertas IS NOT NULL THEN
         INSERT INTO stock_balances (school_id, warehouse_id, item_id, qty)
         VALUES (v_school_id, v_wh_id, v_item_kertas, 85)
-        ON CONFLICT (warehouse_id, item_id) DO UPDATE SET qty = EXCLUDED.qty;
+        ON CONFLICT (warehouse_id, item_id) DO NOTHING;
       END IF;
       IF v_item_spidol IS NOT NULL THEN
         INSERT INTO stock_balances (school_id, warehouse_id, item_id, qty)
         VALUES (v_school_id, v_wh_id, v_item_spidol, 150)
-        ON CONFLICT (warehouse_id, item_id) DO UPDATE SET qty = EXCLUDED.qty;
+        ON CONFLICT (warehouse_id, item_id) DO NOTHING;
       END IF;
     END IF;
   END IF;

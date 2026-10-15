@@ -30,9 +30,7 @@ BEGIN
         (v_sess3, v_school_id, v_academic_year_id, v_term_id, v_schedule_id, v_classroom_id, v_subject_id, v_guru_id,
          CURRENT_DATE, CURRENT_TIMESTAMP, '07:30:00', '08:50:00',
          '3', 'Latihan Soal Cerita Terapan', 'Penyelesaian soal kontekstual kehidupan sehari-hari')
-    ON CONFLICT (schedule_id, session_date) DO UPDATE SET
-        pertemuan = EXCLUDED.pertemuan,
-        pembahasan = EXCLUDED.pembahasan;
+    ON CONFLICT (schedule_id, session_date) DO NOTHING;
 
     -- 2. Student Attendances (Budi Santoso hadir)
     INSERT INTO student_attendances (
@@ -41,9 +39,7 @@ BEGIN
         ('a2000000-0000-0000-0000-000000000001', v_sess1, v_school_id, v_academic_year_id, v_term_id, v_classroom_id, v_student_id, CURRENT_DATE - INTERVAL '2 days', 'hadir', 'Tepat waktu dan aktif', v_guru_id),
         ('a2000000-0000-0000-0000-000000000002', v_sess2, v_school_id, v_academic_year_id, v_term_id, v_classroom_id, v_student_id, CURRENT_DATE - INTERVAL '1 day', 'hadir', 'Mengerjakan tugas dengan baik', v_guru_id),
         ('a2000000-0000-0000-0000-000000000003', v_sess3, v_school_id, v_academic_year_id, v_term_id, v_classroom_id, v_student_id, CURRENT_DATE, 'hadir', 'Hadir tepat waktu', v_guru_id)
-    ON CONFLICT (classroom_id, session_date, student_id) DO UPDATE SET
-        status = EXCLUDED.status,
-        catatan = EXCLUDED.catatan;
+    ON CONFLICT (classroom_id, session_date, student_id) DO NOTHING;
 
     -- 3. Daily Attendance Submissions
     INSERT INTO daily_attendance_submissions (
@@ -52,8 +48,7 @@ BEGIN
         (v_classroom_id, CURRENT_DATE - INTERVAL '2 days', v_school_id, 'submitted', 'Presensi lengkap', v_guru_id, (CURRENT_DATE - INTERVAL '2 days') + TIME '12:00:00', v_guru_id, now()),
         (v_classroom_id, CURRENT_DATE - INTERVAL '1 day', v_school_id, 'submitted', 'Presensi lengkap', v_guru_id, (CURRENT_DATE - INTERVAL '1 day') + TIME '12:00:00', v_guru_id, now()),
         (v_classroom_id, CURRENT_DATE, v_school_id, 'submitted', 'Presensi hari ini', v_guru_id, now(), v_guru_id, now())
-    ON CONFLICT (classroom_id, session_date) DO UPDATE SET
-        status = EXCLUDED.status;
+    ON CONFLICT (classroom_id, session_date) DO NOTHING;
 
     -- 4. Student Leave Requests
     INSERT INTO leave_requests (

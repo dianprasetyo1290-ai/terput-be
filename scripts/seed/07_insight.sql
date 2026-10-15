@@ -14,7 +14,7 @@ BEGIN
     1890, 2000, 9450, NOW(), NOW()
   )
   ON CONFLICT (school_id, metric_key, period_kind, period_start, group_by, dim_value)
-  DO UPDATE SET value = EXCLUDED.value, computed_at = NOW();
+  DO NOTHING;
 
   -- Collection Rate: 88.0% (8800 bp)
   INSERT INTO metric_snapshots (
@@ -25,7 +25,7 @@ BEGIN
     440, 500, 8800, NOW(), NOW()
   )
   ON CONFLICT (school_id, metric_key, period_kind, period_start, group_by, dim_value)
-  DO UPDATE SET value = EXCLUDED.value, computed_at = NOW();
+  DO NOTHING;
 
   -- Active Students: 485
   INSERT INTO metric_snapshots (
@@ -36,7 +36,7 @@ BEGIN
     485, NOW(), NOW()
   )
   ON CONFLICT (school_id, metric_key, period_kind, period_start, group_by, dim_value)
-  DO UPDATE SET value = EXCLUDED.value, computed_at = NOW();
+  DO NOTHING;
 
   -- Active Teachers: 38
   INSERT INTO metric_snapshots (
@@ -47,7 +47,7 @@ BEGIN
     38, NOW(), NOW()
   )
   ON CONFLICT (school_id, metric_key, period_kind, period_start, group_by, dim_value)
-  DO UPDATE SET value = EXCLUDED.value, computed_at = NOW();
+  DO NOTHING;
 
   -- Verified Achievements: 12
   INSERT INTO metric_snapshots (
@@ -58,6 +58,6 @@ BEGIN
     12, NOW(), NOW()
   )
   ON CONFLICT (school_id, metric_key, period_kind, period_start, group_by, dim_value)
-  DO UPDATE SET value = EXCLUDED.value, computed_at = NOW();
+  DO NOTHING;
 
 END $$;

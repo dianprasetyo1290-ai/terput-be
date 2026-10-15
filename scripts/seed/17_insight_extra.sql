@@ -47,7 +47,7 @@ BEGIN
     -- 4. Risk Prediction - Arrears (Risiko Tunggakan)
     INSERT INTO risk_rules (id, school_id, model, version, params, effective_from, created_by, status)
     VALUES (v_rule_arrears, v_school_id, 'arrears_risk', 1, '{"threshold_days": 30, "min_amount": 500000}'::jsonb, CURRENT_DATE - INTERVAL '30 days', v_admin_id, 'active')
-    ON CONFLICT (school_id, model, version) DO UPDATE SET status = 'active';
+    ON CONFLICT (school_id, model, version) DO NOTHING;
 
     INSERT INTO prediction_runs (id, school_id, model, rule_id, run_at, status)
     VALUES (v_run_arrears, v_school_id, 'arrears_risk', v_rule_arrears, now() - interval '1 hour', 'ok')
@@ -65,7 +65,7 @@ BEGIN
     -- 5. Risk Prediction - Absence (Risiko Ketidakhadiran)
     INSERT INTO risk_rules (id, school_id, model, version, params, effective_from, created_by, status)
     VALUES (v_rule_absence, v_school_id, 'absence_risk', 1, '{"consecutive_days": 3, "min_attendance_pct": 80}'::jsonb, CURRENT_DATE - INTERVAL '30 days', v_admin_id, 'active')
-    ON CONFLICT (school_id, model, version) DO UPDATE SET status = 'active';
+    ON CONFLICT (school_id, model, version) DO NOTHING;
 
     INSERT INTO prediction_runs (id, school_id, model, rule_id, run_at, status)
     VALUES (v_run_absence, v_school_id, 'absence_risk', v_rule_absence, now() - interval '1 hour', 'ok')

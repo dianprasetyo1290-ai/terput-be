@@ -26,14 +26,14 @@ BEGIN
   FOREACH v_f IN ARRAY v_features LOOP
     INSERT INTO school_features (school_id, feature_key, enabled, updated_at)
     VALUES (v_school_id, v_f, true, NOW())
-    ON CONFLICT (school_id, feature_key) DO UPDATE SET enabled = true, updated_at = NOW();
+    ON CONFLICT (school_id, feature_key) DO NOTHING;
   END LOOP;
 
   -- 2. Grant roles to admin@teratai.sch.id
   FOREACH v_r IN ARRAY v_roles LOOP
     INSERT INTO user_school_roles (user_id, school_id, role, status)
     VALUES (v_admin_id, v_school_id, v_r, 'active')
-    ON CONFLICT (user_id, school_id, role) DO UPDATE SET status = 'active';
+    ON CONFLICT (user_id, school_id, role) DO NOTHING;
   END LOOP;
 
   -- 3. White-label app branding
@@ -51,12 +51,7 @@ BEGIN
     'bantuan@teratai.sch.id',
     v_admin_id
   )
-  ON CONFLICT (school_id) DO UPDATE SET
-    app_name = EXCLUDED.app_name,
-    short_name = EXCLUDED.short_name,
-    theme_color = EXCLUDED.theme_color,
-    background_color = EXCLUDED.background_color,
-    updated_at = NOW();
+  ON CONFLICT (school_id) DO NOTHING;
 
   INSERT INTO app_branding_versions (
     school_id, version, snapshot, published_by, published_at
