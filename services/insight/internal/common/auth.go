@@ -3,6 +3,7 @@ package common
 import (
 	"context"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -35,6 +36,8 @@ type Claims struct {
 
 type ctxKey string
 
+var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
 const (
 	claimsCtxKey   ctxKey = "claims"
 	internalCtxKey ctxKey = "is_internal"
@@ -62,6 +65,14 @@ func AuthMiddleware(secret string) func(http.Handler) http.Handler {
 			if !ok {
 				WriteError(w, http.StatusUnauthorized, "Invalid token claims")
 				return
+			}
+			// A superadmin token carries no school; scope it to the
+			// ?school_id= the web sends so handlers reading claims.SchoolID
+			// see the school being viewed.
+			if claims.SchoolID == "" && claims.ActiveRole == RoleSuperadmin {
+				if q := strings.TrimSpace(r.URL.Query().Get("school_id")); uuidRe.MatchString(q) {
+					claims.SchoolID = q
+				}
 			}
 
 			ctx := context.WithValue(r.Context(), claimsCtxKey, claims)

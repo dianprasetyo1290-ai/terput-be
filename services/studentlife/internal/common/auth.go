@@ -3,6 +3,7 @@ package common
 import (
 	"context"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -22,6 +23,8 @@ type ctxKey string
 
 const claimsCtxKey ctxKey = "claims"
 
+var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
 // JWTMiddleware verifies the shared identity JWT (HS256) and stashes the
 // claims in the request context.
 func JWTMiddleware(secret string) func(http.Handler) http.Handler {
@@ -39,6 +42,14 @@ func JWTMiddleware(secret string) func(http.Handler) http.Handler {
 			if err != nil || !token.Valid {
 				WriteError(w, http.StatusUnauthorized, "invalid token")
 				return
+			}
+			// A superadmin token carries no school; scope it to the
+			// ?school_id= the web sends so handlers reading claims.SchoolID
+			// work the same as EffectiveSchoolID.
+			if claims.SchoolID == "" && claims.ActiveRole == RoleSuperadmin {
+				if q := strings.TrimSpace(r.URL.Query().Get("school_id")); uuidRe.MatchString(q) {
+					claims.SchoolID = q
+				}
 			}
 			ctx := context.WithValue(r.Context(), claimsCtxKey, claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
