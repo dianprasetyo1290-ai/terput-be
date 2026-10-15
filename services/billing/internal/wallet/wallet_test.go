@@ -145,3 +145,45 @@ func TestExitDisposition(t *testing.T) {
 		t.Fatal("saldo 0 tidak boleh membuat refund")
 	}
 }
+
+func TestClosureForRefund(t *testing.T) {
+	cases := []struct {
+		refund, closure, wallet string
+		ok                      bool
+	}{
+		{"requested", "pending_approval", "closing", true},
+		{"approved", "approved", "closing", true},
+		{"rejected", "rejected", "active", true},
+		{"processed", "completed", "closed", true},
+		{"cancelled", "", "", false},
+	}
+	for _, tc := range cases {
+		c, w, ok := ClosureForRefund(tc.refund)
+		if c != tc.closure || w != tc.wallet || ok != tc.ok {
+			t.Errorf("%s: got %s %s %v", tc.refund, c, w, ok)
+		}
+	}
+}
+
+// A processed wallet refund (refund_exit) is journaled by the daily wallet
+// journal as Dr wallet liability / Cr cash.
+func TestWalletRefundJournal(t *testing.T) {
+	cases := []struct {
+		kind      string
+		amount    int64
+		liability string
+	}{
+		{KindAllowance, 75000, "2101"},
+		{KindSavings, 120000, "2102"},
+	}
+	for _, tc := range cases {
+		lines, err := DailyJournal(DailyAgg{ByKind: map[string]map[string]int64{tc.kind: {MoveRefundExit: -tc.amount}}}, testAcc, model.GatewayAccounts{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := lineMap(lines)
+		if len(got) != 2 || got[tc.liability] != tc.amount || got["1101"] != -tc.amount {
+			t.Errorf("%s: lines %v", tc.kind, got)
+		}
+	}
+}

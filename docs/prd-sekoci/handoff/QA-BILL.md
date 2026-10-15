@@ -53,6 +53,7 @@ Area di luar billing ditulis sebagai kontrak (bagian "Kontrak ke area lain").
 | Tambahan koordinator: job kedaluwarsa transaksi gateway | FIXED | jobs_settlement.go (`gateway_expiry`) | TestGatewayExpiryAndSettlementJobs |
 | Putaran 3: refund mutasi/keluar dipisah deposit vs kelebihan bayar | FIXED | handler/student_refund.go, transfer_billing.go, refunds.go, model/refund.go | TestStudentRefundDepositSplit, TestSplitStudentRefund, TestRefundJournal |
 | Putaran 3: pengajuan refund ditolak core → Exception Queue | FIXED | handler/student_refund.go (reportRefundApprovalFailure) | TestInternalStudentRefund_Idempotency |
+| Putaran 4: refund saldo dompet (wallet_id) diproses tuntas | FIXED | handler/wallet_refund.go, wallet_admin.go, refunds.go, wallet/wallet.go, RefundView.vue | TestWalletRefundFlow, TestClosureForRefund, TestWalletRefundJournal |
 
 ## Migrasi
 
@@ -230,7 +231,7 @@ Merge `feat/QA-PAY` ke `feat/QA-BILL` bersih (tanpa konflik).
   - Porsi tagihan membalik pembayaran tagihan masing-masing (terbaru lebih dulu), lalu status tagihan dihitung ulang.
   - Bila deposit sudah terpakai saat pembayaran keluar: 422, refund tetap `approved`, saldo tidak berubah.
   - Refund Menu 25 lama (`student_bill_id` terisi) tetap berjalan seperti sebelumnya.
-  - Refund saldo dompet (`wallet_id`) kini ditolak 422 di menu ini. Sebelumnya endpoint ini error 500 karena `student_bill_id` NULL; penyelesaian refund dompet tetap di area wallet.
+  - Refund saldo dompet (`wallet_id`): lihat Putaran 4 (sekarang diproses tuntas).
 - **Jurnal refund harian**: Dr akun refund (porsi tagihan) + Dr akun deposit siswa (porsi deposit) / Cr kas (total). Refund siswa tanpa `student_bill_id` kini ikut dijurnal. Bila ada porsi deposit, akun `deposit_acc` wajib dipetakan.
 - **Refund pending** (bagian `bill_refund_parts`) ikut dihitung di `refundableQ` (Menu 25) dan `refundable_idr` financial summary.
 - **Pengajuan ditolak/gagal di core** (alur `refund` belum dikonfigurasi, core tidak terjangkau): selain log dan penghapusan baris, billing mengirim item ke Integration Exception Queue core:
@@ -247,4 +248,39 @@ go vet ./... → OK
 go test ./... (tanpa DB) → semua paket ok
 TEST_PG_DSN=…skci_qa_bill_billing go test -count=1 ./... → semua paket ok (termasuk handler; TestPurposeChargeAndHook dan TestAdhocBillCheckout kini lulus setelah merge QA-PAY)
 web: tidak ada perubahan di putaran 3
+```
+
+## Putaran 4
+
+Refund saldo dompet (FR-125-005: sisa saldo dikembalikan lewat menu 78/25, jadi ada di PRD; tombol tidak disembunyikan) kini diproses tuntas di billing:
+
+- **Pengajuan** (`AdminCloseWallet`, disposisi `refund`):
+  - Penutupan berstatus `pending_approval`, dompet `closing`. Refund Menu 25 (`wallet_id`) diajukan ke Approval Center core dengan request type `refund`, sama seperti refund lain: nominal ikut dikirim, maker = admin, callback `/internal/refunds/{id}/callback`.
+  - Bila core menolak atau gagal: baris refund dihapus, penutupan `rejected`, dompet kembali `active`, dan item masuk Exception Queue (kind `callback`, severity `critical`).
+- **Keputusan**: callback core dan keputusan lokal lama menyelaraskan penutupan dan dompet lewat `wallet.ClosureForRefund`:
+  - requested → pending_approval/closing
+  - approved → approved/closing
+  - rejected → rejected/active (dompet bisa dipakai lagi)
+  - processed → completed/closed
+- **Proses** (`POST /admin/refunds/{id}/process`):
+  - Dompet dikunci, lalu mutasi `refund_exit` sebesar −nominal ditulis (idempoten `wallet-refund:<refund_id>`), sehingga saldo menjadi 0. Penutupan menjadi `completed` dan dompet `closed`.
+  - Audit `wallet_refunded` dicatat dengan saldo/status before/after.
+  - Bila saldo dompet sudah berubah sejak pengajuan: 422, tidak ada yang berubah. Refund tersebut perlu ditolak, lalu dompet ditutup ulang.
+- **Jurnal**: mutasi `refund_exit` dijurnal oleh jurnal harian dompet sebagai Dr liabilitas dompet (uang saku/tabungan) / Cr kas dompet. Jurnal refund tagihan tetap mengecualikan `wallet_id`, jadi tidak dobel.
+- **UI Refund (menu 25)**:
+  - Kolom/baris "Sumber" menampilkan "Saldo dompet uang saku/tabungan", "Deposit siswa", "Deposit + tagihan terbayar siswa" atau tagihan.
+  - Riwayat proses dan form proses menjelaskan efeknya, misalnya "saldo dompet dikosongkan dan dompet ditutup".
+  - `GET /admin/refunds` menambahkan `deposit_idr`, `wallet_id` dan `wallet_kind`.
+- **Temuan untuk koordinator (tidak diubah)**:
+  - Handler dompet T12 (`/admin/wallets`, `/admin/wallets/{id}/close`, `/internal/wallets/transfer-callback`, dst.) belum di-mount di `cmd/server/main.go` di branch mana pun, dan belum ada UI penutupan dompet. Endpoint penutupan sudah dites langsung lewat router tes.
+  - Mount rute dan UI dompet adalah keputusan area T12/QA-PAY.
+
+Verifikasi putaran 4 (2026-10-15):
+
+```
+migrate down 1 / up → versi 9, tidak dirty
+go vet ./... → OK
+go test ./... (tanpa DB) → semua paket ok
+TEST_PG_DSN=…skci_qa_bill_billing go test -count=1 ./... → semua paket ok
+web: npx vue-tsc -b && npm run build → vue-tsc tanpa galat; ✓ built in 20.64s
 ```
