@@ -720,18 +720,13 @@ func (h *Handler) registerCore(w http.ResponseWriter, r *http.Request, eventID, 
 		consentID = &cID
 		consentTextSnapshot = event.ConsentText
 
-		meta := map[string]any{
-			"event_id":     event.ID,
-			"event_name":   event.Name,
-			"fee_idr":      event.FeeIDR,
-			"consent_text": event.ConsentText,
+		if _, err := h.DB.ExecContext(r.Context(), `
+			INSERT INTO parent_consents (id, school_id, subject_type, subject_id, student_id, status, requested_by, note)
+			VALUES ($1, $2, 'event_registration', $3, $4, 'pending', $5, $6)`,
+			cID, claims.SchoolID, regID, studentID, claims.UserID, event.Name); err != nil {
+			common.WriteError(w, http.StatusInternalServerError, "Gagal membuat permintaan persetujuan orang tua")
+			return
 		}
-		metaJSON, _ := json.Marshal(meta)
-
-		_, _ = h.DB.ExecContext(r.Context(), `
-			INSERT INTO parent_consents (id, school_id, subject_type, subject_id, requested_by, target_user_id, status, metadata, created_at, updated_at)
-			VALUES ($1, $2, 'event_registration', $3, $4, $5, 'pending', $6, now(), now())`,
-			cID, claims.SchoolID, regID, claims.UserID, studentID, metaJSON)
 
 		// Notify guardians
 		guardians, _ := h.Client.StudentGuardians(r.Context(), studentID, claims.SchoolID)
