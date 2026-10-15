@@ -69,4 +69,18 @@ docker exec -i shared-postgres psql -U postgres -d teratai_core < "$DIR/seed/16_
 echo "--> Seeding teratai_insight extra (dashboards, widgets, risk predictions, help)..."
 docker exec -i shared-postgres psql -U postgres -d teratai_insight < "$DIR/seed/17_insight_extra.sql"
 
+# --- SEED-2: fitur akademik / absensi / ujian / evaluasi / rapor / kesiswaan (additive, idempotent) ---
+echo "--> Seeding teratai_academic features (status siswa, kelas, LMS)..."
+docker exec -i shared-postgres psql -U postgres -d teratai_academic -v ON_ERROR_STOP=1 < "$DIR/seed/30_academic_features.sql"
+echo "--> Seeding teratai_attendance features (sesi, izin, koreksi, guru pengganti)..."
+docker exec -i shared-postgres psql -U postgres -d teratai_attendance -v ON_ERROR_STOP=1 < "$DIR/seed/31_attendance_features.sql"
+echo "--> Seeding teratai_exam features (bank soal, ujian, peserta, attempt)..."
+docker exec -i shared-postgres psql -U postgres -d teratai_exam -v ON_ERROR_STOP=1 < "$DIR/seed/32_exam_features.sql"
+echo "--> Seeding teratai_evaluation features (RPM, prota/prosem, penilaian guru)..."
+docker exec -i shared-postgres psql -U postgres -d teratai_evaluation -v ON_ERROR_STOP=1 < "$DIR/seed/33_evaluation_features.sql"
+echo "--> Seeding teratai_report features (predikat, bobot, rapor bayangan)..."
+docker exec -i shared-postgres psql -U postgres -d teratai_report -v ON_ERROR_STOP=1 < "$DIR/seed/34_report_features.sql"
+echo "--> Seeding teratai_studentlife features (BK, disiplin, ekskul, kegiatan, UKS, PKL)..."
+docker exec -i shared-postgres psql -U postgres -d teratai_studentlife -v ON_ERROR_STOP=1 < "$DIR/seed/35_studentlife_features.sql"
+
 echo "=== ALL SEED DATA SUCCESSFULLY APPLIED ==="
