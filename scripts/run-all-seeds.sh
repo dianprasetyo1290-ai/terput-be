@@ -69,4 +69,8 @@ docker exec -i shared-postgres psql -U postgres -d teratai_core < "$DIR/seed/16_
 echo "--> Seeding teratai_insight extra (dashboards, widgets, risk predictions, help)..."
 docker exec -i shared-postgres psql -U postgres -d teratai_insight < "$DIR/seed/17_insight_extra.sql"
 
+# 60. Ops features (procurement, AP, tax, budget, assets, library circulation, transport trips)
+echo "--> Seeding teratai_ops features (60_ops_features.sql)..."
+docker exec -i shared-postgres psql -U postgres -d teratai_ops -v ON_ERROR_STOP=1 < "$DIR/seed/60_ops_features.sql"
+
 echo "=== ALL SEED DATA SUCCESSFULLY APPLIED ==="
