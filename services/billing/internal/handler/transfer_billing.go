@@ -34,7 +34,7 @@ func (a *App) InternalStudentFinancialSummary(w http.ResponseWriter, r *http.Req
 	}
 
 	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT b.id, b.scheme_id::text, COALESCE(s.name,''), b.status, b.period_year, b.period_month,
+		`SELECT b.id, COALESCE(b.scheme_id::text,''), COALESCE(s.name,b.source_module,''), b.status, b.period_year, b.period_month,
 		        b.base_idr, b.discount_idr, b.net_idr, b.due_at, b.created_at,
 		        COALESCE((SELECT sum(al.amount_idr) FROM bill_payment_allocations al JOIN bill_payments p ON p.id=al.payment_id
 		                  WHERE p.student_bill_id=b.id AND p.school_id=b.school_id AND p.status='verified'), 0),

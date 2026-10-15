@@ -695,7 +695,17 @@ func (s *Store) MarkTaskDone(ctx context.Context, schoolID, id, doneBy string, d
 	}
 	aff, _ := res.RowsAffected()
 	if aff == 0 {
-		return ErrNotFound
+		// Marking an already-finished task done again (double click, or a
+		// seeded task that is already closed) is idempotent, not an error.
+		var exists bool
+		if err := s.DB.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM case_tasks WHERE id = $1 AND school_id = $2)`,
+			id, schoolID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return ErrNotFound
+		}
 	}
 	return nil
 }

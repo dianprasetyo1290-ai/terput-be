@@ -16,7 +16,9 @@ import (
 )
 
 var Officers = []string{common.RoleProcurement, common.RoleFinanceManager, common.RoleAdmin, common.RoleSuperadmin}
-var Readers = []string{common.RoleProcurement, common.RoleFinanceManager, common.RoleAdmin, common.RoleSuperadmin, common.RoleKepalaSekolah}
+// Readers may list vendors / purchase orders (read-only): the AP & tax pages
+// (payable/tax readers kepala_sekolah, kepala_yayasan) need them for lookups.
+var Readers = []string{common.RoleProcurement, common.RoleFinanceManager, common.RoleAdmin, common.RoleSuperadmin, common.RoleKepalaSekolah, common.RoleKepalaYayasan}
 
 type Handler struct {
 	Store        *Store

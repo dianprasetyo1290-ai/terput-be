@@ -426,6 +426,10 @@ func main() {
 		ir.Get("/users/export", app.ExportUsers)
 		ir.Get("/users/import-template", app.DownloadUsersTemplate)
 		ir.Get("/users/import-batches", app.ListImportBatches)
+		// GET twin of POST /users/search (same ListUsers handler): pickers call
+		// GET /users/search?role=guru, which otherwise fell into GetUser with
+		// id="search" and 500'd.
+		ir.Get("/users/search", app.ListUsers)
 		ir.Get("/users/{id}", app.GetUser)
 		ir.Get("/users", app.ListUsers)
 		// Same handler as GET /users, reached when ids/exclude_ids is too large for

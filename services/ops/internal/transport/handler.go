@@ -898,10 +898,10 @@ func (h *Handler) MyChildren(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Filter by parent access if identity client is available
-	var childAllocs []Allocation
+	childAllocs := []Allocation{}
 	for _, a := range allocs {
 		if h.Client != nil {
-			hasAccess, _ := h.Client.CheckGuardianStudentAccess(r.Context(), parentUserID, a.StudentUserID)
+			hasAccess, _ := h.Client.CheckGuardianStudentAccess(r.Context(), schoolID, parentUserID, a.StudentUserID)
 			if !hasAccess {
 				continue
 			}
@@ -918,7 +918,7 @@ func (h *Handler) MyChildEvents(w http.ResponseWriter, r *http.Request) {
 	parentUserID := claimsUserID(r)
 
 	if h.Client != nil {
-		hasAccess, _ := h.Client.CheckGuardianStudentAccess(r.Context(), parentUserID, studentID)
+		hasAccess, _ := h.Client.CheckGuardianStudentAccess(r.Context(), schoolID, parentUserID, studentID)
 		if !hasAccess {
 			common.WriteError(w, http.StatusForbidden, "akses ditolak: bukan wali siswa ini")
 			return
@@ -947,7 +947,7 @@ func (h *Handler) MyChildEvents(w http.ResponseWriter, r *http.Request) {
 		Direction  string    `json:"direction"`
 		TripDate   time.Time `json:"trip_date"`
 	}
-	var logs []eventLog
+	logs := []eventLog{}
 	for rows.Next() {
 		var l eventLog
 		if err := rows.Scan(&l.ID, &l.TripID, &l.Event, &l.RecordedAt, &l.Direction, &l.TripDate); err == nil {
@@ -973,7 +973,7 @@ func (h *Handler) CreateMyAbsence(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.Client != nil {
-		hasAccess, _ := h.Client.CheckGuardianStudentAccess(r.Context(), parentUserID, in.StudentUserID)
+		hasAccess, _ := h.Client.CheckGuardianStudentAccess(r.Context(), schoolID, parentUserID, in.StudentUserID)
 		if !hasAccess {
 			common.WriteError(w, http.StatusForbidden, "akses ditolak: bukan wali siswa ini")
 			return

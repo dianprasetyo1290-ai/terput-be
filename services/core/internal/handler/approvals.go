@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -124,12 +125,28 @@ func (h *Handler) GetApprovalBySource(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusBadRequest, "source_service dan source_id diperlukan")
 		return
 	}
-	req, _, ok := h.loadVisible(w, r, claims, schoolID, func(ctx context.Context) (*model.ApprovalRequest, error) {
-		return h.Store.GetRequestBySource(ctx, schoolID, svc, srcID)
-	})
-	if ok {
-		common.WriteJSON(w, http.StatusOK, req, nil)
+	// "No approval (visible to you) for this source yet" is the normal state of
+	// a fresh transaction, so it answers 200 {data:null} rather than a 404 the
+	// ApprovalTimeline on every source page would log as a failed call. A
+	// request the caller may not see is reported the same way (no leak).
+	req, err := h.Store.GetRequestBySource(r.Context(), schoolID, svc, srcID)
+	if errors.Is(err, store.ErrNotFound) {
+		common.WriteJSON(w, http.StatusOK, nil, nil)
+		return
 	}
+	if err != nil {
+		writeStoreErr(w, err, "permintaan approval tidak ditemukan")
+		return
+	}
+	user := userInfo(claims)
+	dels := h.delegationsFor(r.Context(), schoolID, user.UserID)
+	if !canViewAllApprovals(claims) && !model.CanView(req, user, dels) {
+		common.WriteJSON(w, http.StatusOK, nil, nil)
+		return
+	}
+	one := []model.ApprovalRequest{*req}
+	markCanDecide(one, user, dels)
+	common.WriteJSON(w, http.StatusOK, &one[0], nil)
 }
 
 type decideRequest struct {

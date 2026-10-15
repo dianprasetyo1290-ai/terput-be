@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -35,6 +36,7 @@ func writeErr(w http.ResponseWriter, err error) {
 		common.WriteError(w, he.status, he.msg)
 		return
 	}
+	log.Printf("error response 500 (sanitized): %v", err)
 	common.CaptureError(err)
 	common.WriteError(w, http.StatusInternalServerError, "internal error")
 }

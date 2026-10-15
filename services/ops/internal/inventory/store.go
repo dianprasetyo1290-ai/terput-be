@@ -449,9 +449,26 @@ func (s *Store) GetStockCard(ctx context.Context, schoolID, warehouseID, itemID 
 	report := &StockCardReport{
 		ItemID:      itemID,
 		WarehouseID: warehouseID,
+		Entries:     []StockCardEntry{},
+		Movements:   []StockCardMovement{},
 	}
-	_ = s.db.QueryRowContext(ctx, `SELECT name FROM items WHERE id = $1`, itemID).Scan(&report.ItemName)
-	_ = s.db.QueryRowContext(ctx, `SELECT name FROM warehouses WHERE id = $1`, warehouseID).Scan(&report.WarehouseName)
+	if it, err := s.GetItem(ctx, schoolID, itemID); err == nil {
+		report.Item = it
+		report.ItemName = it.Name
+	} else {
+		_ = s.db.QueryRowContext(ctx, `SELECT name FROM items WHERE id = $1`, itemID).Scan(&report.ItemName)
+	}
+	// warehouseID == "" is the consolidated card across all warehouses.
+	if warehouseID != "" {
+		var wh Warehouse
+		if err := s.db.QueryRowContext(ctx, `
+			SELECT id, school_id, code, name, room_id, status, created_at, updated_at
+			FROM warehouses WHERE school_id = $1 AND id::text = $2`, schoolID, warehouseID).
+			Scan(&wh.ID, &wh.SchoolID, &wh.Code, &wh.Name, &wh.RoomID, &wh.Status, &wh.CreatedAt, &wh.UpdatedAt); err == nil {
+			report.Warehouse = &wh
+			report.WarehouseName = wh.Name
+		}
+	}
 
 	// Opening balance: sum of all net movements before 'from'
 	var inBefore, outBefore int64
@@ -459,14 +476,14 @@ func (s *Store) GetStockCard(ctx context.Context, schoolID, warehouseID, itemID 
 		SELECT COALESCE(SUM(CASE WHEN direction = 'in' THEN qty ELSE 0 END), 0),
 		       COALESCE(SUM(CASE WHEN direction = 'out' THEN qty ELSE 0 END), 0)
 		FROM stock_movements
-		WHERE school_id = $1 AND warehouse_id = $2 AND item_id = $3 AND created_at < $4
+		WHERE school_id = $1 AND ($2 = '' OR warehouse_id::text = $2) AND item_id::text = $3 AND created_at < $4
 	`, schoolID, warehouseID, itemID, from).Scan(&inBefore, &outBefore)
 	report.OpeningBalance = inBefore - outBefore
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, created_at, direction, qty, kind, ref_no, balance_after, COALESCE(note, '')
+		SELECT id, created_at, direction, qty, kind, COALESCE(ref_no, ''), balance_after, COALESCE(note, '')
 		FROM stock_movements
-		WHERE school_id = $1 AND warehouse_id = $2 AND item_id = $3 AND created_at >= $4 AND created_at <= $5
+		WHERE school_id = $1 AND ($2 = '' OR warehouse_id::text = $2) AND item_id::text = $3 AND created_at >= $4 AND created_at <= $5
 		ORDER BY created_at ASC
 	`, schoolID, warehouseID, itemID, from, to)
 	if err != nil {
@@ -486,8 +503,23 @@ func (s *Store) GetStockCard(ctx context.Context, schoolID, warehouseID, itemID 
 			running -= e.Qty
 		}
 		report.Entries = append(report.Entries, e)
+		// Per-warehouse rows carry that warehouse's balance; the consolidated
+		// card shows the running total across warehouses instead.
+		bal := e.BalanceAfter
+		if warehouseID == "" {
+			bal = running
+		}
+		report.Movements = append(report.Movements, StockCardMovement{
+			ID: e.ID, CreatedAt: e.CreatedAt, MovementType: e.Direction, Kind: e.Kind,
+			Qty: e.Qty, DocNumber: e.RefNo, Notes: e.Note, BalanceAfter: bal,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	report.ClosingBalance = running
+	report.InitialBalance = report.OpeningBalance
+	report.FinalBalance = running
 	return report, nil
 }
 

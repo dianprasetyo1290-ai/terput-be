@@ -29,6 +29,13 @@ var (
 
 	rolesPayrollOperate = append(slices.Clone(rolesHR), common.RolePayroll)
 	rolesPayrollRead    = append(slices.Clone(rolesPayrollOperate), common.RoleFinanceManager)
+
+	// Employee directory (list only, masked for non-full roles by
+	// maskEmployee): payroll input and training assignment pick employees.
+	rolesEmployeeDirectory = append(slices.Clone(rolesHR), common.RolePayroll, common.RoleTrainingAdmin)
+	// Position list: org readers plus training_admin (mandatory training per
+	// position).
+	rolesPositionRead = append(slices.Clone(rolesOrgRead), common.RoleTrainingAdmin)
 )
 
 func (a *App) Router() http.Handler {
@@ -131,10 +138,18 @@ func (a *App) Router() http.Handler {
 		api.Group(func(org chi.Router) {
 			org.Use(common.RequireAnyRole(rolesOrgRead...))
 			org.Get("/departments", a.ListDepartments)
-			org.Get("/positions", a.ListPositions)
 			org.Get("/org-chart", a.GetOrgChart)
 			org.Get("/headcount-plans", a.ListHeadcountPlans)
 			org.Get("/headcount", a.GetHeadcountOverview)
+		})
+
+		api.Group(func(pr chi.Router) {
+			pr.Use(common.RequireAnyRole(rolesPositionRead...))
+			pr.Get("/positions", a.ListPositions)
+		})
+		api.Group(func(dir chi.Router) {
+			dir.Use(common.RequireAnyRole(rolesEmployeeDirectory...))
+			dir.Get("/employees", a.ListEmployees)
 		})
 
 		// 2. HR Management routes: HR Admin, HR Manager, Superadmin
@@ -144,7 +159,6 @@ func (a *App) Router() http.Handler {
 			hr.Get("/dashboard", a.HRDashboard)
 
 			// Employees
-			hr.Get("/employees", a.ListEmployees)
 			hr.Get("/employees/export", a.ExportEmployees)
 			hr.Get("/employees/{id}", a.GetEmployee)
 			hr.Get("/employees/{id}/timeline", a.GetEmployeeTimeline)

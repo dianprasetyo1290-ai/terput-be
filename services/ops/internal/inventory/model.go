@@ -155,4 +155,24 @@ type StockCardReport struct {
 	OpeningBalance int64            `json:"opening_balance"`
 	ClosingBalance int64            `json:"closing_balance"`
 	Entries        []StockCardEntry `json:"entries"`
+
+	// Shape read by the SPA's Kartu Stok page (StockCardView.vue). Warehouse
+	// is null for the consolidated (all warehouses) card.
+	Item           *Item               `json:"item"`
+	Warehouse      *Warehouse          `json:"warehouse"`
+	InitialBalance int64               `json:"initial_balance"`
+	FinalBalance   int64               `json:"final_balance"`
+	Movements      []StockCardMovement `json:"movements"`
+}
+
+// StockCardMovement is a StockCardEntry in the SPA's StockMovement shape.
+type StockCardMovement struct {
+	ID           string    `json:"id"`
+	CreatedAt    time.Time `json:"created_at"`
+	MovementType string    `json:"movement_type"` // 'in' | 'out'
+	Kind         string    `json:"kind"`
+	Qty          int64     `json:"qty"`
+	DocNumber    string    `json:"doc_number"`
+	Notes        string    `json:"notes"`
+	BalanceAfter int64     `json:"balance_after"`
 }

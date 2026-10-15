@@ -73,6 +73,19 @@ seed teratai_studentlife  35_studentlife_features.sql
 seed teratai_hr           50_hr_features.sql
 seed teratai_ops          60_ops_features.sql
 
+# UAT account auditor@teratai.sch.id (created by seed-all-roles-teratai.sql
+# with a random id) needs an active audit access period to open the audit
+# log. Its id differs per environment, so look it up instead of a SQL file.
+AUDITOR_ID="$(psql_db teratai_identity -Atc "SELECT id FROM users WHERE email = 'auditor@teratai.sch.id'" || true)"
+if [ -n "$AUDITOR_ID" ]; then
+  echo "--> teratai_core audit access period for auditor@teratai.sch.id"
+  psql_db teratai_core -c "INSERT INTO audit_access_grants (id, school_id, user_id, valid_from, valid_to, reason, granted_by)
+    VALUES ('a2100005-0000-0000-0000-0000000000f1', '11111111-1111-1111-1111-111111111111', '$AUDITOR_ID',
+            now() - interval '1 day', now() + interval '180 days', 'Masa akses akun UAT auditor (data demo).',
+            '22222222-2222-2222-2222-222222222222')
+    ON CONFLICT DO NOTHING" >/dev/null
+fi
+
 # Accounting (Laravel, schema per tenant): additive demo data, idempotent by
 # itself. Never ModulesSeeder/db:seed here — they truncate.
 if [ "${SKIP_ACCOUNTING:-0}" != "1" ]; then

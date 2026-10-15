@@ -161,10 +161,11 @@ func NewHandler(db *sql.DB, s *Store, c *client.Client, cfg config.Config, cons 
 // -------------------------------------------------------------
 
 func (h *Handler) ListEventKinds(w http.ResponseWriter, r *http.Request) {
-	claims := common.GetClaims(r.Context())
-	kinds, err := h.Store.ListEventKinds(r.Context(), claims.SchoolID)
+	// EffectiveSchoolID: a superadmin has no school in the JWT and picks it
+	// with ?school_id= (RequireFeature already validated it).
+	kinds, err := h.Store.ListEventKinds(r.Context(), common.EffectiveSchoolID(r))
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat jenis kegiatan")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat jenis kegiatan: "+err.Error())
 		return
 	}
 	common.WriteSuccess(w, kinds, nil)
@@ -1476,13 +1477,12 @@ func (h *Handler) RejectAchievement(w http.ResponseWriter, r *http.Request) {
 
 // Summary endpoint: only returns verified achievements (AC-136-01, FR-136-003)
 func (h *Handler) AchievementSummary(w http.ResponseWriter, r *http.Request) {
-	claims := common.GetClaims(r.Context())
 	from := r.URL.Query().Get("from")
 	to := r.URL.Query().Get("to")
 
-	verified, err := h.Store.ListAllVerifiedAchievements(r.Context(), claims.SchoolID, from, to)
+	verified, err := h.Store.ListAllVerifiedAchievements(r.Context(), common.EffectiveSchoolID(r), from, to)
 	if err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat rekap prestasi")
+		common.WriteError(w, http.StatusInternalServerError, "Gagal memuat rekap prestasi: "+err.Error())
 		return
 	}
 

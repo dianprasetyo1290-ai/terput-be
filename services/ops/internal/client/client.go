@@ -261,15 +261,20 @@ func (c *Client) GuardiansForStudent(ctx context.Context, schoolID, studentUserI
 	return list, err
 }
 
-func (c *Client) CheckGuardianStudentAccess(ctx context.Context, guardianUserID, studentUserID string) (bool, error) {
-	var res struct {
-		HasAccess bool `json:"has_access"`
-	}
-	err := c.do(ctx, http.MethodGet, c.IdentityURL+"/internal/guardians/"+url.PathEscape(guardianUserID)+"/students/"+url.PathEscape(studentUserID)+"/access", nil, "", &res)
+func (c *Client) CheckGuardianStudentAccess(ctx context.Context, schoolID, guardianUserID, studentUserID string) (bool, error) {
+	// identity requires ?school_id= (an X-Internal-Key caller has no JWT to
+	// derive it from, 400 otherwise) and answers 200 {"allowed":true} when the
+	// guardian link exists, 404 when it does not.
+	q := url.Values{"school_id": {schoolID}}
+	err := c.do(ctx, http.MethodGet, c.IdentityURL+"/internal/guardians/"+url.PathEscape(guardianUserID)+"/students/"+url.PathEscape(studentUserID)+"/access?"+q.Encode(), nil, "", nil)
 	if err != nil {
+		var he *HTTPError
+		if errors.As(err, &he) && he.Status == http.StatusNotFound {
+			return false, nil
+		}
 		return false, err
 	}
-	return res.HasAccess, nil
+	return true, nil
 }
 
 type EmployeeOption struct {

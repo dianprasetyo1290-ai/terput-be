@@ -178,10 +178,16 @@ func (a *App) Router() http.Handler {
 			api.Post("/purchase-requests/{id}/submit", proc.SubmitPR)
 			api.Post("/purchase-requests/{id}/cancel", proc.CancelPR)
 
+			// Readers: vendor / PO lists only (lookups on AP & tax pages).
+			api.Group(func(rd chi.Router) {
+				rd.Use(common.RequireAnyRole(procurement.Readers...))
+				rd.Get("/vendors", proc.ListVendors)
+				rd.Get("/purchase-orders", proc.ListPOs)
+			})
+
 			// Officers
 			api.Group(func(of chi.Router) {
 				of.Use(common.RequireAnyRole(procurement.Officers...))
-				of.Get("/vendors", proc.ListVendors)
 				of.Get("/vendors/{id}", proc.GetVendor)
 				of.Post("/vendors", proc.CreateVendor)
 				of.Post("/vendors/check-duplicate", proc.CheckDuplicate)
@@ -189,7 +195,6 @@ func (a *App) Router() http.Handler {
 				of.Get("/vendors/{id}/evaluations", proc.ListEvaluations)
 				of.Post("/vendors/{id}/evaluations", proc.CreateEvaluation)
 
-				of.Get("/purchase-orders", proc.ListPOs)
 				of.Get("/purchase-orders/{id}", proc.GetPO)
 				of.Get("/purchase-orders/{id}/pdf", proc.GetPOReportPDF)
 				of.Post("/purchase-orders", proc.CreatePO)
@@ -225,6 +230,9 @@ func (a *App) Router() http.Handler {
 			// OPAC: accessible to any authenticated user
 			api.Get("/opac", lib.OpacSearch)
 			api.Get("/opac/{id}", lib.OpacDetail)
+			// OPAC category filter: read-only category names, needed by every
+			// member who can open Katalog OPAC (writes stay officer-only below).
+			api.Get("/collection-categories", lib.ListCollectionCategories)
 
 			// Reports: readers (pustakawan, kepsek, admin, superadmin)
 			api.Group(func(rd chi.Router) {
@@ -249,7 +257,6 @@ func (a *App) Router() http.Handler {
 				of.Get("/fine-rates", lib.ListFineRates)
 				of.Post("/fine-rates", lib.CreateFineRate)
 				of.Delete("/fine-rates/{id}", lib.DeleteFineRate)
-				of.Get("/collection-categories", lib.ListCollectionCategories)
 				of.Post("/collection-categories", lib.CreateCollectionCategory)
 				of.Put("/collection-categories/{id}", lib.UpdateCollectionCategory)
 				of.Delete("/collection-categories/{id}", lib.DeleteCollectionCategory)

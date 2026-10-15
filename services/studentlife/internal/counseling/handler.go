@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -833,8 +834,12 @@ func (h *Handler) MarkTaskDone(w http.ResponseWriter, r *http.Request) {
 	claims := common.GetClaims(r.Context())
 	taskID := chi.URLParam(r, "id")
 
-	if err := h.Store.MarkTaskDone(r.Context(), claims.SchoolID, taskID, claims.UserID, time.Now()); err != nil {
-		common.WriteError(w, http.StatusInternalServerError, "Gagal menyelesaikan tugas")
+	if err := h.Store.MarkTaskDone(r.Context(), common.EffectiveSchoolID(r), taskID, claims.UserID, time.Now()); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			common.WriteError(w, http.StatusNotFound, "Tugas tidak ditemukan")
+			return
+		}
+		common.WriteError(w, http.StatusInternalServerError, "Gagal menyelesaikan tugas: "+err.Error())
 		return
 	}
 	common.WriteSuccess(w, map[string]string{"status": "done"}, nil)

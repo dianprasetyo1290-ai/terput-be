@@ -120,7 +120,7 @@ func TestMakerOnlyApprover(t *testing.T) {
 }
 
 // ApprovalTimeline on source pages: GET /approvals/by-source returns the
-// request (with steps) to people who may see it, 404 to others.
+// request (with steps) to people who may see it, 200 data:null otherwise.
 func TestGetApprovalBySource(t *testing.T) {
 	fs, router, h, _ := newWiredServer(t, map[string][]string{
 		testUserFinance:  {"finance_manager"},
@@ -136,8 +136,11 @@ func TestGetApprovalBySource(t *testing.T) {
 	if rec.Code != http.StatusOK || resp.Data.ID != res.id || len(resp.Data.Steps) == 0 {
 		t.Fatalf("maker: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(router, http.MethodGet, path, token(t, testUserKepala, testSchoolA, "guru"), nil, ""); rec.Code != http.StatusNotFound {
-		t.Fatalf("unrelated user: want 404, got %d", rec.Code)
+	if rec := do(router, http.MethodGet, path, token(t, testUserKepala, testSchoolA, "guru"), nil, ""); rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), res.id) {
+		t.Fatalf("unrelated user: want 200 data:null, got %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(router, http.MethodGet, "/approvals/by-source?source_service=billing&source_id=none", token(t, testUserFinance, testSchoolA, "finance_manager"), nil, ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"data":null`) {
+		t.Fatalf("no approval yet: want 200 data:null, got %d %s", rec.Code, rec.Body.String())
 	}
 	if rec := do(router, http.MethodGet, "/approvals/by-source?source_service=billing", token(t, testUserFinance, testSchoolA, "finance_manager"), nil, ""); rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing source_id: want 400, got %d", rec.Code)

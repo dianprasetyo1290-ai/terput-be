@@ -83,7 +83,7 @@ func (a *App) writeStudentBills(w http.ResponseWriter, r *http.Request, schoolID
 	}
 
 	rows, err := a.DB.QueryContext(r.Context(),
-		`SELECT b.id,b.scheme_id::text,COALESCE(s.name,''),b.status,b.period_year,b.period_month,
+		`SELECT b.id,COALESCE(b.scheme_id::text,''),COALESCE(s.name,b.source_module,''),b.status,b.period_year,b.period_month,
 		        b.base_idr,b.discount_idr,b.net_idr,b.due_at,b.created_at,
 		        COALESCE((SELECT sum(al.amount_idr) FROM bill_payment_allocations al
 		                  JOIN bill_payments p ON p.id=al.payment_id
@@ -183,7 +183,7 @@ func (a *App) GetChildBill(w http.ResponseWriter, r *http.Request) {
 		snapshot                         []byte
 	)
 	err := a.DB.QueryRowContext(r.Context(),
-		`SELECT b.id,b.scheme_id::text,COALESCE(s.name,''),b.status,b.period_year,b.period_month,
+		`SELECT b.id,COALESCE(b.scheme_id::text,''),COALESCE(s.name,b.source_module,''),b.status,b.period_year,b.period_month,
 		        b.base_idr,b.discount_idr,b.net_idr,b.due_at,b.created_at,b.discount_snapshot
 		 FROM student_bills b LEFT JOIN billing_schemes s ON s.id=b.scheme_id
 		 WHERE b.id=$1 AND b.school_id=$2 AND b.student_user_id::text=$3`,

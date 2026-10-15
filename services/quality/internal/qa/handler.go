@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -408,6 +409,8 @@ func (h *Handler) VerifyEvidence(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusOK, map[string]string{"message": "Status bukti berhasil diperbarui"})
 }
 
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
 func (h *Handler) GetCompleteness(w http.ResponseWriter, r *http.Request) {
 	schoolID := h.effectiveSchoolID(r)
 	instID := r.URL.Query().Get("instrument_id")
@@ -415,6 +418,10 @@ func (h *Handler) GetCompleteness(w http.ResponseWriter, r *http.Request) {
 
 	if instID == "" || ayID == "" {
 		common.WriteError(w, http.StatusBadRequest, "instrument_id and academic_year_id are required")
+		return
+	}
+	if !uuidPattern.MatchString(instID) || !uuidPattern.MatchString(ayID) {
+		common.WriteError(w, http.StatusBadRequest, "instrument_id dan academic_year_id harus berupa ID yang valid")
 		return
 	}
 

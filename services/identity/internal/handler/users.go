@@ -402,6 +402,10 @@ func (a *App) GetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
+	if !rules.IsUUID(id) { // a non-UUID id is a 404, not a postgres cast error (500)
+		common.WriteError(w, http.StatusNotFound, "Pengguna tidak ditemukan")
+		return
+	}
 	row := a.DB.QueryRow(`SELECT `+userCols+` FROM users u WHERE u.id=$1 AND u.deleted_at IS NULL`, id)
 	u, err := scanUser(row)
 	if err == sql.ErrNoRows {

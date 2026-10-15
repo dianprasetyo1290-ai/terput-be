@@ -441,8 +441,8 @@ func (a *App) ListTracks(w http.ResponseWriter, r *http.Request) {
 		`SELECT t.id,t.period_id,t.code,t.name,COALESCE(t.description,''),t.quota,t.is_active,t.eligibility_config,
 		        (SELECT count(*) FROM applications a WHERE a.track_id=t.id),
 		        (SELECT count(*) FROM applications a WHERE a.track_id=t.id AND a.status NOT IN('draft','withdrawn','rejected','dropped')),
-		        COALESCE((SELECT array_agg(dr.name ORDER BY dr.name) FROM document_requirements dr
-		                  WHERE dr.track_id=t.id AND dr.deleted_at IS NULL),'{}')
+		        COALESCE((SELECT json_agg(dr.name ORDER BY dr.name) FROM document_requirements dr
+		                  WHERE dr.track_id=t.id AND dr.deleted_at IS NULL),'[]'::json)
 		 FROM admission_tracks t WHERE t.school_id=$1 AND t.deleted_at IS NULL AND ($2='' OR t.period_id::text=$2)
 		 ORDER BY t.name`, schoolID, r.URL.Query().Get("period_id"))
 	if err != nil {
@@ -456,11 +456,17 @@ func (a *App) ListTracks(w http.ResponseWriter, r *http.Request) {
 			id, period, code, name, description string
 			quota, applicants, active           int
 			isActive                            bool
-			eligibility                         []byte
+			eligibility, requirementsJSON       []byte
 			requirements                        []string
 		)
+		// database/sql + pgx/stdlib hands a text[] back as its string literal,
+		// which cannot scan into []string: aggregate to JSON and decode.
 		if err := rows.Scan(&id, &period, &code, &name, &description, &quota, &isActive, &eligibility,
-			&applicants, &active, &requirements); err != nil {
+			&applicants, &active, &requirementsJSON); err != nil {
+			writeErr(w, err)
+			return
+		}
+		if err := json.Unmarshal(requirementsJSON, &requirements); err != nil {
 			writeErr(w, err)
 			return
 		}

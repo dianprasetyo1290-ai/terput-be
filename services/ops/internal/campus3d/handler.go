@@ -827,6 +827,9 @@ func (h *Handler) GetAvailability(w http.ResponseWriter, r *http.Request) {
 
 		status, cur, _ := RoomStatusAt(busySlots, at)
 		todayList := TodaySchedule(busySlots, at, h.TimeLocation)
+		if todayList == nil {
+			todayList = []Busy{} // JSON [] bukan null — klien membaca .length
+		}
 
 		item := AvailabilityItem{
 			RoomID:     rm.ID,

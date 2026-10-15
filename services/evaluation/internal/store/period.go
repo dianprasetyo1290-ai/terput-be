@@ -22,10 +22,10 @@ func marshalStrs(ss []string) []byte {
 	return b
 }
 
-const periodCols = `id, school_id, academic_year_id, title, semester, publish_start_date, publish_end_date,
+const periodCols = `id, school_id, academic_year_id, title, COALESCE(semester,''), publish_start_date, publish_end_date,
 	published, headmaster_user_id, curriculum_vp_user_id, student_affairs_vp_user_id,
 	target_teacher_ids, peer_evaluatee_ids, peer_evaluator_ids, student_classroom_ids,
-	lead_assessor_name, created_by, updated_by, created_at, updated_at`
+	COALESCE(lead_assessor_name,''), created_by, updated_by, created_at, updated_at`
 
 func scanPeriod(row interface {
 	Scan(dest ...interface{}) error

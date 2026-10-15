@@ -225,7 +225,7 @@ func (a *App) InternalRiskFactsArrears(w http.ResponseWriter, r *http.Request) {
 	                           WHERE p.student_bill_id=b.id AND p.status='verified'), 0)
 	               - COALESCE((SELECT sum(rv.amount_idr) FROM bill_payment_reversals rv JOIN bill_payments p ON p.id=rv.payment_id
 	                           WHERE p.student_bill_id=b.id), 0) as paid_idr,
-	                 COALESCE((SELECT count(*) FROM bill_payments p WHERE p.student_bill_id=b.id AND p.status='verified' AND p.paid_at > b.due_at), 0) as late_payments
+	                 COALESCE((SELECT count(*) FROM bill_payments p WHERE p.student_bill_id=b.id AND p.status='verified' AND COALESCE(p.transfer_at, p.verified_at, p.created_at) > b.due_at), 0) as late_payments
 	          FROM student_bills b
 	          WHERE b.school_id = $1 AND b.status <> 'void'`
 

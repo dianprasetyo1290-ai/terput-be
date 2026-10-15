@@ -885,7 +885,15 @@ func (h *Handler) MyLibrary(w http.ResponseWriter, r *http.Request) {
 	member, err := h.Store.GetMemberByUserID(r.Context(), schoolID, userID)
 	if err != nil {
 		if err == ErrNotFound {
-			common.WriteError(w, http.StatusNotFound, "Akun Anda belum terdaftar sebagai anggota perpustakaan")
+			// Not (yet) a library member: an empty state, not an error — the
+			// "Pustaka Saya" menu is shown to every member-eligible role.
+			common.WriteJSON(w, http.StatusOK, map[string]any{
+				"member":       nil,
+				"active_loans": []Loan{},
+				"loans":        []Loan{},
+				"fines":        []any{},
+				"reservations": []any{},
+			}, nil)
 			return
 		}
 		common.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -903,7 +911,7 @@ func (h *Handler) MyLibrary(w http.ResponseWriter, r *http.Request) {
 		ORDER BY l.due_date ASC
 	`, schoolID, member.ID)
 
-	var loans []Loan
+	loans := []Loan{}
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -917,8 +925,15 @@ func (h *Handler) MyLibrary(w http.ResponseWriter, r *http.Request) {
 	fines, _ := h.Store.ListFines(r.Context(), schoolID, "open", member.ID)
 	reservations, _ := h.Store.ListReservations(r.Context(), schoolID, member.ID)
 
+	if fines == nil {
+		fines = []Fine{}
+	}
+	if reservations == nil {
+		reservations = []Reservation{}
+	}
 	resp := map[string]any{
 		"member":       member,
+		"active_loans": loans, // key the SPA (MyLibraryView) reads
 		"loans":        loans,
 		"fines":        fines,
 		"reservations": reservations,

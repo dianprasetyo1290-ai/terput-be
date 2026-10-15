@@ -25,7 +25,8 @@ func oversightRouter(app *App) http.Handler {
 }
 
 // QA-BILL hand-off: finance/oversight roles read students of their own unit
-// (identifiers only); other roles still get 403; other units' students 404.
+// (identifiers only) and its staff by id; other roles still get 403; other
+// units' users 404.
 func TestOversightRolesReadStudents(t *testing.T) {
 	db := openTestDB(t)
 	app := newTestApp(db)
@@ -89,8 +90,13 @@ func TestOversightRolesReadStudents(t *testing.T) {
 				if code, _ := govCall(t, h, http.MethodGet, "/users/"+foreign, cl, nil); code != http.StatusNotFound {
 					t.Fatalf("foreign detail %d", code)
 				}
-				if code, _ := govCall(t, h, http.MethodGet, "/users/"+admin.userID, cl, nil); code != http.StatusNotFound {
-					t.Fatalf("non-student detail %d", code)
+				// Staff of the same unit (refund/approval actor names) are
+				// readable too, identifiers only; another unit's admin is not.
+				if code, _ := govCall(t, h, http.MethodGet, "/users/"+admin.userID, cl, nil); code != http.StatusOK {
+					t.Fatalf("own-unit staff detail %d", code)
+				}
+				if code, _ := govCall(t, h, http.MethodGet, "/users/"+other.userID, cl, nil); code != http.StatusNotFound {
+					t.Fatalf("foreign staff detail %d", code)
 				}
 			}
 		})

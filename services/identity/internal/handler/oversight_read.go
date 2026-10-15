@@ -37,7 +37,8 @@ func stripToIdentifiers(u *model.User) {
 }
 
 // getUserForOversight serves GET /users/{id} to a studentOversightRoles
-// caller: only a student of the caller's own unit, identifiers only.
+// caller: only a member (any role — a student, or the staff who requested /
+// decided a refund or approval) of the caller's own unit, identifiers only.
 func (a *App) getUserForOversight(w http.ResponseWriter, r *http.Request, claims *common.Claims) {
 	id := chi.URLParam(r, "id")
 	if !rules.IsUUID(id) || claims.SchoolID == "" {
@@ -46,12 +47,12 @@ func (a *App) getUserForOversight(w http.ResponseWriter, r *http.Request, claims
 	}
 	var ok bool
 	if err := a.DB.QueryRowContext(r.Context(), `SELECT EXISTS (SELECT 1 FROM user_school_roles
-		WHERE user_id::text=$1 AND school_id::text=$2 AND role='siswa')`, id, claims.SchoolID).Scan(&ok); err != nil {
+		WHERE user_id::text=$1 AND school_id::text=$2)`, id, claims.SchoolID).Scan(&ok); err != nil {
 		common.WriteDBError(w, err, "Gagal memuat pengguna")
 		return
 	}
 	if !ok {
-		common.WriteError(w, http.StatusNotFound, "Siswa tidak ditemukan di unit Anda")
+		common.WriteError(w, http.StatusNotFound, "Pengguna tidak ditemukan di unit Anda")
 		return
 	}
 	u, err := scanUser(a.DB.QueryRow(`SELECT `+userCols+` FROM users u WHERE u.id=$1 AND u.deleted_at IS NULL`, id))

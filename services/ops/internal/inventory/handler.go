@@ -345,13 +345,21 @@ func (h *Handler) GetStockCard(w http.ResponseWriter, r *http.Request) {
 	schoolID := common.EffectiveSchoolID(r)
 	itemID := r.URL.Query().Get("item_id")
 	warehouseID := r.URL.Query().Get("warehouse_id")
-	if itemID == "" || warehouseID == "" {
-		common.WriteError(w, http.StatusBadRequest, "item_id dan warehouse_id wajib diisi")
+	// warehouse_id is optional: without it the card is consolidated across
+	// every warehouse ("Konsolidasi Semua Gudang" in the SPA).
+	if itemID == "" {
+		common.WriteError(w, http.StatusBadRequest, "item_id wajib diisi")
 		return
 	}
 
 	fromStr := r.URL.Query().Get("from")
 	toStr := r.URL.Query().Get("to")
+	if fromStr == "" {
+		fromStr = r.URL.Query().Get("start") // SPA param name
+	}
+	if toStr == "" {
+		toStr = r.URL.Query().Get("end")
+	}
 	from := time.Now().AddDate(0, -1, 0)
 	to := time.Now()
 	if t, err := time.Parse("2006-01-02", fromStr); err == nil {
