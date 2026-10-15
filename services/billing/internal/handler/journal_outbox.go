@@ -42,6 +42,7 @@ type outboxRow struct {
 	Attempts    int
 	TransNo     string
 	LastError   string
+	SourceRefs  map[string][]string
 }
 
 // JobJournalOutbox sends due outbox rows.
@@ -89,14 +90,18 @@ func (a *App) sendJournalOutbox(ctx context.Context, now time.Time) error {
 
 func loadOutboxRow(ctx context.Context, q queryer, id, lock string) (outboxRow, error) {
 	var r outboxRow
-	var lines []byte
+	var lines, refs []byte
 	var transNo, lastErr sql.NullString
 	var day time.Time
 	err := q.QueryRowContext(ctx,
-		`SELECT id::text, school_id::text, source, reference, trans_date, description, lines, status, attempts, trans_no, last_error
+		`SELECT id::text, school_id::text, source, reference, trans_date, description, lines, status, attempts, trans_no, last_error,
+		        COALESCE(source_refs, '{}'::jsonb)
 		   FROM gateway_journal_postings WHERE id::text = $1 `+lock, id).
-		Scan(&r.ID, &r.SchoolID, &r.Source, &r.Reference, &day, &r.Description, &lines, &r.Status, &r.Attempts, &transNo, &lastErr)
+		Scan(&r.ID, &r.SchoolID, &r.Source, &r.Reference, &day, &r.Description, &lines, &r.Status, &r.Attempts, &transNo, &lastErr, &refs)
 	if err != nil {
+		return r, err
+	}
+	if err := json.Unmarshal(refs, &r.SourceRefs); err != nil {
 		return r, err
 	}
 	r.TransDate, r.TransNo, r.LastError = day.Format("2006-01-02"), transNo.String, lastErr.String
@@ -136,7 +141,7 @@ func (a *App) journalRequest(ctx context.Context, r outboxRow) (client.JournalRe
 		div = &v
 	}
 	req := client.JournalRequest{SchoolID: r.SchoolID, Source: r.Source, Reference: r.Reference,
-		TransDate: r.TransDate, Description: r.Description}
+		TransDate: r.TransDate, Description: r.Description, SourceRefs: journalSourceRefs(r.SourceRefs)}
 	for _, l := range r.Lines {
 		req.Lines = append(req.Lines, client.JournalLine{AccCode: l.AccCode, DivCode: div,
 			Description: l.Description, DebitIDR: l.DebitIDR, CreditIDR: l.CreditIDR})

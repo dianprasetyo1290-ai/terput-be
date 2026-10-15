@@ -47,6 +47,8 @@ func TestRouterBuilds(t *testing.T) {
 		{http.MethodPost, "/internal/bills/adhoc"},
 		{http.MethodPost, "/internal/bills/b1/void"},
 		{http.MethodGet, "/internal/bills/by-source"},
+		{http.MethodGet, "/internal/journal-sources"},
+		{http.MethodGet, "/internal/receivables/summary"},
 	}
 	rctx := chi.NewRouteContext()
 	for _, w := range want {

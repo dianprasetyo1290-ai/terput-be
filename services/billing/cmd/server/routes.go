@@ -302,6 +302,9 @@ func newRouter(cfg config.Config, app *handler.App) chi.Router {
 		in.Post("/internal/bills/adhoc/adjust", app.InternalAdjustAdhocBill)
 		in.Post("/internal/bills/{id}/void", app.InternalVoidBill)
 		in.Get("/internal/bills/by-source", app.InternalBillBySource)
+		// Accounting (QA-ACC): documents behind a journal + AR control total.
+		in.Get("/internal/journal-sources", app.InternalJournalSources)
+		in.Get("/internal/receivables/summary", app.InternalReceivablesSummary)
 	})
 
 	return r

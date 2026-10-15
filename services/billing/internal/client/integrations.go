@@ -183,6 +183,10 @@ type JournalRequest struct {
 	TransDate   string        `json:"trans_date"`
 	Description string        `json:"description"`
 	Lines       []JournalLine `json:"lines"`
+	// SourceRefs lists the billing documents behind the journal by type
+	// ({"bill": [ids], "payment": [ids], ...}); accounting stores it and
+	// reads the details back from /internal/journal-sources.
+	SourceRefs map[string][]string `json:"source_refs,omitempty"`
 }
 
 // PostJournal posts one balanced journal. A repeated reference returns the
@@ -209,6 +213,7 @@ type UserProfile struct {
 	Name  string  `json:"name"`
 	Email string  `json:"email"`
 	Phone *string `json:"phone"`
+	NISN  *string `json:"nisn"`
 }
 
 // User reads one user from identity.
