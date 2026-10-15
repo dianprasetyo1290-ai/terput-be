@@ -100,6 +100,8 @@ services:
       IDENTITY_BASE_URL: http://identity:${IDENTITY_PORT}
       CORE_BASE_URL: http://core:${CORE_PORT:-8091}
       ACADEMIC_INTERNAL_URL: http://academic:${ACADEMIC_PORT}
+      STORAGE_ROOT: /data/private
+    volumes: ["academic_files:/data/private"]
     ports: ["${ACADEMIC_PORT}:${ACADEMIC_PORT}"]
 
   # ---------- attendance ----------
@@ -642,6 +644,7 @@ services:
       - edge
 
 volumes:
+  academic_files:
   admission_files:
   billing_files:
   hr_files:
