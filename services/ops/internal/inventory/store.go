@@ -284,10 +284,28 @@ func (s *Store) DeleteWarehouse(ctx context.Context, schoolID, id string) error 
 
 func (s *Store) ListBalances(ctx context.Context, schoolID, warehouseID, itemID string, belowMin bool) ([]StockBalance, error) {
 	query := `
-		SELECT b.school_id, b.warehouse_id, w.name, b.item_id, i.code, i.name, i.unit, i.min_stock, b.qty, b.updated_at
+		SELECT b.school_id, b.warehouse_id, w.name, b.item_id, i.code, i.name, i.unit, i.min_stock, b.qty,
+		       COALESCE(gr.avg_cost, po.avg_cost, 0)::bigint AS avg_unit_cost_idr, b.updated_at
 		FROM stock_balances b
 		JOIN warehouses w ON w.id = b.warehouse_id
 		JOIN items i ON i.id = b.item_id
+		LEFT JOIN (
+			SELECT pol.item_id,
+			       ROUND(SUM(grl.qty_accepted * pol.unit_price_idr)::numeric / NULLIF(SUM(grl.qty_accepted), 0)) AS avg_cost
+			FROM goods_receipt_lines grl
+			JOIN purchase_order_lines pol ON pol.id = grl.po_line_id
+			WHERE grl.school_id = $1 AND pol.item_id IS NOT NULL AND grl.qty_accepted > 0
+			GROUP BY pol.item_id
+		) gr ON gr.item_id = b.item_id
+		LEFT JOIN (
+			SELECT pol.item_id,
+			       ROUND(SUM(pol.qty * pol.unit_price_idr)::numeric / NULLIF(SUM(pol.qty), 0)) AS avg_cost
+			FROM purchase_order_lines pol
+			JOIN purchase_orders o ON o.id = pol.po_id
+			WHERE pol.school_id = $1 AND pol.item_id IS NOT NULL
+			  AND o.status NOT IN ('draft', 'rejected', 'cancelled')
+			GROUP BY pol.item_id
+		) po ON po.item_id = b.item_id
 		WHERE b.school_id = $1 AND w.deleted_at IS NULL AND i.deleted_at IS NULL
 	`
 	args := []any{schoolID}
@@ -315,7 +333,7 @@ func (s *Store) ListBalances(ctx context.Context, schoolID, warehouseID, itemID 
 		var b StockBalance
 		var updatedAt time.Time
 		if err := rows.Scan(&b.SchoolID, &b.WarehouseID, &b.WarehouseName, &b.ItemID, &b.ItemCode, &b.ItemName,
-			&b.Unit, &b.MinStock, &b.Qty, &updatedAt); err != nil {
+			&b.Unit, &b.MinStock, &b.Qty, &b.AvgUnitCostIDR, &updatedAt); err != nil {
 			return nil, err
 		}
 		b.UpdatedAt = updatedAt.Format(time.RFC3339)

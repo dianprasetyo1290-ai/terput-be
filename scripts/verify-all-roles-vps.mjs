@@ -1,7 +1,7 @@
 import { chromium } from '@playwright/test'
 
 const BASE_URL = 'http://43.157.207.147/teratai'
-const PASSWORD = 'CHANGE_ME_DEMO_PASSWORD'
+const PASSWORD = (process.env.DEMO_PASSWORD ?? '')
 
 const ROLES = [
   { role: 'superadmin', username: 'superadmin@terataiputih.sch.id' },

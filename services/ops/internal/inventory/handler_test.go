@@ -25,11 +25,13 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 		t.Skip("skipping DB test: cannot ping database:", err)
 	}
 
-	// Apply base + facility + inventory migrations
+	// Apply base + facility + inventory migrations, plus procurement: the
+	// stock balance list derives avg_unit_cost_idr from PO/GR lines.
 	for _, f := range []string{
 		"../../migrations/0001_ops_base.up.sql",
 		"../../migrations/0002_facility.up.sql",
 		"../../migrations/0010_inventory.up.sql",
+		"../../migrations/0011_procurement.up.sql",
 	} {
 		content, err := os.ReadFile(f)
 		if err != nil {
@@ -43,6 +45,21 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 	cleanup := func() {
 		// Clean tables
 		_, _ = db.Exec(`
+			DROP VIEW IF EXISTS pr_open_commitment_v CASCADE;
+			DROP VIEW IF EXISTS po_line_match_v CASCADE;
+			DROP TABLE IF EXISTS vendor_evaluations CASCADE;
+			DROP TABLE IF EXISTS goods_returns CASCADE;
+			DROP TABLE IF EXISTS goods_receipt_lines CASCADE;
+			DROP TABLE IF EXISTS goods_receipts CASCADE;
+			DROP TABLE IF EXISTS purchase_order_lines CASCADE;
+			DROP TABLE IF EXISTS purchase_orders CASCADE;
+			DROP TABLE IF EXISTS purchase_request_lines CASCADE;
+			DROP TABLE IF EXISTS purchase_requests CASCADE;
+			DROP TABLE IF EXISTS vendor_accounting_sync CASCADE;
+			DROP TABLE IF EXISTS vendor_bank_accounts CASCADE;
+			DROP TABLE IF EXISTS vendor_documents CASCADE;
+			DROP TABLE IF EXISTS vendor_contacts CASCADE;
+			DROP TABLE IF EXISTS vendors CASCADE;
 			DROP TABLE IF EXISTS inventory_settings CASCADE;
 			DROP TABLE IF EXISTS stock_count_lines CASCADE;
 			DROP TABLE IF EXISTS stock_counts CASCADE;
@@ -198,7 +215,7 @@ func TestInventoryMovementsAndCountsE2E(t *testing.T) {
 	// Verify balance remains 15
 	balances, err := store.ListBalances(ctx, schoolID, wh.ID, item.ID, false)
 	if err != nil || len(balances) == 0 || balances[0].Qty != 15 {
-		t.Fatalf("expected balance to remain 15, got %v", balances)
+		t.Fatalf("expected balance to remain 15, got %v (err %v)", balances, err)
 	}
 
 	// 7. Stock Opname: Start Count

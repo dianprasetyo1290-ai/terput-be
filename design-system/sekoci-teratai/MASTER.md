@@ -1,70 +1,75 @@
 # SEKOCI Teratai — Design System (MASTER)
 
 Source of truth for the in-app UI (web/src). Page files in `pages/` override
-this file for one page only. Chosen 2026-10-15: SEKOCI blue, Minimalism &
-Swiss style for enterprise dashboards, light mode, WCAG AA.
+this file for one page only. Since 2026-10-15 the look follows the **FC Design
+System** (design-component-fc-main), ported to Vue + Tailwind. Icons stay
+lucide-vue-next. Light mode, WCAG AA.
 
 ## Style
-- Clean, functional, grid-based, generous but dense-enough spacing (dashboard density).
-- One accent per screen; color carries meaning (status), never decoration.
-- Flat surfaces: white cards on a slate-50 background, 1px borders, `shadow-sm` at most.
-- Icons: lucide-vue-next only, 16–20px, `aria-hidden="true"` when decorative. No emoji as icons.
-- Avoid: gradients on content, glassmorphism, colored page backgrounds, heavy shadows,
-  ALL CAPS body text, more than 2 font weights in one block.
+- Grey canvas, white cards **without borders**: a thin layered shadow defines the edge.
+- Pills everywhere you click or read a state: buttons, status badges, search inputs.
+- Solid colored figure cards for key numbers (3–5 per row, never more).
+- Black tab bar with a white pill for the active tab.
+- Color carries meaning (status), never decoration. One primary action per screen.
+- Icons: lucide-vue-next, 16–20px, `aria-hidden="true"` when decorative. No emoji as icons.
 
-## Color tokens (Tailwind theme names in web/src/tailwind.css)
+## Tokens (web/src/tailwind.css @theme + CSS vars in web/src/style.css)
 | Token | Hex | Use |
 |---|---|---|
-| primary | #2563EB | main buttons, links, active nav, focus ring |
-| primary-hover | #1D4ED8 | hover/pressed of primary |
-| primary-light | #EFF6FF | selected rows, active nav background, info chips |
-| accent | #EA580C | rare, the single most important CTA on a page |
-| background | #F8FAFC | app/page background |
+| background / `--dash-canvas` | #F3F4F6 | page canvas |
 | surface | #FFFFFF | cards, tables, dialogs |
-| border | #E2E8F0 | card/table/input borders |
-| on-surface | #0F172A | headings, primary text |
-| on-surface-variant | #475569 | secondary text, labels (4.5:1 on white) |
-| muted | #64748B | captions, placeholders only (not body text) |
-| success / success-light | #15803D / #F0FDF4 | paid, approved, active |
-| warning / warning-light | #B45309 / #FFFBEB | pending, due soon |
-| error / error-light | #B91C1C / #FEF2F2 | failed, overdue, destructive |
-| info / info-light | #0369A1 | informational notes |
+| on-surface / `--dash-text` | #161616 | headings, body text |
+| on-surface-variant / `--dash-sub` | #5C5C5C | secondary text, table headers |
+| muted | #6F6F6F | captions, placeholders only |
+| border / `--dash-line` | #E8E8E8 | row dividers, input borders |
+| surface-container-low / `--dash-muted` | #F4F4F4 | row hover, neutral pills, notes |
+| primary / `--dash-accent` | #1E6BF6 | primary buttons, links, active nav |
+| primary-light | #EAF1FE | active nav background |
+| ink / `--dash-ink` | #161616 | tab bar, ink buttons, hero badge |
+| tone success / warning / error / info / neutral | #15803D / #B45309 / #DC2626 / #1E6BF6 / #262626 | solid status pills and figures |
 
-Rules: no raw hex in components; prefer the tokens above (`bg-primary`, `text-on-surface-variant`,
-`border-border`, …). Existing `slate-*` utilities are acceptable for neutrals; replace `indigo-*`,
-`violet-*`, `purple-*` primaries with `primary` tokens. Status always = color + text/icon.
+Shadows: `--dash-shadow` (cards; Tailwind `shadow-md`), `--dash-shadow-sm` (buttons, small
+controls; Tailwind `shadow-sm`). Radius: cards 20px (`--dash-radius-card`), dialogs 22px,
+inputs 14px, buttons/pills 999px.
+
+Rules: no raw hex in views; use tokens or the `fc-*` classes. Status = color + text.
 
 ## Typography
-- Font: **Plus Jakarta Sans** (400/500/600/700), fallback system-ui. Numbers in tables: `tabular-nums`.
-- Scale: page title 24px/700 (`text-2xl font-bold`), section title 18px/600, card title 16px/600,
-  body 14px/400 (`text-sm`) with line-height 1.5, captions 12px/500. Never below 12px.
+- Font **Roboto Flex** (variable 400–800), fallback system-ui. Body 14px, line-height 1.5.
+- Page title 26px/700, card title 15px/700, table header 11px/600 uppercase +0.04em,
+  captions 12px. Numbers: `tabular-nums` (`fc-num`).
 
-## Spacing & shape
-- 4px grid. Page padding 24px desktop / 16px mobile. Gap between cards 16–24px.
-- Radius: 8px inputs/buttons (`rounded-lg`), 12px cards/dialogs (`rounded-xl`), chips `rounded-full`.
-- Controls min height 36px (buttons, inputs, selects); touch targets ≥ 40px on mobile.
+## Global classes (web/src/style.css)
+- Cards: `fc-card` (padded 18px), `fc-card-flush` (for tables), `fc-card-head` +
+  `fc-card-title` (lucide icon + title) + `fc-count` (row count pill), `fc-card-body`.
+  Existing `rounded-xl … shadow-sm` cards automatically adopt the FC card look.
+- Tables: `fc-table`; numeric cells `fc-num`; actions `td.fc-actions` with an
+  `inline-flex gap-1.5` wrapper (never stacked buttons); secondary line `fc-sub`.
+- Status: `<Badge variant>` (solid pill) or `.fc-status[data-tone]`.
+- Figures: `fc-figures` grid with `fc-figure[data-tone]` (`fc-figure-label`, `-value`, `-hint`);
+  `StatCard` renders one.
+- Tabs: `fc-tabs` / `fc-tab[aria-selected]` or `<Tabs>` components (same look).
+- Forms: `fc-form` grid, `fc-field`, `fc-label`, `fc-help`, `fc-span` (full width);
+  fields `fc-input` / `fc-select` / `fc-textarea` (bare inputs get the same style).
+- Filters: `fc-filterbar` (single white pill bar; search left, filters, reset).
+- Buttons: `<Button>` variants default (blue) / ink / secondary (white + shadow) /
+  outline / destructive / ghost / link; legacy `.btn .btn-*` map to the same look.
 
-## Page anatomy (every feature page)
-1. `<PageHeader title description>` with actions slot (primary action right-aligned, max 1 primary).
-2. Optional filter bar: a single row card (search left, filters, reset) wrapping on mobile.
-3. Content: `Card` with table/list, or a responsive grid of `StatCard`s on top for dashboards.
-4. States: `LoadingState` (skeleton), `EmptyState` (icon + title + hint + optional action),
-   inline `Alert variant="destructive"` for load errors (message from apiErrorMessage).
-- Tables: sticky-free simple header `bg-slate-50 text-xs font-semibold text-on-surface-variant`,
-  rows `hover:bg-slate-50`, numeric columns right-aligned, actions in the last column,
-  horizontal scroll inside the card on small screens (`overflow-x-auto`), never page-level.
-- Forms: visible label above every field, helper text below, error under the field in error color,
-  required marked with `*`, primary submit right in dialog footer, Cancel as outline.
-- Dialogs: max-w-lg (forms) / max-w-2xl (detail), title + description, footer actions.
-- Status badges: `Badge` with semantic variant (success/warning/destructive/secondary/info).
+## Page anatomy
+1. `<PageHeader title description>` with actions slot (max 1 primary).
+2. Optional `fc-filterbar`.
+3. Optional `fc-figures` row (3–5 figures).
+4. Content: `fc-card-flush` with `fc-card-head` (icon + title + count) and an `fc-table`,
+   horizontal scroll inside the card on small screens, never page-level.
+5. States: `LoadingState` (skeleton), `EmptyState`, inline `Alert variant="destructive"`.
+- Dialogs: `<Dialog>`; confirmations/prompts only via `confirmDialog` / `alertDialog` /
+  `promptDialog` (components/ui). **Native alert/confirm/prompt are forbidden.**
 
 ## Interaction & accessibility
-- Visible focus ring (`focus-visible:ring-2 ring-primary/40`) on all interactive elements.
-- `cursor-pointer` on clickable things, hover transitions 150–200ms, respect prefers-reduced-motion.
-- Icon-only buttons need `aria-label`. Disabled buttons explain why (title/tooltip or helper text).
-- Loading: buttons show spinner + disabled while submitting; never double-submit.
-- Responsive check at 375, 768, 1024, 1440px; no horizontal page scroll.
+- Visible focus ring on all interactive elements; `cursor-pointer` on clickables;
+  transitions 150ms; respect prefers-reduced-motion.
+- Icon-only buttons need `aria-label`. Loading buttons show a spinner and are disabled.
+- Check at 1366×768 and 390×844; no horizontal page scroll.
 
 ## Do not change during redesign
 Behavior, API calls, routes, props/emits, data-testids, form field names, permission checks.
-Redesign is presentational only.

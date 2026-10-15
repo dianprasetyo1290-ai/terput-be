@@ -92,13 +92,13 @@ ON CONFLICT DO NOTHING;
 INSERT INTO saved_reports (id, school_id, owner_user_id, title, columns, filters, shared_roles, deleted_at, created_at, updated_at)
 VALUES
   ('a2400005-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', '88888888-8888-8888-8888-888888888888', 'Ringkasan Keuangan Bulanan Yayasan',
-   '[{"name":"metric","label":"Metrik"},{"name":"period","label":"Periode"},{"name":"value","label":"Nilai"}]',
+   '["billed_idr","paid_idr","collection_rate"]',
    '{"metric_keys":["billed_idr","paid_idr","collection_rate"],"period":"last_month"}', '{kepala_yayasan,finance_manager}', NULL, now() - interval '60 days', now() - interval '60 days'),
   ('a2400005-0000-0000-0000-000000000002', '11111111-1111-1111-1111-111111111111', '77777777-7777-7777-7777-777777777777', 'Kehadiran Siswa per Kelas',
-   '[{"name":"grade","label":"Jenjang"},{"name":"value","label":"Kehadiran (%)"}]',
+   '["attendance_rate"]',
    '{"metric_keys":["attendance_rate"],"group_by":"grade","period":"last_month"}', '{kepala_sekolah,walikelas}', NULL, now() - interval '45 days', now() - interval '45 days'),
   ('a2400005-0000-0000-0000-000000000003', '11111111-1111-1111-1111-111111111111', '77777777-7777-7777-7777-777777777777', 'Rekap PPDB per Gelombang',
-   '[{"name":"wave","label":"Gelombang"},{"name":"value","label":"Pendaftar"}]',
+   '["ppdb_applicants"]',
    '{"metric_keys":["ppdb_applicants"],"group_by":"wave"}', '{}', NULL, now() - interval '30 days', now() - interval '30 days')
 ON CONFLICT DO NOTHING;
 
@@ -227,15 +227,15 @@ INSERT INTO predictions (id, school_id, run_id, model, subject_kind, subject_id,
 SELECT v.id::uuid, '11111111-1111-1111-1111-111111111111', pr.id, pr.model, v.kind, v.subject, v.score, v.level, v.proj, v.factors::jsonb, v.label, pr.run_at
 FROM (VALUES
   ('a2400015-0000-0000-0000-000000000001', 'a2400014-0000-0000-0000-000000000001', 'wave', 'Gelombang 1 2027/2028', NULL::int, NULL, 58::bigint,
-   '[{"factor":"Rata-rata 2 tahun","note":"Gelombang 1 rata-rata 55 pendaftar"}]', 'perlu_tinjauan'),
+   '[{"key":"","label":"Rata-rata 2 tahun","raw_value":0,"contribution":0,"note":"Gelombang 1 rata-rata 55 pendaftar"}]', 'perlu_tinjauan'),
   ('a2400015-0000-0000-0000-000000000002', 'a2400014-0000-0000-0000-000000000001', 'wave', 'Gelombang 2 2027/2028', NULL, NULL, 34,
-   '[{"factor":"Tren kunjungan landing page","note":"Naik 12% dibanding tahun lalu"}]', 'perlu_tinjauan'),
+   '[{"key":"","label":"Tren kunjungan landing page","raw_value":0,"contribution":0,"note":"Naik 12% dibanding tahun lalu"}]', 'perlu_tinjauan'),
   ('a2400015-0000-0000-0000-000000000003', 'a2400014-0000-0000-0000-000000000002', 'month', '2026-11', NULL, NULL, 371500000,
-   '[{"factor":"Kolektibilitas 3 bulan","note":"Rata-rata 89,9%"}]', 'perlu_tinjauan'),
+   '[{"key":"","label":"Kolektibilitas 3 bulan","raw_value":0,"contribution":0,"note":"Rata-rata 89,9%"}]', 'perlu_tinjauan'),
   ('a2400015-0000-0000-0000-000000000004', 'a2400014-0000-0000-0000-000000000002', 'month', '2026-12', NULL, NULL, 352000000,
-   '[{"factor":"Libur semester","note":"Pembayaran Desember historis turun 5%"}]', 'sudah_ditinjau'),
+   '[{"key":"","label":"Libur semester","raw_value":0,"contribution":0,"note":"Pembayaran Desember historis turun 5%"}]', 'sudah_ditinjau'),
   ('a2400015-0000-0000-0000-000000000005', 'a2400014-0000-0000-0000-000000000002', 'month', '2027-01', NULL, NULL, 395000000,
-   '[{"factor":"Tagihan semester genap","note":"Termasuk biaya kegiatan semester"}]', 'perlu_tinjauan')
+   '[{"key":"","label":"Tagihan semester genap","raw_value":0,"contribution":0,"note":"Termasuk biaya kegiatan semester"}]', 'perlu_tinjauan')
 ) AS v(id, run, kind, subject, score, level, proj, factors, label)
 JOIN prediction_runs pr ON pr.id = v.run::uuid
 ON CONFLICT DO NOTHING;

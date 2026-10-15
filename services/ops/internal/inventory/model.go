@@ -59,7 +59,12 @@ type StockBalance struct {
 	MinStock      int64  `json:"min_stock"`
 	Qty           int64  `json:"qty"`
 	BelowMin      bool   `json:"below_min"`
-	UpdatedAt     string `json:"updated_at"`
+	// AvgUnitCostIDR is the weighted-average purchase cost per unit, derived
+	// from accepted goods-receipt lines × PO unit price (falls back to the
+	// average PO unit price when nothing has been received yet; 0 if the item
+	// was never purchased). Read by the SPA's Saldo Stok page for valuation.
+	AvgUnitCostIDR int64  `json:"avg_unit_cost_idr"`
+	UpdatedAt      string `json:"updated_at"`
 }
 
 type StockMovement struct {

@@ -516,7 +516,15 @@ func (h *Handler) CreateTransfer(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	transferID := fmt.Sprintf("trf:%s", idempotencyKey)
+	// stock_movements.transfer_id is a UUID column; derive a deterministic
+	// UUID from the idempotency key so retries reuse the same transfer id
+	// (the old "trf:<key>" string could never be inserted).
+	var transferID string
+	if err := tx.QueryRowContext(r.Context(),
+		`SELECT md5('trf:' || $1::text)::uuid::text`, idempotencyKey).Scan(&transferID); err != nil {
+		common.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	refNo := fmt.Sprintf("TRF-%d", time.Now().Unix())
 
 	for i, l := range req.Lines {

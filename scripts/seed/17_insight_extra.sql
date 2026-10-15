@@ -31,7 +31,7 @@ BEGIN
     INSERT INTO saved_reports (id, school_id, owner_user_id, title, columns, filters, shared_roles)
     VALUES (
         v_report_id, v_school_id, v_admin_id, 'Laporan Rekapitulasi Tagihan & Tunggakan SPP',
-        '[{"name": "student_name", "label": "Nama Siswa"}, {"name": "classroom", "label": "Kelas"}, {"name": "amount", "label": "Nominal"}, {"name": "status", "label": "Status"}]'::jsonb,
+        '["billed_idr", "paid_idr", "outstanding_idr", "collection_rate"]'::jsonb,
         '{"status": "all"}'::jsonb,
         ARRAY['admin', 'bendahara', 'kepala_sekolah']::text[]
     ) ON CONFLICT (id) DO NOTHING;
@@ -58,7 +58,7 @@ BEGIN
     ) VALUES (
         v_pred_arrears, v_school_id, v_run_arrears, 'arrears_risk', 'student', v_student_id::text,
         35, 'low', 750000,
-        '[{"factor": "Riwayat Pembayaran", "weight": 0.4, "note": "2 bulan awal lunas tepat waktu"}]'::jsonb,
+        '[{"key": "payment_history", "label": "Riwayat Pembayaran", "raw_value": 0, "contribution": 0.4, "note": "2 bulan awal lunas tepat waktu"}]'::jsonb,
         'perlu_tinjauan'
     ) ON CONFLICT (id) DO NOTHING;
 
@@ -76,7 +76,7 @@ BEGIN
     ) VALUES (
         v_pred_absence, v_school_id, v_run_absence, 'absence_risk', 'student', v_student_id::text,
         15, 'low', 0,
-        '[{"factor": "Tingkat Kehadiran", "weight": 0.8, "note": "Kehadiran 98% konsisten"}]'::jsonb,
+        '[{"key": "attendance_rate", "label": "Tingkat Kehadiran", "raw_value": 0, "contribution": 0.8, "note": "Kehadiran 98% konsisten"}]'::jsonb,
         'perlu_tinjauan'
     ) ON CONFLICT (id) DO NOTHING;
 

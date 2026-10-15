@@ -1,7 +1,7 @@
 DO $$
 DECLARE
   v_school_id uuid := '11111111-1111-1111-1111-111111111111';
-  v_pw_hash text := '$2a$10$aX2hW3yHCaaQJ1h87c.vMO4P12Y/94ldm6k.txlnG5b5RMJjvXzq2'; -- CHANGE_ME_DEMO_PASSWORD
+  v_pw_hash text := '$2a$10$aX2hW3yHCaaQJ1h87c.vMO4P12Y/94ldm6k.txlnG5b5RMJjvXzq2'; -- bcrypt of the demo password (shared out of band, env DEMO_PASSWORD)
   v_user_id uuid;
 BEGIN
   -- 1. superadmin

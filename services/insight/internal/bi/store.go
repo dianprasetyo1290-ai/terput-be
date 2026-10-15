@@ -156,8 +156,8 @@ func (s *Store) ListReports(ctx context.Context, schoolID string) ([]SavedReport
 		if err := rows.Scan(&r.ID, &r.SchoolID, &r.OwnerUserID, &r.Title, &colBytes, &filterBytes, &r.SharedRoles, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal(colBytes, &r.Columns)
 		_ = json.Unmarshal(filterBytes, &r.Filters)
+		r.Columns = decodeReportColumns(colBytes, r.Filters)
 		res = append(res, r)
 	}
 	return res, nil
@@ -173,8 +173,8 @@ func (s *Store) GetReport(ctx context.Context, id, schoolID string) (*SavedRepor
 	if err != nil {
 		return nil, err
 	}
-	_ = json.Unmarshal(colBytes, &r.Columns)
 	_ = json.Unmarshal(filterBytes, &r.Filters)
+	r.Columns = decodeReportColumns(colBytes, r.Filters)
 	return &r, nil
 }
 
@@ -411,4 +411,53 @@ func (s *Store) RevokeExportToken(ctx context.Context, id, schoolID string) erro
 	query := `UPDATE bi_export_tokens SET revoked_at = NOW(), updated_at = NOW() WHERE id = $1 AND school_id = $2 AND revoked_at IS NULL`
 	_, err := s.pool.Exec(ctx, query, id, schoolID)
 	return err
+}
+
+// decodeReportColumns reads saved_reports.columns, which the service writes
+// as a JSON array of metric keys. Older seed data stored a display layout
+// instead ([{"name":..,"label":..}]) with the metric keys under
+// filters.metric_keys; decoding that into []string silently yielded "" for
+// every column. For that legacy shape, use filters.metric_keys when present,
+// otherwise each object's key/metric_key/name.
+func decodeReportColumns(colBytes []byte, filters map[string]interface{}) []string {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(colBytes, &raw); err != nil {
+		return []string{}
+	}
+	cols := make([]string, 0, len(raw))
+	legacy := false
+	for _, el := range raw {
+		var key string
+		if err := json.Unmarshal(el, &key); err == nil {
+			if key != "" {
+				cols = append(cols, key)
+			}
+			continue
+		}
+		legacy = true
+		var obj map[string]interface{}
+		if err := json.Unmarshal(el, &obj); err != nil {
+			continue
+		}
+		for _, f := range []string{"key", "metric_key", "name"} {
+			if v, ok := obj[f].(string); ok && v != "" {
+				cols = append(cols, v)
+				break
+			}
+		}
+	}
+	if legacy {
+		if mk, ok := filters["metric_keys"].([]interface{}); ok && len(mk) > 0 {
+			keys := make([]string, 0, len(mk))
+			for _, v := range mk {
+				if k, ok := v.(string); ok && k != "" {
+					keys = append(keys, k)
+				}
+			}
+			if len(keys) > 0 {
+				return keys
+			}
+		}
+	}
+	return cols
 }

@@ -32,15 +32,15 @@ type MemberCategory struct {
 }
 
 type FineRate struct {
-	ID                string     `json:"id"`
-	SchoolID          string     `json:"school_id"`
-	MemberCategoryID  *string    `json:"member_category_id,omitempty"`
-	LateFeePerDayIDR  int64      `json:"late_fee_per_day_idr"`
-	LostFeeIDR        *int64     `json:"lost_fee_idr,omitempty"`
-	EffectiveFrom     time.Time  `json:"effective_from"`
-	EffectiveTo       *time.Time `json:"effective_to,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	ID               string     `json:"id"`
+	SchoolID         string     `json:"school_id"`
+	MemberCategoryID *string    `json:"member_category_id,omitempty"`
+	LateFeePerDayIDR int64      `json:"late_fee_per_day_idr"`
+	LostFeeIDR       *int64     `json:"lost_fee_idr,omitempty"`
+	EffectiveFrom    time.Time  `json:"effective_from"`
+	EffectiveTo      *time.Time `json:"effective_to,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 type Member struct {
@@ -89,9 +89,11 @@ type Title struct {
 	UpdatedAt           time.Time  `json:"updated_at"`
 
 	// OPAC / Summary
-	AvailableCopies int     `json:"available_copies,omitempty"`
-	TotalCopies     int     `json:"total_copies,omitempty"`
-	Copies          []Copy  `json:"copies,omitempty"`
+	// No omitempty: 0 available copies is meaningful ("Sedang Dipinjam"),
+	// and dropping the key made the SPA render it as missing.
+	AvailableCopies int    `json:"available_copies"`
+	TotalCopies     int    `json:"total_copies"`
+	Copies          []Copy `json:"copies,omitempty"`
 }
 
 type Copy struct {
@@ -148,6 +150,9 @@ type Reservation struct {
 	TitleName  string `json:"title_name,omitempty"`
 	MemberCode string `json:"member_code,omitempty"`
 	MemberName string `json:"member_name,omitempty"`
+	// QueuePosition is the 1-based FIFO position among the title's 'waiting'
+	// reservations; nil for any other status.
+	QueuePosition *int `json:"queue_position,omitempty"`
 }
 
 type Fine struct {

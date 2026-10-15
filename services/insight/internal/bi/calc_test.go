@@ -122,3 +122,19 @@ func TestNextRun(t *testing.T) {
 		t.Errorf("expected 2026-02-28 08:00 for month_day=31 in Feb, got %s", nextMonthlyFeb.Format("2006-01-02 15:04"))
 	}
 }
+
+func TestDecodeReportColumns(t *testing.T) {
+	got := decodeReportColumns([]byte(`["billed_idr","paid_idr"]`), nil)
+	if len(got) != 2 || got[0] != "billed_idr" || got[1] != "paid_idr" {
+		t.Fatalf("string columns: got %v", got)
+	}
+	legacy := []byte(`[{"name":"metric","label":"Metrik"},{"name":"value","label":"Nilai"}]`)
+	got = decodeReportColumns(legacy, map[string]interface{}{"metric_keys": []interface{}{"billed_idr", "collection_rate"}})
+	if len(got) != 2 || got[0] != "billed_idr" || got[1] != "collection_rate" {
+		t.Fatalf("legacy columns with metric_keys: got %v", got)
+	}
+	got = decodeReportColumns(legacy, map[string]interface{}{})
+	if len(got) != 2 || got[0] != "metric" {
+		t.Fatalf("legacy columns without metric_keys: got %v", got)
+	}
+}

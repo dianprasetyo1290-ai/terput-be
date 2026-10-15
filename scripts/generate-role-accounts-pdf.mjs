@@ -13,7 +13,7 @@ const accounts = [
     roleLabel: 'Super Administrator',
     name: 'Superadmin Sekoci',
     email: 'superadmin@sekoci.local',
-    pw: 'CHANGE_ME_DEMO_PASSWORD',
+    pw: (process.env.DEMO_PASSWORD ?? ''),
     scope: 'Akses penuh seluruh satuan pendidikan, manajemen pengguna global, konfigurasi sistem & audit',
     landing: '/dashboard',
     badge: 'System Admin'
@@ -24,7 +24,7 @@ const accounts = [
     roleLabel: 'Ketua Yayasan',
     name: 'Ketua Yayasan Teratai',
     email: 'yayasan@teratai.sch.id',
-    pw: 'CHANGE_ME_DEMO_PASSWORD',
+    pw: (process.env.DEMO_PASSWORD ?? ''),
     scope: 'Oversight eksekutif yayasan, laporan keuangan yayasan, rekap SDM lintas unit, & persetujuan kebijakan',
     landing: '/dashboard',
     badge: 'Executive'
@@ -35,7 +35,7 @@ const accounts = [
     roleLabel: 'Kepala Sekolah',
     name: 'Kepala Sekolah Teratai',
     email: 'kepsek@teratai.sch.id',
-    pw: 'CHANGE_ME_DEMO_PASSWORD',
+    pw: (process.env.DEMO_PASSWORD ?? ''),
     scope: 'Persetujuan akhir alur approval (cuti, mutasi, pengeluaran), monitoring mutu akademik, & evaluasi guru',
     landing: '/dashboard',
     badge: 'Executive'
@@ -46,7 +46,7 @@ const accounts = [
     roleLabel: 'Pengawas Satuan',
     name: 'Pengawas Teratai',
     email: 'pengawas@teratai.sch.id',
-    pw: 'CHANGE_ME_DEMO_PASSWORD',
+    pw: (process.env.DEMO_PASSWORD ?? ''),
     scope: 'Pengawasan pelaksanaan ujian CBT, asesmen nasional, supervisi kurikulum, & evaluasi kinerja satuan',
     landing: '/dashboard',
     badge: 'Supervisor'
@@ -59,7 +59,7 @@ const accounts = [
     roleLabel: 'Administrator Sekolah',
     name: 'Admin Teratai',
     email: 'admin@teratai.sch.id',
-    pw: 'CHANGE_ME_DEMO_PASSWORD',
+    pw: (process.env.DEMO_PASSWORD ?? ''),
     scope: 'Data induk siswa/guru, tahun akademik, rombel, jadwal, PPDB terpadu, tarif SPP, & administrasi harian',
     landing: '/dashboard',
     badge: 'Operations'
@@ -70,7 +70,7 @@ const accounts = [
     roleLabel: 'Guru Mata Pelajaran',
     name: 'Guru Teratai',
     email: 'guru@teratai.sch.id',
-    pw: 'CHANGE_ME_DEMO_PASSWORD',
+    pw: (process.env.DEMO_PASSWORD ?? ''),
     scope: 'Jadwal mengajar, presensi siswa per jam, input nilai formatif/sumatif, bank soal CBT, & RPM/silabus',
     landing: '/akademik/jadwal-saya',
     badge: 'Faculty'
@@ -81,7 +81,7 @@ const accounts = [
     roleLabel: 'Wali Kelas',
     name: 'Wali Kelas Teratai',
     email: 'walikelas@teratai.sch.id',
-    pw: 'CHANGE_ME_DEMO_PASSWORD',
+    pw: (process.env.DEMO_PASSWORD ?? ''),
     scope: 'Binaan rombel, monitoring presensi harian, sidang kenaikan kelas, catatan sikap, & generate buku rapor',
     landing: '/walikelas/dashboard',
     badge: 'Faculty'
@@ -94,7 +94,7 @@ const accounts = [
     roleLabel: 'HR Administrator',
     name: 'HR Administrator Teratai',
     email: 'hradmin@teratai.sch.id',
-    pw: 'CHANGE_ME_DEMO_PASSWORD',
+    pw: (process.env.DEMO_PASSWORD ?? ''),
     scope: 'Master data pegawai (NIK/NPWP AES-256), struktur organisasi, dokumen kontrak, presensi & cuti staf',
     landing: '/hr/pegawai',
     badge: 'HR & Org'
@@ -105,7 +105,7 @@ const accounts = [
     roleLabel: 'HR Manager',
     name: 'HR Manager Teratai',
     email: 'hrmanager@teratai.sch.id',
-    pw: 'CHANGE_ME_DEMO_PASSWORD',
+    pw: (process.env.DEMO_PASSWORD ?? ''),
     scope: 'Persetujuan cuti/lembur pegawai, perencanaan formasi organisasi, matriks kompetensi, & reviu SDM',
     landing: '/hr/organisasi',
     badge: 'HR Management'
@@ -116,7 +116,7 @@ const accounts = [
     roleLabel: 'Petugas Payroll',
     name: 'Petugas Payroll Teratai',
     email: 'payroll@teratai.sch.id',
-    pw: 'CHANGE_ME_DEMO_PASSWORD',
+    pw: (process.env.DEMO_PASSWORD ?? ''),
     scope: 'Siklus penggajian bulanan, perhitungan PPh 21 TER (PP 58/2023), BPJS Kes/TK, slip gaji, & jurnal otomatis',
     landing: '/payroll/run',
     badge: 'Payroll'
@@ -127,7 +127,7 @@ const accounts = [
     roleLabel: 'Recruiter (ATS)',
     name: 'Recruiter Teratai',
     email: 'recruiter@teratai.sch.id',
-    pw: 'CHANGE_ME_DEMO_PASSWORD',
+    pw: (process.env.DEMO_PASSWORD ?? ''),
     scope: 'Applicant Tracking System: formasi lowongan, posting portal karier publik, kanban seleksi, & penawaran gaji',
     landing: '/rekrutmen/lowongan',
     badge: 'Recruitment'
@@ -138,7 +138,7 @@ const accounts = [
     roleLabel: 'Admin Pelatihan',
     name: 'Admin Pelatihan Teratai',
     email: 'training@teratai.sch.id',
-    pw: 'CHANGE_ME_DEMO_PASSWORD',
+    pw: (process.env.DEMO_PASSWORD ?? ''),
     scope: 'Katalog kursus, penugasan pelatihan wajib jabatan, monitoring kuis kelulusan, & kepatuhan sertifikasi',
     landing: '/pelatihan/katalog',
     badge: 'L&D Admin'
@@ -149,7 +149,7 @@ const accounts = [
     roleLabel: 'Staf Pegawai (ESS)',
     name: 'Staf Pegawai Teratai',
     email: 'pegawai@teratai.sch.id',
-    pw: 'CHANGE_ME_DEMO_PASSWORD',
+    pw: (process.env.DEMO_PASSWORD ?? ''),
     scope: 'Employee Self-Service: kehadiran mandiri, pengajuan cuti & lembur dengan timeline approval, slip gaji, kursus',
     landing: '/pegawai',
     badge: 'Employee'
@@ -162,7 +162,7 @@ const accounts = [
     roleLabel: 'Finance Manager',
     name: 'Finance Manager Teratai',
     email: 'financemanager@teratai.sch.id',
-    pw: 'CHANGE_ME_DEMO_PASSWORD',
+    pw: (process.env.DEMO_PASSWORD ?? ''),
     scope: 'Dashboard NICEPay Gateway, kasir loket tunai/transfer, rekonsiliasi bank 50-baris, settlement, & akuntansi COA',
     landing: '/keuangan/payment-dashboard',
     badge: 'Finance'
@@ -173,7 +173,7 @@ const accounts = [
     roleLabel: 'Auditor Internal',
     name: 'Auditor Internal Teratai',
     email: 'auditor@teratai.sch.id',
-    pw: 'CHANGE_ME_DEMO_PASSWORD',
+    pw: (process.env.DEMO_PASSWORD ?? ''),
     scope: 'Pemeriksaan audit trail event keamanan, selisih data mutasi JSON diff, & antrean galat integrasi (DLQ retry)',
     landing: '/audit',
     badge: 'Audit & Compliance'
@@ -186,7 +186,7 @@ const accounts = [
     roleLabel: 'Siswa / Murid',
     name: 'Budi Santoso (Siswa)',
     email: 'siswa@teratai.sch.id',
-    pw: 'CHANGE_ME_DEMO_PASSWORD',
+    pw: (process.env.DEMO_PASSWORD ?? ''),
     scope: 'Jadwal pelajaran, nilai tugas/ulangan, riwayat presensi harian, ujian CBT online, & informasi Tagihan Saya',
     landing: '/siswa/dashboard',
     badge: 'Student Portal'
@@ -197,7 +197,7 @@ const accounts = [
     roleLabel: 'Orang Tua / Wali Murid',
     name: 'Wali Santoso (Orang Tua)',
     email: 'orangtua@teratai.sch.id',
-    pw: 'CHANGE_ME_DEMO_PASSWORD',
+    pw: (process.env.DEMO_PASSWORD ?? ''),
     scope: 'Multi-bill checkout tagihan SPP online (VA/QRIS), pantau presensi & nilai anak, e-rapor, serta tiket layanan TU',
     landing: '/orang-tua/dashboard',
     badge: 'Parent Portal'

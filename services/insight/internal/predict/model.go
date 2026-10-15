@@ -45,6 +45,9 @@ type RiskFactor struct {
 	Label        string  `json:"label"`
 	RawValue     float64 `json:"raw_value"`
 	Contribution float64 `json:"contribution"`
+	// Note is a free-text explanation, used by forecast factors that have no
+	// numeric raw value.
+	Note string `json:"note,omitempty"`
 }
 
 type Prediction struct {

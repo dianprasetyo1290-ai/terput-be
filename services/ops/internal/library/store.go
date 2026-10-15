@@ -931,9 +931,9 @@ func (s *Store) ReturnCopy(ctx context.Context, schoolID, barcode, returnedBy st
 		if hasRate {
 			ratePerDay = rate.LateFeePerDayIDR
 			rateSnapMap = map[string]any{
-				"rate_id":           rate.ID,
-				"rate_per_day_idr":  ratePerDay,
-				"effective_from":    rate.EffectiveFrom,
+				"rate_id":          rate.ID,
+				"rate_per_day_idr": ratePerDay,
+				"effective_from":   rate.EffectiveFrom,
 			}
 		}
 
@@ -1233,7 +1233,12 @@ func (s *Store) ReportLost(ctx context.Context, schoolID, loanID, reportedBy str
 func (s *Store) ListReservations(ctx context.Context, schoolID, memberID string) ([]Reservation, error) {
 	query := `
 		SELECT r.id, r.school_id, r.title_id, r.member_id, r.status, r.held_copy_id, r.ready_until,
-		       r.created_at, r.updated_at, t.title, m.member_code
+		       r.created_at, r.updated_at, t.title, m.member_code,
+		       CASE WHEN r.status = 'waiting' THEN (
+		           SELECT COUNT(*) FROM lib_reservations q
+		           WHERE q.school_id = r.school_id AND q.title_id = r.title_id AND q.status = 'waiting'
+		             AND (q.created_at, q.id) <= (r.created_at, r.id)
+		       ) END AS queue_position
 		FROM lib_reservations r
 		JOIN lib_titles t ON t.id = r.title_id
 		JOIN lib_members m ON m.id = r.member_id
@@ -1257,7 +1262,7 @@ func (s *Store) ListReservations(ctx context.Context, schoolID, memberID string)
 		var r Reservation
 		if err := rows.Scan(
 			&r.ID, &r.SchoolID, &r.TitleID, &r.MemberID, &r.Status, &r.HeldCopyID, &r.ReadyUntil,
-			&r.CreatedAt, &r.UpdatedAt, &r.TitleName, &r.MemberCode,
+			&r.CreatedAt, &r.UpdatedAt, &r.TitleName, &r.MemberCode, &r.QueuePosition,
 		); err != nil {
 			return nil, err
 		}
@@ -1497,13 +1502,18 @@ type OverdueReportItem struct {
 	ClassroomName string    `json:"classroom_name"`
 	DueDate       time.Time `json:"due_date"`
 	DaysOverdue   int       `json:"days_overdue"`
+	// EstFineIDR is the late fine if the copy were returned today, using the
+	// fine rate active today for the member's category (general rate as
+	// fallback); 0 when no rate is configured.
+	EstFineIDR int64  `json:"est_fine_idr"`
+	CategoryID string `json:"-"`
 }
 
 // OverdueLoans implements AC-115-01: list of members with overdue loans and days overdue.
 func (s *Store) OverdueLoans(ctx context.Context, schoolID string) ([]OverdueReportItem, error) {
 	now := time.Now().In(s.loc)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT l.id, m.member_code, m.kind, t.title, cp.barcode,
+		SELECT l.id, m.member_code, m.kind, m.category_id, t.title, cp.barcode,
 		       COALESCE(l.classroom_name, ''), l.due_date,
 		       ($2::date - l.due_date) AS days_overdue
 		FROM lib_loans l
@@ -1522,12 +1532,28 @@ func (s *Store) OverdueLoans(ctx context.Context, schoolID string) ([]OverdueRep
 	for rows.Next() {
 		var it OverdueReportItem
 		if err := rows.Scan(
-			&it.LoanID, &it.MemberCode, &it.MemberKind, &it.Title, &it.Barcode,
+			&it.LoanID, &it.MemberCode, &it.MemberKind, &it.CategoryID, &it.Title, &it.Barcode,
 			&it.ClassroomName, &it.DueDate, &it.DaysOverdue,
 		); err != nil {
 			return nil, err
 		}
 		list = append(list, it)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if len(list) > 0 {
+		rates, err := s.GetActiveRates(ctx, schoolID, now)
+		if err != nil {
+			return nil, err
+		}
+		for i := range list {
+			catID := list[i].CategoryID
+			if rate, ok := ResolveRate(rates, &catID, now); ok {
+				list[i].EstFineIDR = LateFine(list[i].DaysOverdue, rate.LateFeePerDayIDR)
+			}
+		}
 	}
 	return list, nil
 }

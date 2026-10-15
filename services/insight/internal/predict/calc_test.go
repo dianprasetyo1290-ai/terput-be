@@ -135,3 +135,14 @@ func TestPrecisionRecallMAPE_FR_154_004(t *testing.T) {
 		t.Errorf("expected nil MAPE for empty dataset")
 	}
 }
+
+func TestDecodeFactors(t *testing.T) {
+	got := decodeFactors([]byte(`[{"key":"overdue_days","label":"Hari Tunggakan","raw_value":95,"contribution":40}]`))
+	if len(got) != 1 || got[0].Label != "Hari Tunggakan" || got[0].RawValue != 95 {
+		t.Fatalf("canonical: got %+v", got)
+	}
+	got = decodeFactors([]byte(`[{"factor":"Libur semester","weight":0.4,"note":"Turun 5%"}]`))
+	if len(got) != 1 || got[0].Label != "Libur semester" || got[0].Note != "Turun 5%" || got[0].Contribution != 0.4 {
+		t.Fatalf("legacy: got %+v", got)
+	}
+}

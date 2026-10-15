@@ -181,7 +181,7 @@ func (s *Store) ListLatestPredictions(ctx context.Context, schoolID, model, leve
 			&fBytes, &p.ReviewLabel, &p.CreatedAt); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal(fBytes, &p.Factors)
+		p.Factors = decodeFactors(fBytes)
 		res = append(res, p)
 	}
 	return res, nil
@@ -242,4 +242,41 @@ func (s *Store) ListAccuracy(ctx context.Context, schoolID, model string) ([]Pre
 		res = append(res, a)
 	}
 	return res, nil
+}
+
+// decodeFactors reads the predictions.factors JSONB column. Besides the
+// canonical RiskFactor shape it accepts the legacy {factor, weight, note}
+// objects that older seed data stored, so their labels are not lost.
+func decodeFactors(b []byte) []RiskFactor {
+	var raw []map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return []RiskFactor{}
+	}
+	str := func(m map[string]any, keys ...string) string {
+		for _, k := range keys {
+			if v, ok := m[k].(string); ok && v != "" {
+				return v
+			}
+		}
+		return ""
+	}
+	num := func(m map[string]any, keys ...string) float64 {
+		for _, k := range keys {
+			if v, ok := m[k].(float64); ok {
+				return v
+			}
+		}
+		return 0
+	}
+	out := make([]RiskFactor, 0, len(raw))
+	for _, m := range raw {
+		out = append(out, RiskFactor{
+			Key:          str(m, "key"),
+			Label:        str(m, "label", "factor"),
+			RawValue:     num(m, "raw_value"),
+			Contribution: num(m, "contribution", "weight"),
+			Note:         str(m, "note"),
+		})
+	}
+	return out
 }
