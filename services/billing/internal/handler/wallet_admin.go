@@ -356,8 +356,9 @@ func (a *App) AdminStudentWallets(w http.ResponseWriter, r *http.Request) {
 }
 
 // AdminCloseWallet is POST /admin/wallets/{id}/close {disposition, target_student_user_id?}
-// (FR-125-005). refund -> a menu 25 refund request with wallet_id; transfer
-// -> core approval wallet_transfer, executed by the callback.
+// (FR-125-005). refund -> a menu 25 refund request with wallet_id, decided
+// in core (request type refund) and paid out from menu 25; transfer -> core
+// approval wallet_transfer, executed by the callback.
 func (a *App) AdminCloseWallet(w http.ResponseWriter, r *http.Request) {
 	c, schoolID := common.RequireRoles(w, r, common.RoleAdmin)
 	if schoolID == "" || !a.requireFeature(w, r, schoolID, featureWallet) {
@@ -420,10 +421,9 @@ func (a *App) AdminCloseWallet(w http.ResponseWriter, r *http.Request) {
 		common.WriteJSON(w, http.StatusOK, map[string]any{"wallet_id": wl.ID, "status": "closed"}, nil)
 		return
 	}
-	status := "approved"
-	if in.Disposition == "transfer" {
-		status = "pending_approval"
-	}
+	// Both dispositions wait for core's Approval Center: a transfer as
+	// wallet_transfer, a refund as a Menu 25 refund (request type refund).
+	status := "pending_approval"
 	var closureID string
 	if err = tx.QueryRowContext(r.Context(),
 		`INSERT INTO wallet_closures(school_id,wallet_id,disposition,target_student_user_id,amount_idr,status,requested_by)
@@ -453,6 +453,30 @@ func (a *App) AdminCloseWallet(w http.ResponseWriter, r *http.Request) {
 	if err = tx.Commit(); err != nil {
 		writeErr(w, err)
 		return
+	}
+	if in.Disposition == "refund" {
+		amount := wl.BalanceIDR
+		resp, err := a.submitApproval(r.Context(), client.ApprovalRequest{
+			SchoolID: schoolID, RequestType: reqTypeRefund, SourceID: refundID,
+			Title: "Refund saldo dompet siswa",
+			Summary: map[string]any{"wallet_id": wl.ID, "kind": wl.Kind, "student_user_id": wl.StudentUserID,
+				"amount_idr": amount, "reason": reason, "origin": "wallet_closure", "closure_id": closureID},
+			AmountIDR: &amount, MakerUserID: c.UserID, SubjectUserID: wl.StudentUserID,
+			CallbackURL:   a.Config.Gateway.BillingInternalURL + "/internal/refunds/" + refundID + "/callback",
+			CorrelationID: refundID, IdempotencyKey: "refund:" + refundID,
+		})
+		if err != nil {
+			// Nothing moved yet: drop the request and reopen the wallet so the
+			// admin can retry once the refund flow exists in core.
+			_, _ = a.DB.ExecContext(r.Context(), `UPDATE wallet_closures SET status='rejected',refund_id=NULL,updated_at=now() WHERE id=$1`, closureID)
+			_, _ = a.DB.ExecContext(r.Context(), `DELETE FROM bill_refunds WHERE id::text=$1 AND status='requested'`, refundID)
+			_, _ = a.DB.ExecContext(r.Context(), `UPDATE wallets SET status='active',updated_at=now() WHERE id=$1`, wl.ID)
+			a.reportRefundApprovalFailure(r.Context(), schoolID, wl.StudentUserID, refundID, "wallet-close:"+closureID, reason, amount, err)
+			writeErr(w, err)
+			return
+		}
+		_, _ = a.DB.ExecContext(r.Context(), `UPDATE bill_refunds SET approval_id=$1,updated_at=now() WHERE id::text=$2`, resp.ID, refundID)
+		_, _ = a.DB.ExecContext(r.Context(), `UPDATE wallet_closures SET approval_id=$1,updated_at=now() WHERE id=$2`, resp.ID, closureID)
 	}
 	if in.Disposition == "transfer" {
 		amount := wl.BalanceIDR

@@ -70,8 +70,9 @@ func (a *App) ListRefunds(w http.ResponseWriter, r *http.Request) {
 		        COALESCE(f.processed_by::text,''),f.processed_at,f.created_at,
 		        COALESCE(b.period_year,0),COALESCE(b.period_month,0),COALESCE(b.net_idr,0),COALESCE(s.name,''),
 		        COALESCE(f.approval_id,''),COALESCE(f.transfer_ref,''),COALESCE(to_char(f.transfer_date,'YYYY-MM-DD'),''),
-		        COALESCE(f.process_note,''),f.deposit_idr
+		        COALESCE(f.process_note,''),f.deposit_idr,COALESCE(f.wallet_id::text,''),COALESCE(wl.kind,'')
 		 FROM bill_refunds f
+		 LEFT JOIN wallets wl ON wl.id=f.wallet_id
 		 LEFT JOIN student_bills b ON b.id=f.student_bill_id
 		 LEFT JOIN billing_schemes s ON s.id=b.scheme_id
 		 WHERE f.school_id=$1 AND ($2='' OR f.status=$2) AND ($3='' OR f.student_user_id::text=$3)
@@ -85,7 +86,7 @@ func (a *App) ListRefunds(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var (
 			id, billID, student, reason, st, reqBy, decBy, note, procBy, schemeName string
-			approvalID, transferRef, transferDate, processNote                      string
+			approvalID, transferRef, transferDate, processNote, walletID, walletKind string
 			amount, net, depositIDR                                                 int64
 			decAt, procAt                                                           sql.NullTime
 			createdAt                                                               time.Time
@@ -93,7 +94,7 @@ func (a *App) ListRefunds(w http.ResponseWriter, r *http.Request) {
 		)
 		if err := rows.Scan(&id, &billID, &student, &amount, &reason, &st, &reqBy, &decBy, &decAt, &note,
 			&procBy, &procAt, &createdAt, &year, &month, &net, &schemeName,
-			&approvalID, &transferRef, &transferDate, &processNote, &depositIDR); err != nil {
+			&approvalID, &transferRef, &transferDate, &processNote, &depositIDR, &walletID, &walletKind); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -104,7 +105,7 @@ func (a *App) ListRefunds(w http.ResponseWriter, r *http.Request) {
 			"period_year": year, "period_month": month, "bill_net_idr": net, "scheme_name": schemeName,
 			"approval_id": approvalID, "via_approval_center": approvalID != "",
 			"transfer_ref": transferRef, "transfer_date": transferDate, "process_note": processNote,
-			"deposit_idr": depositIDR,
+			"deposit_idr": depositIDR, "wallet_id": walletID, "wallet_kind": walletKind,
 		}
 		if decAt.Valid {
 			m["decided_at"] = decAt.Time
@@ -300,6 +301,10 @@ func (a *App) DecideRefund(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	if err = syncWalletClosureQ(r.Context(), tx, schoolID, id, target); err != nil {
+		writeErr(w, err)
+		return
+	}
 	if err = tx.Commit(); err != nil {
 		writeErr(w, err)
 		return
@@ -345,11 +350,11 @@ func (a *App) ProcessRefund(w http.ResponseWriter, r *http.Request) {
 	var status, studentID, reason string
 	var billID sql.NullString
 	var amount, depositIDR int64
-	var isWallet bool
+	var walletID sql.NullString
 	err = tx.QueryRowContext(r.Context(),
-		`SELECT status,student_bill_id::text,student_user_id::text,amount_idr,deposit_idr,reason,wallet_id IS NOT NULL FROM bill_refunds
+		`SELECT status,student_bill_id::text,student_user_id::text,amount_idr,deposit_idr,reason,wallet_id::text FROM bill_refunds
 		 WHERE id::text=$1 AND school_id=$2 FOR UPDATE`, id, schoolID).
-		Scan(&status, &billID, &studentID, &amount, &depositIDR, &reason, &isWallet)
+		Scan(&status, &billID, &studentID, &amount, &depositIDR, &reason, &walletID)
 	if err == sql.ErrNoRows {
 		common.WriteError(w, http.StatusNotFound, "refund tidak ditemukan")
 		return
@@ -362,9 +367,15 @@ func (a *App) ProcessRefund(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, http.StatusUnprocessableEntity, "hanya refund yang sudah disetujui yang dapat diproses")
 		return
 	}
-	if isWallet {
-		common.WriteError(w, http.StatusUnprocessableEntity, "refund saldo dompet tidak diproses dari menu refund tagihan")
-		return
+	// A wallet refund (FR-125-005) empties the wallet instead of touching
+	// bills or the deposit.
+	var walletRefund walletRow
+	var walletBefore int64
+	if walletID.Valid {
+		if walletRefund, walletBefore, err = payRefundFromWallet(r.Context(), tx, schoolID, id, walletID.String, c.UserID, amount); err != nil {
+			writeErr(w, err)
+			return
+		}
 	}
 	// The bill portions reverse payments of their bills; the deposit
 	// portion only reduces the student's deposit balance.
@@ -419,6 +430,11 @@ func (a *App) ProcessRefund(w http.ResponseWriter, r *http.Request) {
 		map[string]any{"status": status}, map[string]any{"status": "processed", "bill_id": billID.String, "amount_idr": amount,
 			"deposit_idr": depositIDR, "bill_parts": billParts,
 			"transfer_ref": proof.Ref, "transfer_date": proof.Date.Format("2006-01-02")})
+	if walletID.Valid {
+		a.auditBoth(r.Context(), schoolID, "wallet", "wallet", walletRefund.ID, "wallet_refunded", c.ActiveRole, c.UserID, reason,
+			map[string]any{"balance_idr": walletBefore, "status": "closing"},
+			map[string]any{"balance_idr": walletRefund.BalanceIDR, "status": "closed", "refund_id": id, "amount_idr": amount, "kind": walletRefund.Kind})
+	}
 	if depositIDR > 0 {
 		a.auditBoth(r.Context(), schoolID, "billing", "student_deposit", studentID, "deposit_refunded", c.ActiveRole, c.UserID, reason,
 			map[string]any{"balance_idr": depositBefore}, map[string]any{"balance_idr": depositAfter, "refund_id": id, "amount_idr": depositIDR})
@@ -470,6 +486,10 @@ func (a *App) RefundCallback(w http.ResponseWriter, r *http.Request) {
 	if _, err = tx.ExecContext(ctx,
 		`UPDATE bill_refunds SET status=$1,decided_by=$2::uuid,decided_at=now(),decision_note=NULLIF($3,''),updated_at=now()
 		 WHERE id::text=$4`, next, cb.DecidedBy, strings.TrimSpace(cb.Comment), id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err = syncWalletClosureQ(ctx, tx, schoolID, id, next); err != nil {
 		writeErr(w, err)
 		return
 	}

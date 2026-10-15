@@ -267,3 +267,22 @@ func ExitDisposition(wallets []WalletBalance) []ExitRefund {
 	}
 	return out
 }
+
+// ClosureForRefund maps the status of a wallet closure's refund (Menu 25,
+// decided in core's Approval Center) to the closure and wallet status
+// (FR-125-005): pending while requested, released back to active on
+// rejection, and closed once the payout was processed. ok is false for an
+// unknown refund status.
+func ClosureForRefund(refundStatus string) (closure, walletStatus string, ok bool) {
+	switch refundStatus {
+	case "requested":
+		return "pending_approval", "closing", true
+	case "approved":
+		return "approved", "closing", true
+	case "rejected":
+		return "rejected", "active", true
+	case "processed":
+		return "completed", "closed", true
+	}
+	return "", "", false
+}
