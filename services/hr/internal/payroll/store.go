@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"skci/hr/internal/common"
 )
 
 var (
@@ -23,6 +25,9 @@ type Store struct {
 	// (crypto.Service.DecryptAmount, aad = school id).
 	DecryptAmount func(raw []byte, aad string) (int64, error)
 	Accounting    *AccountingClient
+	// Reporter queues failed journal postings in core's exception queue
+	// (kind journal_posting). Nil -> failures stay only on the journal row.
+	Reporter *common.ExceptionReporter
 }
 
 func NewStore(db *sql.DB) *Store {
