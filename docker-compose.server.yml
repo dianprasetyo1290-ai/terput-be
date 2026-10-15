@@ -15,7 +15,7 @@ services:
     <<: *lim
     ports: !reset []
     environment:
-      ADMISSION_SCHOOL_ID: ${ADMISSION_SCHOOL_ID}
+      ADMISSION_SCHOOL_ID: ${ADMISSION_SCHOOL_ID:-11111111-1111-1111-1111-111111111111}
       SCHOOL_NAME: Teratai Putih Global School
       # OTP wali PPDB lewat email (SMTP), bukan WA. Kredensial = SMTP PASSIN di box ini.
       APP_ENV: production
