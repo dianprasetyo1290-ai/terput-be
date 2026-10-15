@@ -202,6 +202,8 @@ func (a *App) ImportUsers(w http.ResponseWriter, r *http.Request) {
 			common.WriteError(w, http.StatusConflict, "Sebagian email baru saja didaftarkan oleh proses lain. Ulangi pratinjau")
 			return
 		}
+		a.reportImportFailure(r, userimport.KindUsers, schoolID, hdr.Filename, "Impor pengguna gagal disimpan: "+err.Error(),
+			map[string]any{"rows": len(valid)})
 		common.WriteDBError(w, err, "Gagal menyimpan data impor")
 		return
 	}

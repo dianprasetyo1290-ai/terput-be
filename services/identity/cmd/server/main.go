@@ -81,6 +81,8 @@ func main() {
 	app.MFAIssuer = getenv("MFA_ISSUER", "SEKOCI")
 	// Base URL core uses for approval callbacks into identity.
 	app.SelfURL = getenv("IDENTITY_INTERNAL_URL", "http://identity:8081")
+	// Failed imports land in core's exception queue (kind import).
+	app.Exceptions = common.NewExceptionReporter(app.CoreURL, app.InternalKey, "identity")
 	// Break-glass grants end on their own (QA-IDN BUG-120).
 	go func() {
 		t := time.NewTicker(time.Minute)
@@ -129,13 +131,17 @@ func main() {
 	}
 
 	r := chi.NewRouter()
+	// One correlation id per flow (CORE handoff §9): adopted from the caller
+	// or minted, echoed in the response and forwarded on calls to core.
+	r.Use(common.CorrelationMiddleware, handler.StampCorrelationHeader)
 	r.Use(middleware.Logger)
 	r.Use(common.SentryMiddleware())
 	r.Use(middleware.Recoverer)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   corsOrigins(),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Internal-Key"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Internal-Key", common.CorrelationHeader},
+		ExposedHeaders:   []string{common.CorrelationHeader},
 		AllowCredentials: true,
 	}))
 
