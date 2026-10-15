@@ -1,78 +1,68 @@
 #!/usr/bin/env bash
+# Demo seed data for Teratai on shared-postgres. Safe on a live server:
+#   - every file only adds rows (fixed UUIDs, ON CONFLICT DO NOTHING);
+#   - each file runs in one transaction with ON_ERROR_STOP;
+#   - public.seed_ledger in each database records the files already applied,
+#     so a file is never run twice (some legacy files are not idempotent).
+#
+#   scripts/run-all-seeds.sh                 run every file not yet applied
+#   BASELINE_LEGACY=1 scripts/run-all-seeds.sh
+#       first run on a server that already got the legacy files (01–17) by
+#       hand: mark them applied without running them, then run the rest.
+#   PG_CONTAINER / ACCOUNTING_CONTAINER override the container names.
 set -euo pipefail
 
-echo "=== Seeding Teratai Databases on shared-postgres ==="
-
 DIR="$(cd "$(dirname "$0")" && pwd)"
+PG="${PG_CONTAINER:-shared-postgres}"
+ACC="${ACCOUNTING_CONTAINER:-teratai-accounting-1}"
+BASELINE_LEGACY="${BASELINE_LEGACY:-0}"
 
-# 1. Identity
-echo "--> Seeding teratai_identity (features, roles, white-label branding)..."
-docker exec -i shared-postgres psql -U postgres -d teratai_identity < "$DIR/seed/01_identity_features.sql"
+psql_db() { docker exec -i "$PG" psql -U postgres -d "$1" -v ON_ERROR_STOP=1 -q "${@:2}"; }
 
-# 2. Academic
-echo "--> Seeding teratai_academic (classrooms, subjects, enrollments)..."
-docker exec -i shared-postgres psql -U postgres -d teratai_academic < "$DIR/seed/02_academic.sql"
+seed() { # seed <database> <file> [legacy]
+  local db="$1" file="$2" legacy="${3:-}"
+  psql_db "$db" -c "CREATE TABLE IF NOT EXISTS public.seed_ledger (file text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())" >/dev/null
+  if [ "$(psql_db "$db" -Atc "SELECT 1 FROM public.seed_ledger WHERE file = '$file'")" = "1" ]; then
+    echo "    skip $db $file (already applied)"
+    return
+  fi
+  if [ -n "$legacy" ] && [ "$BASELINE_LEGACY" = "1" ]; then
+    echo "    baseline $db $file (marked applied, not run)"
+  else
+    echo "--> $db $file"
+    psql_db "$db" < "$DIR/seed/$file"
+  fi
+  psql_db "$db" -c "INSERT INTO public.seed_ledger (file) VALUES ('$file') ON CONFLICT DO NOTHING" >/dev/null
+}
 
-# 3. Billing
-echo "--> Seeding teratai_billing (schemes, items, student bills)..."
-docker exec -i shared-postgres psql -U postgres -d teratai_billing < "$DIR/seed/03_billing.sql"
+echo "=== Seeding Teratai databases on $PG ==="
 
-# 4. Ops
-echo "--> Seeding teratai_ops (facilities, inventory, assets, library, transport, 3d)..."
-docker exec -i shared-postgres psql -U postgres -d teratai_ops < "$DIR/seed/04_ops.sql"
+# Legacy files (applied by hand on the server before the ledger existed).
+seed teratai_identity     01_identity_features.sql   legacy
+seed teratai_academic     02_academic.sql            legacy
+seed teratai_billing      03_billing.sql             legacy
+seed teratai_ops          04_ops.sql                 legacy
+seed teratai_studentlife  05_studentlife.sql         legacy
+seed teratai_quality      06_quality.sql             legacy
+seed teratai_insight      07_insight.sql             legacy
+seed teratai_academic     08_academic_schedules.sql  legacy
+seed teratai_attendance   09_attendance.sql          legacy
+seed teratai_exam         10_exam.sql                legacy
+seed teratai_evaluation   11_evaluation.sql          legacy
+seed teratai_report       12_report.sql              legacy
+seed teratai_hr           14_hr.sql                  legacy
+seed teratai_notification 15_notification.sql        legacy
+seed teratai_core         16_core.sql                legacy
+seed teratai_insight      17_insight_extra.sql       legacy
 
-# 5. Studentlife
-echo "--> Seeding teratai_studentlife (medicines, counseling, discipline, extracurriculars, PKL)..."
-docker exec -i shared-postgres psql -U postgres -d teratai_studentlife < "$DIR/seed/05_studentlife.sql"
-
-# 6. Quality
-echo "--> Seeding teratai_quality (instruments, standards, items, indicators, evidence)..."
-docker exec -i shared-postgres psql -U postgres -d teratai_quality < "$DIR/seed/06_quality.sql"
-
-# 7. Insight (metrics)
-echo "--> Seeding teratai_insight (BI metric snapshots)..."
-docker exec -i shared-postgres psql -U postgres -d teratai_insight < "$DIR/seed/07_insight.sql"
-
-# 8. Academic Schedules
-echo "--> Seeding teratai_academic schedules & materials..."
-docker exec -i shared-postgres psql -U postgres -d teratai_academic < "$DIR/seed/08_academic_schedules.sql"
-
-# 9. Attendance
-echo "--> Seeding teratai_attendance (sessions, attendances, leave requests)..."
-docker exec -i shared-postgres psql -U postgres -d teratai_attendance < "$DIR/seed/09_attendance.sql"
-
-# 10. Exam (CBT)
-echo "--> Seeding teratai_exam (types, folders, questions, exams, tokens)..."
-docker exec -i shared-postgres psql -U postgres -d teratai_exam < "$DIR/seed/10_exam.sql"
-
-# 11. Evaluation
-echo "--> Seeding teratai_evaluation (lesson plans, prota, prosem, evaluations)..."
-docker exec -i shared-postgres psql -U postgres -d teratai_evaluation < "$DIR/seed/11_evaluation.sql"
-
-# 12. Report (E-Rapor)
-echo "--> Seeding teratai_report (report cards, subject grades, formative)..."
-docker exec -i shared-postgres psql -U postgres -d teratai_report < "$DIR/seed/12_report.sql"
-
-# 13. HR
-echo "--> Seeding teratai_hr (departments, employees, attendance, leave, training, jobs)..."
-docker exec -i shared-postgres psql -U postgres -d teratai_hr < "$DIR/seed/14_hr.sql"
-echo "--> Seeding teratai_hr features (payroll, ATS, pelatihan, cuti, lembur, mutasi, onboarding)..."
-docker exec -i shared-postgres psql -U postgres -d teratai_hr -v ON_ERROR_STOP=1 < "$DIR/seed/50_hr_features.sql"
-
-# 14. Notification & Chat
-echo "--> Seeding teratai_notification (in-app notifs, chat threads, messages)..."
-docker exec -i shared-postgres psql -U postgres -d teratai_notification < "$DIR/seed/15_notification.sql"
-
-# 15. Core (Service Desk & Approvals)
-echo "--> Seeding teratai_core (service desk, tickets, approvals, audit logs)..."
-docker exec -i shared-postgres psql -U postgres -d teratai_core < "$DIR/seed/16_core.sql"
-
-# 16. Insight Extra (Dashboards, Reports, Risk Predictions)
-echo "--> Seeding teratai_insight extra (dashboards, widgets, risk predictions, help)..."
-docker exec -i shared-postgres psql -U postgres -d teratai_insight < "$DIR/seed/17_insight_extra.sql"
-
-# 60. Ops features (procurement, AP, tax, budget, assets, library circulation, transport trips)
-echo "--> Seeding teratai_ops features (60_ops_features.sql)..."
-docker exec -i shared-postgres psql -U postgres -d teratai_ops -v ON_ERROR_STOP=1 < "$DIR/seed/60_ops_features.sql"
+# Feature seeds (additive, idempotent).
+seed teratai_academic     30_academic_features.sql
+seed teratai_attendance   31_attendance_features.sql
+seed teratai_exam         32_exam_features.sql
+seed teratai_evaluation   33_evaluation_features.sql
+seed teratai_report       34_report_features.sql
+seed teratai_studentlife  35_studentlife_features.sql
+seed teratai_hr           50_hr_features.sql
+seed teratai_ops          60_ops_features.sql
 
 echo "=== ALL SEED DATA SUCCESSFULLY APPLIED ==="
